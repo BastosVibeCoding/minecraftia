@@ -193,3 +193,46 @@ Essai réel : un mur du joueur → construction à 0,02 « observe » → le bot
 **Incertain**
 - Les réponses oui/non aux propositions arrivent avec les retours du joueur (phase 7) ; d'ici là,
   seul l'accord tacite est possible en jeu réel.
+
+## 2026-10-04 — Phase 7 : retours du joueur (chat, voix, TTS)
+
+**Fait**
+- Classifieur d'énoncés à deux étages : règles françaises locales (correction, approbation,
+  enseignement, ordre, bavardage ; double sens « non, construis plutôt… ») puis petit LLM seulement
+  si c'est ambigu et si le budget le permet. Chaque énoncé est consigné (`utterances`).
+- Effets : correction immédiate (action coupée, mécanisme pénalisé, autonomie −20 %, cache du
+  domaine vidé, nouvelle décision forcée) ; approbation (+2 mécanisme, autonomie) ; enseignement
+  (fenêtre de 90 s, épisodes `taught` ×3) ; ordre (exécuté sans demander, même en bande observe,
+  même sans branche apprise) ; réponses oui/non aux propositions.
+- Service vocal Python (`voice/`) : paquets Opus de Simple Voice Chat → décodage → 16 kHz →
+  découpage des énoncés aux silences → faster-whisper `small` int8 + filtre Silero VAD ; synthèse
+  Edge TTS (moteur interchangeable : `TTS_ENGINE`, Piper/Kokoro à brancher dans `ENGINES`).
+- Côté bot : `HeardAudioExtractor` (`heard_audio_batch` d'Easy LLM), `VoiceClient` (service vocal,
+  reconnexion), `VoiceLink` (Easy LLM Voice : setup, trames 20 ms, stop, interruption),
+  `Speaker` (chat toujours + voix en jeu si disponible ; une panne de voix ne bloque rien).
+- Troisième conteneur `minecraftia-voice` dans le compose ; outil `scripts/voice-say.ts`.
+
+**Testé** — 180 tests Node + 6 tests Python verts. En réel sur le serveur :
+- enseignement par le chat : « regarde, je fais comme ça » (règles, 0 appel LLM) → épisodes `taught`
+  → construction de « observe » à « imitate » au 3e mur → le bot imite (vrai Haiku) et réussit ;
+- correction par le chat pendant l'imitation : le bot cesse de reproduire le mur ;
+- voix : dans le conteneur du VPS, Edge TTS → paquets Opus SVC → Whisper `small` :
+  « construis un mur en pierre près de la maison. » (exact) ; bot connecté au service vocal et au
+  mod Easy LLM Voice ; reconnexion automatique au redémarrage du serveur observée.
+
+**Appris**
+- Défaut réel : après « non, pas comme ça », le bot refaisait le même mur. Habitude de poids ≈ 33
+  (enseignée ×3) : `w × 0,2 − 5` restait positif. Désormais une correction rend toujours le poids
+  négatif, et le code refuse toute décision reproduisant un mécanisme à éviter (même si le LLM
+  ne le cite pas). Test ajouté avec une habitude de poids 30.
+- « pas comme ça » déclenchait aussi la règle d'enseignement « comme ça » → exclu.
+- Le classement « fallback » donnait une raison trompeuse → raisons précises.
+
+**Incertain (important)**
+- **Voix entrante en jeu non vérifiée** : Easy LLM Voice produit `heard_audio_batch` à partir des
+  paquets de *microphone* d'un joueur équipé du client Simple Voice Chat. Je n'ai pas de tel client :
+  l'essai par voix injectée (sortie audio du point d'accès « Testeur ») n'a produit aucun paquet
+  « entendu ». La chaîne aval (paquets Opus SVC → transcription → classifieur) est vérifiée ;
+  l'amont doit être confirmé par Bastien en parlant en jeu (procédure dans le README).
+- **Voix sortante audible non vérifiée** pour la même raison (pas d'oreille équipée de SVC) ;
+  le mod accepte la connexion et les trames sans erreur.

@@ -1,0 +1,103 @@
+import type { Autonomy } from '../autonomy/autonomy.js';
+import type { ProposalBroker } from '../autonomy/proposals.js';
+import type { Clock } from '../core/clock.js';
+import type { Logger } from '../core/logger.js';
+import type { DecisionCache } from '../decider/cache.js';
+import type { DecisionRecord } from '../decider/decider.js';
+import type { DecisionLoop } from '../decider/loop.js';
+import type { Observer } from '../observer/observer.js';
+import type { ActionController } from '../skills/actionController.js';
+import type { Store } from '../store/store.js';
+import type { BehaviorTree } from '../tree/tree.js';
+import type { Classification, UtteranceClassifier } from './classifier.js';
+
+export interface FeedbackDeps {
+  classifier: UtteranceClassifier;
+  tree: BehaviorTree;
+  autonomy: Autonomy;
+  cache: DecisionCache;
+  proposals: ProposalBroker;
+  observer: Observer;
+  store: Store;
+  clock: Clock;
+  logger: Logger;
+  loop: () => DecisionLoop | null;
+  actions: () => ActionController | null;
+  lastDecision: () => DecisionRecord | null;
+  lastDecisionAt: () => number;
+  say: (text: string) => void;
+  teachWindowMs?: number;
+}
+
+/** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
+const FEEDBACK_WINDOW_MS = 120_000;
+
+/**
+ * Retours du joueur (chat ou voix) → effets sur l'arbre, l'autonomie et la boucle.
+ * Une correction pèse plus que tout et s'applique immédiatement : l'action en cours est coupée,
+ * le mécanisme pénalisé, le cache du domaine vidé, et une nouvelle décision est demandée.
+ */
+export class FeedbackHandler {
+  constructor(private readonly deps: FeedbackDeps) {}
+
+  async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
+    const d = this.deps;
+    const recent = this.recentDecision();
+    const context = recent ? `le compagnon vient de faire : ${recent.decision.intent}` : '';
+    const c = await d.classifier.classify(text, context);
+    const r = d.store.db
+      .prepare('INSERT INTO utterances(player, channel, text, label, classifier, confidence, domain, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(player, channel, text, c.label, c.classifier, c.confidence, c.domain ?? null, d.clock.now());
+    const utteranceId = Number(r.lastInsertRowid);
+    d.logger.info({ channel, label: c.label, also: c.also, classifier: c.classifier }, `retour du joueur : « ${text} »`);
+
+    // une proposition attend sa réponse : oui / non
+    if (d.proposals.open && (c.label === 'approval' || c.label === 'correction')) {
+      d.proposals.answer(c.label === 'approval' ? 'yes' : 'no');
+      return c;
+    }
+
+    switch (c.label) {
+      case 'correction':
+        this.correct(recent, c, utteranceId);
+        if (c.also === 'order') d.loop()?.order(text);
+        else d.loop()?.request('correction du joueur', true);
+        break;
+      case 'approval':
+        if (recent) {
+          for (const id of recent.decision.basedOn) d.tree.approve(id, { utteranceId, decisionId: recent.id });
+          d.autonomy.apply(recent.decision.domain, 'approval', utteranceId);
+        }
+        break;
+      case 'teaching':
+        d.observer.startTeaching(d.clock.now() + (d.teachWindowMs ?? 90_000));
+        d.say('Je regarde !');
+        if (c.also === 'order') d.loop()?.order(text);
+        break;
+      case 'order':
+        d.loop()?.order(text);
+        break;
+      case 'chatter':
+        break;
+    }
+    return c;
+  }
+
+  private recentDecision(): DecisionRecord | null {
+    const last = this.deps.lastDecision();
+    if (!last || last.decision.skill === 'follow') return null;
+    return this.deps.clock.now() - this.deps.lastDecisionAt() <= FEEDBACK_WINDOW_MS ? last : null;
+  }
+
+  private correct(recent: DecisionRecord | null, c: Classification, utteranceId: number): void {
+    const d = this.deps;
+    d.actions()?.abort('correction du joueur');
+    const domain = recent?.decision.domain ?? c.domain;
+    if (recent) for (const id of recent.decision.basedOn) d.tree.correct(id, { utteranceId, decisionId: recent.id });
+    if (domain) {
+      d.autonomy.apply(domain, 'correction', utteranceId);
+      d.cache.invalidateDomain(domain);
+    }
+    d.say('D\'accord, j\'arrête.');
+  }
+}

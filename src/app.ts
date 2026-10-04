@@ -9,6 +9,12 @@ import type { Episode, RawEvent } from './observer/types.js';
 import type { PlayClock } from './tree/playClock.js';
 import type { Autonomy } from './autonomy/autonomy.js';
 import type { ProposalBroker } from './autonomy/proposals.js';
+import type { UtteranceClassifier } from './feedback/classifier.js';
+import { FeedbackHandler } from './feedback/feedback.js';
+import { HeardAudioExtractor } from './voice/audioIn.js';
+import { VoiceClient } from './voice/voiceClient.js';
+import { VoiceLink } from './voice/voiceLink.js';
+import { ChatSpeaker, CompositeSpeaker, VoiceSpeaker, type Speaker } from './tts/speaker.js';
 import type { BehaviorTree } from './tree/tree.js';
 import type { Config } from './config/schema.js';
 import { EventBus } from './core/bus.js';
@@ -52,6 +58,7 @@ export interface CompanionDeps {
   router: ModelRouter;
   autonomy: Autonomy;
   proposals: ProposalBroker;
+  classifier: UtteranceClassifier;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -68,6 +75,11 @@ export class Companion {
   private recent: string[] = [];
   /** Blocs modifiés par le bot lui-même (clé « x,y,z » → instant) : jamais attribués au joueur. */
   private ownBlocks = new Map<string, number>();
+  readonly feedback: FeedbackHandler;
+  private readonly voiceClient: VoiceClient | null;
+  private readonly voiceLink: VoiceLink;
+  private readonly heard: HeardAudioExtractor;
+  readonly speaker: Speaker;
 
   constructor(
     private readonly config: Config,
@@ -82,11 +94,51 @@ export class Companion {
     this.telemetry = new EasyLlmTelemetry(
       { port: config.telemetry.port, capturePath: config.telemetry.capturePath, logger: logger.child({ module: 'easy-llm' }) },
       (msg) => {
+        if (this.voiceClient) for (const p of this.heard.extract(msg)) this.voiceClient.sendAudio(p.speaker, p.opusBase64, p.capturedAtMs);
         for (const e of this.mapper.map(msg)) this.observe(e);
         const pos = this.mapper.positionOf(config.followPlayer);
         if (pos) this.telemetry.setFocus(pos);
       },
     );
+    this.heard = new HeardAudioExtractor(config.followPlayer);
+    this.voiceClient = config.voice.url
+      ? new VoiceClient(config.voice.url, logger.child({ module: 'voix' }), (t) => {
+          logger.info({ speaker: t.speaker, audioMs: t.audioMs, latencyMs: t.latencyMs }, `voix entendue : « ${t.text} »`);
+          this.hear(t.speaker, t.text, 'voice');
+        })
+      : null;
+    this.voiceLink = new VoiceLink({ port: config.voice.linkPort, playerName: config.minecraft.username, logger: logger.child({ module: 'voix' }) });
+    const voiceClient = this.voiceClient;
+    const link = this.voiceLink;
+    this.speaker = new CompositeSpeaker(
+      new ChatSpeaker((text) => this.session?.bot.chat(text)),
+      voiceClient
+        ? new VoiceSpeaker({
+            synth: (text) => voiceClient.synth(text),
+            play: (frames) => link.play(frames),
+            get available() {
+              return voiceClient.connected && link.connected;
+            },
+          })
+        : null,
+      logger.child({ module: 'voix' }),
+    );
+    this.feedback = new FeedbackHandler({
+      classifier: deps.classifier,
+      tree: deps.tree,
+      autonomy: deps.autonomy,
+      cache: deps.cache,
+      proposals: deps.proposals,
+      observer: this.observer,
+      store: deps.tree.store,
+      clock,
+      logger: logger.child({ module: 'retours' }),
+      loop: () => this.session?.loop ?? null,
+      actions: () => this.session?.actions ?? null,
+      lastDecision: () => deps.decider.lastDecision,
+      lastDecisionAt: () => this.session?.loop.lastDecisionTime ?? -Infinity,
+      say: (text) => void this.speaker.speak(text),
+    });
     this.connection = new BotConnection(
       { ...config.minecraft, ...config.reconnect },
       createBot,
@@ -99,6 +151,8 @@ export class Companion {
 
   start(): void {
     this.telemetry.start();
+    this.voiceClient?.start();
+    this.voiceLink.start();
     this.observerTimer = setInterval(() => {
       this.observer.tick(this.clock.now());
       // le temps de jeu actif (décroissance des poids) n'avance que si le joueur suivi est là
@@ -114,12 +168,20 @@ export class Companion {
     this.deps.playClock.setActive(false);
     this.observer.flush();
     this.telemetry.stop();
+    this.voiceClient?.stop();
+    this.voiceLink.stop();
   }
 
   /** Point d'entrée unique des événements du joueur, quelle que soit leur source. */
   observe(e: RawEvent): void {
     if ((e.type === 'block_placed' || e.type === 'block_broken') && this.isOwnBlock(e.pos, e.t)) return;
     this.observer.push(e);
+  }
+
+  /** Énoncé du joueur suivi (chat ou voix transcrite). Les commandes `!…` sont traitées à part. */
+  hear(player: string, text: string, channel: 'chat' | 'voice'): void {
+    if (player !== this.config.followPlayer || text.trim().startsWith('!')) return;
+    void this.feedback.handle(player, text, channel).catch((err: unknown) => this.logger.error({ err }, "traitement d'un retour en erreur"));
   }
 
   /** Le bot va modifier ce bloc : on s'en souvient quelques secondes pour ne pas apprendre de soi-même. */
@@ -189,6 +251,10 @@ export class Companion {
       actions.abort('mort', 'death');
     });
 
+    bot.on('chat', (username, message) => {
+      if (username !== bot.username) this.hear(username, message, 'chat');
+    });
+
     const events = new MineflayerEventSource(
       bot,
       this.config.followPlayer,
@@ -203,7 +269,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos) },
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), speak: (text) => void this.speaker.speak(text) },
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,

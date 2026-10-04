@@ -10,6 +10,7 @@ import { systemPrompt, userPrompt, type Band, type DecisionContext } from './pro
 import type { ModelRouter } from './router.js';
 import { parseDecision, type Decision } from './schema.js';
 import { describeSituation, situationHash, type WorldState } from './world.js';
+import { actionKey } from '../tree/merge.js';
 
 export interface DecisionRecord {
   id: number;
@@ -60,17 +61,26 @@ export class Decider {
     return this.deps.budget.exhausted();
   }
 
-  async decide(trigger: string, world: WorldState, lastOutcome: string | null = null): Promise<DecisionRecord> {
+  async decide(trigger: string, world: WorldState, lastOutcome: string | null = null, order?: string): Promise<DecisionRecord> {
     const { tree, cache, router, budget, strategy, logger } = this.deps;
-    const situationText = describeSituation(world);
+    const situationText = describeSituation(world, order);
     const autonomy = this.deps.autonomy();
     const bands = Object.fromEntries(Object.entries(autonomy).map(([d, a]) => [d, a.band]));
 
     const branches = strategy.transform(await tree.search(situationText, { k: 6 })).filter((b) => b.mechanisms.length > 0 || b.avoid.length > 0);
-    const hash = situationHash(world, branches.map((b) => b.situationId), bands);
+    const hash = situationHash(world, branches.map((b) => b.situationId), bands) + (order ? `:${order}` : '');
 
     const usable = branches.filter((b) => autonomy[b.domain]?.band !== 'observe' && b.mechanisms.length > 0);
-    if (usable.length === 0) return this.save(trigger, fallbackDecision(branches.length ? 'domaines encore en observation' : 'rien d\'appris pour cette situation'), 'fallback', null, hash, situationText, branches);
+    // un ordre du joueur passe toujours par le LLM (il peut viser une compétence sans branche apprise)
+    if (usable.length === 0 && !order) {
+      const reason =
+        branches.length === 0
+          ? "rien d'appris pour cette situation"
+          : branches.every((b) => b.mechanisms.length === 0)
+            ? 'seuls des mécanismes corrigés par le joueur : rien à reproduire'
+            : 'domaines encore en observation';
+      return this.save(trigger, fallbackDecision(reason), 'fallback', null, hash, situationText, branches);
+    }
 
     if (budget.exhausted()) {
       if (!this.budgetWarned) logger.warn({ spent: budget.spentToday(), daily: budget.dailyUsd }, 'budget quotidien atteint : décideur coupé, suivi + réflexes');
@@ -79,11 +89,11 @@ export class Decider {
     }
     this.budgetWarned = false;
 
-    const cached = cache.get(hash);
+    const cached = order ? null : cache.get(hash);
     if (cached) return this.save(trigger, cached, 'cache', null, hash, situationText, branches);
     if (!this.deps.llm) return this.save(trigger, fallbackDecision('aucun LLM configuré'), 'fallback', null, hash, situationText, branches);
 
-    const ctx: DecisionContext = { trigger, world, autonomy, branches, lastOutcome };
+    const ctx: DecisionContext = { trigger, world, autonomy, branches, lastOutcome, ...(order ? { order } : {}) };
     const { model } = router.pick('decide', hash);
     let error: string | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -101,7 +111,7 @@ export class Decider {
       }
       const parsed = parseDecision(text);
       if (parsed.ok) {
-        const decision = this.enforce(parsed.decision, branches, autonomy);
+        const decision = this.enforce(parsed.decision, branches, autonomy, Boolean(order));
         if (decision.skill !== 'none' && decision.skill !== 'follow') cache.set(hash, decision.domain, decision);
         return this.save(trigger, decision, 'llm', model, hash, situationText, branches);
       }
@@ -116,10 +126,16 @@ export class Decider {
    * s'il faut une validation (« propose ») ou si l'action est interdite (« observe ») ; seuls les
    * identifiants de mécanismes réellement proposés sont conservés.
    */
-  private enforce(d: Decision, branches: Branch[], autonomy: Record<Domain, { band: Band; score: number }>): Decision {
+  private enforce(d: Decision, branches: Branch[], autonomy: Record<Domain, { band: Band; score: number }>, ordered = false): Decision {
     const known = new Set(branches.flatMap((b) => b.mechanisms.map((m) => m.id)));
     const basedOn = d.basedOn.filter((id) => known.has(id));
-    if (d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
+    // un ordre explicite du joueur s'exécute sans demander, quelle que soit la bande
+    if (ordered || d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
+    // jamais un mécanisme corrigé, même si le LLM ne le cite pas (sauf ordre explicite, traité plus haut)
+    const key = actionKey(d.skill, d.params);
+    const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
+    const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);
+    if (avoided && !endorsed) return fallbackDecision(`reproduirait un mécanisme corrigé par le joueur (${key})`);
     const band = autonomy[d.domain]?.band ?? 'observe';
     if (band === 'observe') return fallbackDecision(`domaine ${d.domain} encore en observation`);
     return { ...d, basedOn, needsApproval: band === 'propose' };

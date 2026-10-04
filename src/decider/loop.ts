@@ -39,7 +39,7 @@ export interface LoopDeps {
  */
 export class DecisionLoop {
   private inFlight = false;
-  private pending: { trigger: string; force: boolean } | null = null;
+  private pending: { trigger: string; force: boolean; order?: string } | null = null;
   private lastDecisionAt = -Infinity;
   private lastOutcome: string | null = null;
   private stopped = false;
@@ -58,16 +58,23 @@ export class DecisionLoop {
    * Demande une décision. `force` ignore l'intervalle minimal (correction, ordre du joueur).
    * Une action de suivi en cours est interrompue ; toute autre action termine d'abord.
    */
-  request(trigger: string, force = false): void {
+  request(trigger: string, force = false, order?: string): void {
     if (this.stopped) return;
     const now = this.deps.clock.now();
     if (!force && now - this.lastDecisionAt < (this.deps.minIntervalMs ?? 5000)) return;
     if (this.inFlight) {
-      if (!this.pending || force) this.pending = { trigger, force };
-      if (this.deps.actions.current?.name === 'follow') this.deps.actions.abort(`nouvelle décision : ${trigger}`);
+      if (!this.pending || force) this.pending = { trigger, force, ...(order ? { order } : {}) };
+      // un ordre coupe toute action en cours ; une autre demande ne coupe que le suivi
+      if (order || this.deps.actions.current?.name === 'follow') this.deps.actions.abort(`nouvelle décision : ${trigger}`);
       return;
     }
-    void this.run(trigger);
+    void this.run(trigger, order);
+  }
+
+  /** Ordre explicite du joueur : immédiat, prioritaire sur l'action en cours. */
+  order(text: string): void {
+    this.deps.actions.abort('ordre du joueur');
+    this.request('ordre du joueur', true, text);
   }
 
   /** Appelé quand le contrôleur est libre : décision si l'inactivité dure, sinon suivi sans LLM. */
@@ -79,12 +86,12 @@ export class DecisionLoop {
     else void this.execute(null, 'follow', { distance: 3, seconds: 5 });
   }
 
-  private async run(trigger: string): Promise<void> {
+  private async run(trigger: string, order?: string): Promise<void> {
     this.inFlight = true;
     try {
       const world = this.deps.world();
       if (!world) return;
-      const record = await this.deps.decider.decide(trigger, world, this.lastOutcome);
+      const record = await this.deps.decider.decide(trigger, world, this.lastOutcome, order);
       this.lastDecisionAt = this.deps.clock.now();
       const d = record.decision;
       this.deps.logger.info({ trigger, source: record.source, skill: d.skill, domain: d.domain, basedOn: d.basedOn, model: record.model }, `décision : ${d.intent}`);
@@ -92,7 +99,7 @@ export class DecisionLoop {
       if (d.needsApproval) {
         if (!(await this.propose(record))) return;
       } else if (d.say) {
-        this.deps.skillContext.bot.chat(d.say);
+        this.say(d.say);
       }
       await this.execute(record, d.skill, d.params);
     } catch (err) {
@@ -101,7 +108,7 @@ export class DecisionLoop {
       this.inFlight = false;
       const next = this.pending;
       this.pending = null;
-      if (next && !this.stopped) this.request(next.trigger, next.force);
+      if (next && !this.stopped) this.request(next.trigger, next.force, next.order);
     }
   }
 
@@ -147,7 +154,7 @@ export class DecisionLoop {
   private async propose(record: DecisionRecord): Promise<boolean> {
     const d = record.decision;
     const text = d.say ?? `Je peux ${d.intent.charAt(0).toLowerCase()}${d.intent.slice(1)} ?`;
-    this.deps.skillContext.bot.chat(text);
+    this.say(text);
     if (!this.deps.proposals) return false;
     const answer = await this.deps.proposals.ask(text);
     this.deps.logger.info({ answer, decision: record.id }, 'réponse à la proposition');
@@ -162,6 +169,17 @@ export class DecisionLoop {
       return false;
     }
     return !this.stopped;
+  }
+
+  private say(text: string): void {
+    const ctx = this.deps.skillContext;
+    if (ctx.speak) ctx.speak(text);
+    else ctx.bot.chat(text);
+  }
+
+  /** Instant de la dernière décision (pour rattacher un retour du joueur à cette décision). */
+  get lastDecisionTime(): number {
+    return this.lastDecisionAt;
   }
 
   /** Domaines concernés par la dernière décision (pour les retours du joueur). */

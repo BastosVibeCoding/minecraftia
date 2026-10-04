@@ -14,6 +14,7 @@ import { MirrorStrategy } from '../src/strategy/strategy.js';
 import { PlayClock } from '../src/tree/playClock.js';
 import { Autonomy } from '../src/autonomy/autonomy.js';
 import { ProposalBroker } from '../src/autonomy/proposals.js';
+import { UtteranceClassifier } from '../src/feedback/classifier.js';
 import { BehaviorTree } from '../src/tree/tree.js';
 import { silentLogger } from './helpers.js';
 
@@ -35,7 +36,7 @@ async function companion() {
     logger: silentLogger,
   });
   const config = loadConfig({ FOLLOW_PLAYER: 'Bastien' });
-  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router, autonomy: new Autonomy(store), proposals: new ProposalBroker(clock) });
+  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router, autonomy: new Autonomy(store), proposals: new ProposalBroker(clock), classifier: new UtteranceClassifier(null, null, 'fast') });
   return { c, clock };
 }
 

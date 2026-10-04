@@ -1,0 +1,119 @@
+import { z } from 'zod';
+import { DOMAINS, type Domain } from '../core/types.js';
+import type { Budget } from '../decider/budget.js';
+import { LlmError, type LlmClient } from '../decider/llm.js';
+
+export type UtteranceLabel = 'correction' | 'approval' | 'teaching' | 'order' | 'chatter';
+
+export interface Classification {
+  label: UtteranceLabel;
+  /** Second sens éventuel (« non, construis plutôt en bois » = correction + ordre). */
+  also?: UtteranceLabel;
+  domain?: Domain;
+  confidence: number;
+  classifier: 'rules' | 'llm';
+}
+
+const norm = (t: string) =>
+  t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[’`]/g, "'")
+    .trim();
+
+const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
+  correction: [
+    /^(non|nan|nope|no)\b/,
+    /pas comme (ca|ça)/,
+    /\barrete\b|\bstop\b|\bhalte\b/,
+    /c'est pas (ca|bien|comme)|ce n'est pas (ca|bien)/,
+    /n'importe quoi|\bmauvais\b|\brate\b/,
+    /(ne )?fais pas (ca|ça)|ne fais pas/,
+  ],
+  approval: [
+    /^(oui|ouais|ouep|yes|ok|okay|d'accord|vas[- ]y|go|carrement)\b/,
+    /\b(bien joue|bravo|parfait|super|genial|top|nickel|excellent|exactement|c'est (ca|ça|bien)|bon travail|merci)\b/,
+  ],
+  // « comme ça » enseigne, sauf dans « pas comme ça » (correction)
+  teaching: [/\bregarde\b|\bobserve\b/, /je (te )?montre/, /(?<!pas )comme (ca|ça)\b(?! ?\?)/, /fais comme moi|voila comment|apprends/],
+  order: [
+    // verbe à l'impératif en tête de phrase ou après « non, » / « plutôt »
+    /(^|[,;.!] *|plutot )(construis|batis|bati|pose|mine|creuse|coupe|recolte|ramasse|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends)/,
+    /^(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais)\b/,
+  ],
+};
+
+const DOMAIN_WORDS: [Domain, RegExp][] = [
+  ['build', /construi|bati|mur|maison|toit|sol|pose|bloc|brique/],
+  ['combat', /attaque|tue|combat|zombie|squelette|monstre|mob|epee|defend|protege/],
+  ['mine', /mine|creuse|minerai|fer|diamant|charbon|grotte|pioche/],
+  ['gather', /coupe|bois|arbre|recolte|ramasse|ble|bucheron/],
+  ['craft', /fabrique|craft|etabli|outil/],
+  ['explore', /explore|cherche|va voir|decouvr/],
+  ['survive', /mange|faim|vie|soigne|armure/],
+];
+
+function inferDomain(t: string): Domain | undefined {
+  return DOMAIN_WORDS.find(([, r]) => r.test(t))?.[0];
+}
+
+/** Étage 1 : règles locales, gratuites. `ambiguous` = laisser trancher le LLM. */
+export function classifyByRules(text: string): Classification & { ambiguous: boolean } {
+  const t = norm(text);
+  const hits = (Object.keys(RULES) as (keyof typeof RULES)[]).filter((k) => RULES[k].some((r) => r.test(t)));
+  const domain = inferDomain(t);
+  const priority: UtteranceLabel[] = ['correction', 'teaching', 'order', 'approval'];
+  const sorted = priority.filter((p) => hits.includes(p as keyof typeof RULES));
+  if (sorted.length === 0) {
+    // phrase longue mentionnant le jeu sans motif reconnu : à faire trancher
+    const ambiguous = t.split(/\s+/).length >= 4 && domain !== undefined;
+    return { label: 'chatter', confidence: ambiguous ? 0.4 : 0.8, classifier: 'rules', ambiguous, ...(domain ? { domain } : {}) };
+  }
+  const label = sorted[0]!;
+  const also = sorted[1];
+  // « non » seul est une correction sûre ; « non mais construis… » mêle correction et ordre : cohérent
+  const ambiguous = sorted.length > 1 && !(label === 'correction' && also === 'order') && !(label === 'teaching' && also === 'order');
+  return { label, ...(also ? { also } : {}), ...(domain ? { domain } : {}), confidence: ambiguous ? 0.5 : 0.9, classifier: 'rules', ambiguous };
+}
+
+const LlmClassification = z.object({
+  label: z.enum(['correction', 'approval', 'teaching', 'order', 'chatter']),
+  also: z.enum(['correction', 'approval', 'teaching', 'order', 'chatter']).nullish(),
+  domain: z.enum(DOMAINS).nullish(),
+  confidence: z.number().min(0).max(1).default(0.7),
+});
+
+const SYSTEM = `Tu classes une phrase dite par un joueur de Minecraft à son compagnon IA.
+Catégories : correction (il désapprouve ce que fait le compagnon), approval (il approuve), teaching (il montre comment faire : « regarde »), order (il demande une action), chatter (bavardage).
+Réponds uniquement en JSON : {"label": "...", "also": "<seconde catégorie ou null>", "domain": "build|combat|mine|gather|explore|craft|survive|null", "confidence": 0..1}`;
+
+/**
+ * Classifieur d'énoncés en deux étages : règles locales, puis petit LLM seulement si c'est ambigu
+ * (et si le budget le permet). Sans LLM, la meilleure hypothèse des règles est conservée.
+ */
+export class UtteranceClassifier {
+  constructor(
+    private readonly llm: LlmClient | null,
+    private readonly budget: Budget | null,
+    private readonly model: string,
+  ) {}
+
+  async classify(text: string, context = ''): Promise<Classification> {
+    const rules = classifyByRules(text);
+    const { ambiguous, ...base } = rules;
+    if (!ambiguous || !this.llm || !this.budget || this.budget.exhausted()) return base;
+    try {
+      const res = await this.llm.complete({ purpose: 'classify', model: this.model, system: SYSTEM, user: `${context ? `Contexte : ${context}\n` : ''}Phrase : « ${text} »`, maxTokens: 80 });
+      this.budget.record({ purpose: 'classify', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
+      const start = res.text.indexOf('{');
+      const parsed = LlmClassification.safeParse(JSON.parse(res.text.slice(start, res.text.lastIndexOf('}') + 1)));
+      if (!parsed.success) return base;
+      const p = parsed.data;
+      return { label: p.label, ...(p.also ? { also: p.also } : {}), ...((p.domain ?? base.domain) ? { domain: (p.domain ?? base.domain)! } : {}), confidence: p.confidence, classifier: 'llm' };
+    } catch (err) {
+      this.budget.record({ purpose: 'classify', model: this.model, promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, ok: false, error: err instanceof LlmError ? err.message : String(err) });
+      return base;
+    }
+  }
+}

@@ -202,6 +202,38 @@ describe('correction', () => {
   });
 });
 
+describe("correction d'une habitude très renforcée (cas réel)", () => {
+  it("même un mécanisme de poids 30 n'est plus reproduit après une correction, même si le LLM insiste", async () => {
+    const { decider, tree, cache, stub } = await setup();
+    let wall = await tree.ingest(wallEpisode({ source: 'taught' }));
+    for (let i = 0; i < 9; i++) wall = await tree.ingest(wallEpisode({ source: 'taught' })); // poids 30
+    tree.correct(wall.mechanismId);
+    cache.invalidateDomain('build');
+    expect(tree.store.getNode(wall.mechanismId)!.weight).toBeLessThan(0);
+    // un LLM qui ignorerait la consigne et reconstruirait le même mur sans citer l'identifiant
+    stub.scripted.push(JSON.stringify({ skill: 'build', params: { shape: 'wall', material: 'stone_bricks', width: 7, height: 4 }, domain: 'build', intent: 'refaire le mur', basedOn: [] }));
+    const r = await decider.decide('correction', world());
+    expect(r.decision.skill).toBe('follow');
+    expect(r.decision.rationale).toContain('corrigé');
+  });
+});
+
+describe("garde-fou contre un mécanisme corrigé", () => {
+  it("refuse une décision qui reproduit un mécanisme à éviter, même quand le LLM est appelé", async () => {
+    const { decider, tree, cache, stub } = await setup();
+    let wall = await tree.ingest(wallEpisode({ source: 'taught' }));
+    for (let i = 0; i < 9; i++) wall = await tree.ingest(wallEpisode({ source: 'taught' }));
+    await tree.ingest(wallEpisode({ kind: 'pillar', mechanism: { skill: 'build', shape: 'pillar', material: 'stone_bricks' } }));
+    tree.correct(wall.mechanismId);
+    cache.invalidateDomain('build');
+    stub.scripted.push(JSON.stringify({ skill: 'build', params: { shape: 'wall', material: 'stone_bricks' }, domain: 'build', intent: 'refaire le mur', basedOn: [] }));
+    const r = await decider.decide('correction', world());
+    expect(stub.calls).toHaveLength(1);
+    expect(r.decision.skill).toBe('follow');
+    expect(r.decision.rationale).toContain('corrigé');
+  });
+});
+
 describe('routage des modèles', () => {
   it('petit modèle par défaut, gros après 3 échecs dans la même situation, gros pour composer', () => {
     const r = new ModelRouter(FAST, STRONG);

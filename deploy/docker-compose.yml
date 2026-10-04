@@ -41,4 +41,18 @@ services:
       - /opt/minecraftia/data:/app/data
     depends_on:
       - minecraft
+      - voice
+    restart: unless-stopped
+
+  # service vocal : transcription (faster-whisper + Silero VAD) et synthèse (Edge TTS), réseau interne
+  voice:
+    build: /opt/minecraftia/app/voice
+    container_name: minecraftia-voice
+    environment:
+      WHISPER_MODEL: "small"
+      WHISPER_THREADS: "4"
+      EDGE_VOICE: "fr-FR-HenriNeural"
+      TTS_ENGINE: "edge"
+    volumes:
+      - /opt/minecraftia/voice-data:/data
     restart: unless-stopped

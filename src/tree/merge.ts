@@ -125,3 +125,23 @@ export function mechanismSignature(m: Mechanism): string {
       return m.skill;
   }
 }
+
+/**
+ * Clé d'action comparable entre une décision (compétence + paramètres) et un mécanisme appris :
+ * sert à refuser une décision qui reproduirait un mécanisme corrigé par le joueur.
+ */
+export function actionKey(skill: string, p: Record<string, unknown>): string {
+  const first = (v: unknown) => (Array.isArray(v) ? String(v[0] ?? '') : String(v ?? ''));
+  switch (skill) {
+    case 'build':
+      return `build:${String(p.shape)}:${String(p.material)}`;
+    case 'collect':
+      return `collect:${first(p.blocks ?? p.targets ?? p.block)}`;
+    case 'attack':
+      return `attack:${first(p.targets)}`;
+    case 'craft':
+      return `craft:${first(p.item ?? p.items)}`;
+    default:
+      return skill;
+  }
+}

@@ -9,8 +9,8 @@ cd "$(dirname "$0")/.."
 
 echo "→ envoi du code"
 tar czf - --exclude=node_modules --exclude=dist --exclude=data --exclude=graphify-out --exclude=.git --exclude=.env \
-  package.json package-lock.json tsconfig.json Dockerfile .dockerignore src scripts test \
-  | "${SSH[@]}" 'mkdir -p /opt/minecraftia/app /opt/minecraftia/data && rm -rf /opt/minecraftia/app/src /opt/minecraftia/app/scripts /opt/minecraftia/app/test && tar xzf - -C /opt/minecraftia/app'
+  --exclude=__pycache__ --exclude=.pytest_cache   package.json package-lock.json tsconfig.json Dockerfile .dockerignore src scripts test voice \
+  | "${SSH[@]}" 'mkdir -p /opt/minecraftia/app /opt/minecraftia/data && rm -rf /opt/minecraftia/app/src /opt/minecraftia/app/scripts /opt/minecraftia/app/test /opt/minecraftia/app/voice && tar xzf - -C /opt/minecraftia/app'
 
 echo "→ compose et configuration des mods"
 "${SSH[@]}" 'cat > /opt/minecraft/docker-compose.yml' < deploy/docker-compose.yml
@@ -19,4 +19,4 @@ for f in deploy/mc-config/*.json; do
 done
 
 echo "→ construction et relance"
-"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build ${*:-minecraftia} 2>&1 | tail -5"
+"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build ${*:-voice minecraftia} 2>&1 | tail -5"

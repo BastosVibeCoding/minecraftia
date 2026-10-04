@@ -19,6 +19,8 @@ export interface SkillContext {
   followPlayer: string;
   /** Signale un bloc que le bot va modifier lui-même : l'observateur ne doit pas l'attribuer au joueur. */
   touch?: (pos: { x: number; y: number; z: number }) => void;
+  /** Voix du bot (chat + voix en jeu si disponible) ; à défaut, le chat. */
+  speak?: (text: string) => void;
 }
 
 export interface Skill<P extends z.ZodType = z.ZodType> {
@@ -285,8 +287,9 @@ const say = {
   description: 'say {text} — parler au joueur (court)',
   params: z.object({ text: z.string().min(1).max(200) }),
   timeoutMs: () => 3_000,
-  async run({ bot }: SkillContext, p: { text: string }): Promise<ActionRunOutput> {
-    bot.chat(p.text);
+  async run({ bot, speak }: SkillContext, p: { text: string }): Promise<ActionRunOutput> {
+    if (speak) speak(p.text);
+    else bot.chat(p.text);
     return { status: 'success' };
   },
 };

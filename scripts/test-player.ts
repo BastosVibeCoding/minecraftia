@@ -2,7 +2,9 @@
  * Joueur scripté pour les essais réels : pose un mur, casse des blocs, fabrique, combat.
  * Il génère de vrais événements serveur (captés par Easy LLM et par l'observateur du bot).
  * Prérequis (RCON) : plateforme plate, inventaire fourni, zombie immobile à proximité.
- * Usage : npx tsx scripts/test-player.ts <hôte> [port] [scénario: all|build|craft|fight]
+ * Usage : npx tsx scripts/test-player.ts <hôte> [port] [scénario: all|build|craft|fight|teach|say:<texte>]
+ *   teach : dit « regarde, je fais comme ça » puis pose un mur, cinq fois
+ *   stay:<s> : reste connecté <s> secondes sans rien faire (essais de voix)
  */
 import mineflayer from 'mineflayer';
 
@@ -11,14 +13,16 @@ const bot = mineflayer.createBot({ host, port: Number(port), username: 'Testeur'
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const log = (msg: string) => console.log(`[Testeur] ${msg}`);
 
-async function buildWall(len: number, height: number): Promise<void> {
+/** Mur de `len`×`height` à `offset` blocs devant (axe z) ou sur le côté (axe x), à portée de bras. */
+async function buildWall(len: number, height: number, offset = 3, axis: 'x' | 'z' = 'z'): Promise<void> {
   const item = bot.inventory.items().find((i) => i.name === 'stone_bricks');
   if (!item) throw new Error('pas de stone_bricks dans l\'inventaire');
   await bot.equip(item, 'hand');
   const base = bot.entity.position.floored();
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < len; x++) {
-      const target = base.offset(x - Math.floor(len / 2), y, 3);
+      const along = x - Math.floor(len / 2);
+      const target = axis === 'z' ? base.offset(along, y, offset) : base.offset(offset, y, along);
       const below = bot.blockAt(target.offset(0, -1, 0));
       if (!below || below.boundingBox !== 'block') continue;
       try {
@@ -84,6 +88,22 @@ bot.once('spawn', async () => {
     if (scenario === 'all' || scenario === 'fight') {
       await sleep(2000);
       await fight();
+    }
+    if (scenario === 'teach') {
+      const spots: [number, 'x' | 'z'][] = [[3, 'z'], [-3, 'z'], [3, 'x'], [-3, 'x'], [4, 'z']];
+      for (const [offset, axis] of spots) {
+        bot.chat('regarde, je fais comme ça');
+        await sleep(1500);
+        await buildWall(5, 3, offset, axis);
+        await sleep(10_000); // silence : l'épisode se clôt
+      }
+    }
+    if (scenario.startsWith('stay:')) {
+      await sleep(Number(scenario.slice(5)) * 1000); // reste en jeu (essais de voix)
+    }
+    if (scenario.startsWith('say:')) {
+      bot.chat(scenario.slice(4));
+      log(`a dit : ${scenario.slice(4)}`);
     }
   } catch (err) {
     log(`échec : ${(err as Error).message}`);

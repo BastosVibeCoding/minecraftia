@@ -37,8 +37,9 @@ const ACTIVITY_FR: Record<Domain, string> = {
 };
 
 /** Description textuelle de la situation, utilisée pour retrouver les branches proches dans l'arbre. */
-export function describeSituation(w: WorldState): string {
+export function describeSituation(w: WorldState, order?: string): string {
   const parts: string[] = [];
+  if (order) parts.push(order);
   if (w.threats.length > 0) parts.push(`un ${w.threats[0]!.name} approche, combattre ${w.threats[0]!.name}`);
   if (w.player.activity.length > 0) parts.push(`le joueur ${w.player.activity.map((a) => ACTIVITY_FR[a]).join(' et ')}`);
   if (w.player.recent[0]) parts.push(w.player.recent[0]);

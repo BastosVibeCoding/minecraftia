@@ -12,6 +12,7 @@ import { PlayClock } from './tree/playClock.js';
 import { BehaviorTree } from './tree/tree.js';
 import { Autonomy } from './autonomy/autonomy.js';
 import { ProposalBroker } from './autonomy/proposals.js';
+import { UtteranceClassifier } from './feedback/classifier.js';
 import { Budget } from './decider/budget.js';
 import { DecisionCache } from './decider/cache.js';
 import { Decider } from './decider/decider.js';
@@ -64,7 +65,10 @@ async function main(): Promise<void> {
   const proposals = new ProposalBroker(systemClock);
   const decider = new Decider({ tree, llm, budget, cache, router, strategy, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
 
-  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree, playClock, decider, cache, router, autonomy, proposals });
+  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, {
+    tree, playClock, decider, cache, router, autonomy, proposals,
+    classifier: new UtteranceClassifier(llm, budget, config.openrouter.modelFast),
+  });
   companion.start();
   logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, 'Minecraftia démarré');
 

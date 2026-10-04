@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate": "tsx scripts/migrate-json.ts"
+    "migrate": "tsx scripts/migrate-json.ts",
+    "test:voice": "cd voice && python -m pytest -q tests"
   },
   "repository": {
     "type": "git",

@@ -45,6 +45,12 @@ export const ConfigSchema = z.object({
     /** Fichier JSONL où recopier les messages bruts (relevé du protocole) ; vide = désactivé. */
     capturePath: z.string().optional(),
   }),
+  voice: z.object({
+    /** Service vocal Python (transcription + synthèse) ; vide = pas de voix. */
+    url: z.string().default('ws://voice:8800'),
+    /** Port où se connecte le mod Easy LLM Voice pour faire parler le bot dans le jeu. */
+    linkPort: intFromEnv(8765),
+  }),
   log: z.object({
     level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
     pretty: z.coerce.boolean().default(false),

@@ -15,6 +15,8 @@ export const FEEDBACK = {
   /** correction : poids × CORRECTION_FACTOR puis + CORRECTION_PENALTY */
   correctionFactor: 0.2,
   correctionPenalty: -5,
+  /** poids maximal après correction (strictement négatif) */
+  correctionFloor: -1,
 } as const;
 
 const HOUR = 3_600_000;
@@ -114,7 +116,9 @@ export class BehaviorTree {
     const n = this.store.getNode(mechanismId);
     if (!n) return undefined;
     const current = this.effectiveWeight(n);
-    const target = current * FEEDBACK.correctionFactor + FEEDBACK.correctionPenalty;
+    // toujours négatif, quelle que soit la force de l'habitude : le mécanisme passe « à éviter »
+    // jusqu'à ce que le joueur le montre de nouveau
+    const target = Math.min(current * FEEDBACK.correctionFactor + FEEDBACK.correctionPenalty, FEEDBACK.correctionFloor);
     return this.adjust(mechanismId, target - current, 'correction', refs);
   }
 
