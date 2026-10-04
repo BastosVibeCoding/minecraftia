@@ -43,7 +43,7 @@ export class FeedbackHandler {
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
     const recent = this.recentDecision();
-    const context = recent ? `le compagnon vient de faire : ${recent.decision.intent}` : '';
+    const context = recent ? `le bot vient de faire : ${recent.decision.intent}` : '';
     const c = await d.classifier.classify(text, context);
     const r = d.store.db
       .prepare('INSERT INTO utterances(player, channel, text, label, classifier, confidence, domain, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')

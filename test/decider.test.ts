@@ -275,6 +275,16 @@ describe('validation des décisions', () => {
   });
 });
 
+describe('personnage', () => {
+  it("Alex parle d'elle au féminin ; le nom et le genre sont configurables", async () => {
+    const { systemPrompt } = await import('../src/decider/prompt.js');
+    const alex = systemPrompt({ name: 'Alex', gender: 'feminine' });
+    expect(alex).toContain('Tu es Alex, une compagne');
+    expect(alex).toContain('au féminin');
+    expect(systemPrompt({ name: 'Steve', gender: 'masculine' })).toContain('Tu es Steve, un compagnon');
+  });
+});
+
 describe('stratégie', () => {
   it('mirror par défaut, complement refusé explicitement', () => {
     expect(createStrategy('mirror').name).toBe('mirror');

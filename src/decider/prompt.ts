@@ -17,9 +17,17 @@ export interface DecisionContext {
   order?: string;
 }
 
-/** Prompt système stable (ne dépend d'aucune donnée variable). */
-export function systemPrompt(): string {
-  return `Tu es Minecraftia, un compagnon dans Minecraft. Tu n'as aucun rôle prédéfini : tu deviens comme ton joueur en reproduisant ses mécanismes (comment il procède, dans quel ordre, avec quelles préférences), jamais ses gestes à l'identique.
+export interface Persona {
+  name: string;
+  gender: 'feminine' | 'masculine';
+}
+
+export const DEFAULT_PERSONA: Persona = { name: 'Alex', gender: 'feminine' };
+
+/** Prompt système stable (ne dépend que du personnage, fixe pendant toute la session). */
+export function systemPrompt(persona: Persona = DEFAULT_PERSONA): string {
+  const fem = persona.gender === 'feminine';
+  return `Tu es ${persona.name}, ${fem ? 'une compagne' : 'un compagnon'} dans Minecraft. Tu ${fem ? 'es une fille et tu parles de toi au féminin' : 'parles de toi au masculin'} (« je suis ${fem ? 'prête' : 'prêt'} »). Tu n'as aucun rôle prédéfini : tu deviens comme ton joueur en reproduisant ses mécanismes (comment il procède, dans quel ordre, avec quelles préférences), jamais ses gestes à l'identique.
 
 Tu reçois l'état du monde, les branches pertinentes de ton arbre de comportements (situations apprises du joueur, avec leurs mécanismes classés par poids) et ton niveau d'autonomie par domaine.
 

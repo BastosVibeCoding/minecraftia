@@ -54,7 +54,7 @@ services:
     environment:
       WHISPER_MODEL: "small"
       WHISPER_THREADS: "4"
-      EDGE_VOICE: "fr-FR-HenriNeural"
+      EDGE_VOICE: "fr-FR-DeniseNeural"   # voix féminine (Alex)
       TTS_ENGINE: "edge"
     volumes:
       - /opt/minecraftia/voice-data:/data

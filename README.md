@@ -1,5 +1,7 @@
 # Minecraftia
 
+Le personnage s'appelle **Alex** ; c'est une fille (nom et genre configurables).
+
 Compagnon IA pour Minecraft (Fabric 1.21) **sans rôle préprogrammé** : il part d'une page blanche,
 suit son joueur, survit, écoute — et sa spécialité (construction, combat, minage, un mélange)
 émerge de la façon de jouer du joueur. Il retient des **mécanismes** (comment, dans quel ordre,
@@ -104,7 +106,8 @@ facultatif peut ajuster les réglages fins (seuils des réflexes, délais…), *
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `MC_HOST`, `MC_PORT` | `localhost`, `25565` | serveur Minecraft |
-| `MC_USERNAME` | `Minecraftia` | pseudo du bot (serveur en `online-mode=false`) |
+| `MC_USERNAME` | `Alex` | nom et pseudo du personnage (serveur en `online-mode=false`) |
+| `BOT_GENDER` | `feminine` | genre grammatical : elle parle d'elle au féminin (`masculine` possible) |
 | `FOLLOW_PLAYER` | — (obligatoire) | joueur que le bot suit et dont il apprend |
 | `STRATEGY` | `mirror` | `mirror` : devenir comme le joueur ; `complement` : point d'extension, refusé au démarrage |
 | `OPENROUTER_API_KEY` | — | clé OpenRouter ; sans clé, le bot suit et survit sans décideur |
@@ -118,7 +121,7 @@ facultatif peut ajuster les réglages fins (seuils des réflexes, délais…), *
 | `DATA_DIR` | `data` | base SQLite et modèles |
 
 Service vocal : `WHISPER_MODEL` (`small`), `WHISPER_THREADS` (`4`), `TTS_ENGINE` (`edge`),
-`EDGE_VOICE` (`fr-FR-HenriNeural`).
+`EDGE_VOICE` (`fr-FR-DeniseNeural`, voix féminine).
 
 ## Commandes en jeu
 

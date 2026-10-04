@@ -6,7 +6,7 @@ import type { Branch, BehaviorTree } from '../tree/tree.js';
 import type { Budget } from './budget.js';
 import type { DecisionCache } from './cache.js';
 import { LlmError, type LlmClient } from './llm.js';
-import { systemPrompt, userPrompt, type Band, type DecisionContext } from './prompt.js';
+import { systemPrompt, userPrompt, type Band, type DecisionContext, type Persona } from './prompt.js';
 import type { ModelRouter } from './router.js';
 import { parseDecision, type Decision } from './schema.js';
 import { describeSituation, situationHash, type WorldState } from './world.js';
@@ -35,6 +35,8 @@ export interface DeciderDeps {
   clock: Clock;
   logger: Logger;
   maxTokens?: number;
+  /** Nom et genre du personnage (par défaut : Alex, au féminin). */
+  persona?: Persona;
 }
 
 export function fallbackDecision(reason: string): Decision {
@@ -116,7 +118,7 @@ export class Decider {
     for (let attempt = 0; attempt < 2; attempt++) {
       let text: string;
       try {
-        const res = await this.deps.llm.complete({ purpose: 'decide', model, system: systemPrompt(), user: userPrompt(ctx, error), maxTokens: this.deps.maxTokens ?? 400 });
+        const res = await this.deps.llm.complete({ purpose: 'decide', model, system: systemPrompt(this.deps.persona), user: userPrompt(ctx, error), maxTokens: this.deps.maxTokens ?? 400 });
         budget.record({ purpose: 'decide', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
         text = res.text;
       } catch (err) {

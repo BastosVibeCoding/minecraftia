@@ -63,7 +63,8 @@ async function main(): Promise<void> {
   if (!llm) logger.warn('OPENROUTER_API_KEY absente : le bot suit et survit, sans décideur LLM');
   const autonomy = new Autonomy(store);
   const proposals = new ProposalBroker(systemClock);
-  const decider = new Decider({ tree, llm, budget, cache, router, strategy, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
+  const persona = { name: config.minecraft.username, gender: config.gender };
+  const decider = new Decider({ tree, llm, budget, cache, router, strategy, persona, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
 
   const companion = new Companion(config, logger, systemClock, mineflayer.createBot, {
     tree, playClock, decider, cache, router, autonomy, proposals,
@@ -71,7 +72,7 @@ async function main(): Promise<void> {
     budget,
   });
   companion.start();
-  logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, 'Minecraftia démarré');
+  logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, `${config.minecraft.username} démarre`);
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'arrêt demandé');

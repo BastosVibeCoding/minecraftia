@@ -23,7 +23,7 @@ class EdgeTts:
     name = "edge"
 
     def __init__(self, voice: str | None = None) -> None:
-        self.voice = voice or os.environ.get("EDGE_VOICE", "fr-FR-HenriNeural")
+        self.voice = voice or os.environ.get("EDGE_VOICE", "fr-FR-DeniseNeural")
 
     async def synth(self, text: str) -> np.ndarray:
         import edge_tts

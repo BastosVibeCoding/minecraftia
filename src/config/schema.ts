@@ -7,11 +7,13 @@ export const ConfigSchema = z.object({
   minecraft: z.object({
     host: z.string().min(1).default('localhost'),
     port: intFromEnv(25565),
-    username: z.string().min(1).max(16).default('Minecraftia'),
+    username: z.string().min(1).max(16).default('Alex'),
     version: z.string().default('1.21'),
   }),
   /** Pseudo du joueur que le bot suit et dont il apprend. */
   followPlayer: z.string().min(1),
+  /** Genre grammatical du personnage (sa façon de parler d'elle ou de lui-même). Son nom est `minecraft.username`. */
+  gender: z.enum(['feminine', 'masculine']).default('feminine'),
   /** mirror : le bot devient comme le joueur. complement : point d'extension, non implémenté. */
   strategy: z.enum(['mirror', 'complement']).default('mirror'),
   openrouter: z.object({

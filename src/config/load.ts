@@ -31,6 +31,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
     minecraft: { host: env.MC_HOST, port: env.MC_PORT, username: env.MC_USERNAME, version: env.MC_VERSION },
     followPlayer: env.FOLLOW_PLAYER,
     strategy: env.STRATEGY,
+    gender: env.BOT_GENDER,
     openrouter: {
       apiKey: env.OPENROUTER_API_KEY,
       modelFast: env.OPENROUTER_MODEL_FAST,

@@ -84,8 +84,8 @@ const LlmClassification = z.object({
   confidence: z.number().min(0).max(1).default(0.7),
 });
 
-const SYSTEM = `Tu classes une phrase dite par un joueur de Minecraft à son compagnon IA.
-Catégories : correction (il désapprouve ce que fait le compagnon), approval (il approuve), teaching (il montre comment faire : « regarde »), order (il demande une action), chatter (bavardage).
+const SYSTEM = `Tu classes une phrase dite par un joueur de Minecraft au personnage IA qui l'accompagne.
+Catégories : correction (il désapprouve ce que fait le personnage), approval (il approuve), teaching (il montre comment faire : « regarde »), order (il demande une action), chatter (bavardage).
 Réponds uniquement en JSON : {"label": "...", "also": "<seconde catégorie ou null>", "domain": "build|combat|mine|gather|explore|craft|survive|null", "confidence": 0..1}`;
 
 /**
