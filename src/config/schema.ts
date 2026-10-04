@@ -39,6 +39,12 @@ export const ConfigSchema = z.object({
     defaultTimeoutMs: intFromEnv(60000),
     followDistance: numFromEnv(3),
   }),
+  telemetry: z.object({
+    /** Port du serveur WebSocket auquel se connecte le mod Easy LLM. */
+    port: intFromEnv(7891),
+    /** Fichier JSONL où recopier les messages bruts (relevé du protocole) ; vide = désactivé. */
+    capturePath: z.string().optional(),
+  }),
   log: z.object({
     level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
     pretty: z.coerce.boolean().default(false),

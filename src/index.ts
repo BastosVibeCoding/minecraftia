@@ -5,8 +5,12 @@ import { ConfigError, loadConfig } from './config/load.js';
 import { systemClock } from './core/clock.js';
 import { installProcessGuards } from './core/guards.js';
 import { createLogger } from './core/logger.js';
+import { join } from 'node:path';
+import { createEmbedder } from './store/embedder.js';
+import { Store } from './store/store.js';
+import { BehaviorTree } from './tree/tree.js';
 
-function main(): void {
+async function main(): Promise<void> {
   let config;
   try {
     config = loadConfig(process.env, process.env.CONFIG_FILE ?? 'config/minecraftia.json');
@@ -30,17 +34,25 @@ function main(): void {
     process.exit(1);
   }
 
-  const companion = new Companion(config, logger, systemClock, mineflayer.createBot);
+  const embedder = await createEmbedder('transformers', join(config.dataDir, 'models'), logger);
+  const store = await Store.open(join(config.dataDir, 'minecraftia.db'), embedder, systemClock, { logger });
+  logger.info({ embedder: embedder.name, vectorIndex: store.index.kind }, 'mémoire ouverte');
+  const tree = new BehaviorTree(store, { logger: logger.child({ module: 'arbre' }) });
+
+  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree });
   companion.start();
   logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, 'Minecraftia démarré');
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'arrêt demandé');
     companion.stop();
-    setTimeout(() => process.exit(0), 500).unref();
+    setTimeout(() => {
+      store.close();
+      process.exit(0);
+    }, 500).unref();
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main();
+void main();

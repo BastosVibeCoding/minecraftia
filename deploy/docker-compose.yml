@@ -1,0 +1,44 @@
+# Serveur Minecraft + bot Minecraftia, sur le VPS (copié dans /opt/minecraft par scripts/deploy.sh).
+# docker compose up -d --build   (dans /opt/minecraft)
+# Seuls 25565/tcp (jeu) et 24454/udp (voix) sont publics ; le bot et le mod se parlent sur le réseau interne.
+services:
+  minecraft:
+    image: itzg/minecraft-server
+    container_name: mc-server
+    ports:
+      - "25565:25565"
+      - "24454:24454/udp"
+    environment:
+      EULA: "TRUE"
+      TYPE: "FABRIC"
+      VERSION: "1.21"
+      ONLINE_MODE: "FALSE"     # le bot n'a pas de compte Mojang
+      MEMORY: "10G"
+      USE_AIKAR_FLAGS: "TRUE"
+      # performances + voix + télémétrie pour le bot
+      MODRINTH_PROJECTS: "lithium,ferrite-core,chunky,simple-voice-chat,easy-llm,easy-llm-voice"
+      MODRINTH_DOWNLOAD_DEPENDENCIES: "required"
+      MC_SERVER_ID: "minecraftia"   # exigé par Easy LLM (plantage au démarrage sinon)
+      SYNC_CHUNK_WRITES: "FALSE"
+      VIEW_DISTANCE: "10"
+      SIMULATION_DISTANCE: "8"
+      ENABLE_RCON: "TRUE"
+      RCON_PASSWORD: "${RCON_PASSWORD}"   # /opt/minecraft/.env
+      TZ: "Europe/Paris"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  minecraftia:
+    build: /opt/minecraftia/app
+    container_name: minecraftia
+    env_file: /opt/minecraftia/.env
+    environment:
+      MC_HOST: "minecraft"
+      MC_PORT: "25565"
+      DATA_DIR: "/app/data"
+    volumes:
+      - /opt/minecraftia/data:/app/data
+    depends_on:
+      - minecraft
+    restart: unless-stopped

@@ -1,0 +1,6 @@
+{
+  "websocketUris": ["ws://minecraftia:7891"],
+  "observationIntervalTicks": 10,
+  "enableEasyLlmVoiceAudio": true,
+  "audioEventType": "heard_audio_batch"
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+data
+logs
+graphify-out
+.env
+.git
+*.db

@@ -37,6 +37,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
       modelStrong: env.OPENROUTER_MODEL_STRONG,
       dailyBudgetUsd: env.DAILY_BUDGET_USD,
     },
+    telemetry: { port: env.TELEMETRY_PORT, capturePath: env.TELEMETRY_CAPTURE },
     log: { level: env.LOG_LEVEL, pretty: env.LOG_PRETTY },
     dataDir: env.DATA_DIR,
   });
@@ -59,7 +60,7 @@ export function loadConfig(env: Env, configFile?: string): Config {
     }
   }
   const merged = deepMerge(
-    { minecraft: {}, openrouter: {}, reconnect: {}, reflexes: {}, actions: {}, log: {} },
+    { minecraft: {}, openrouter: {}, reconnect: {}, reflexes: {}, actions: {}, telemetry: {}, log: {} },
     deepMerge(fileValues, fromEnv(env)),
   );
   const parsed = ConfigSchema.safeParse(merged);

@@ -69,3 +69,36 @@ JSON invalide ou inconnu conservé. Exécution réelle du script de migration av
 
 **Incertain**
 - Pas de JSON hérité réel à migrer (départ de zéro) : le format reconnu est celui que nous définissons.
+
+## 2026-10-04 — Phase 3 : observateur
+
+**Fait**
+- `RawEvent` normalisé ; `Observer` : un seau par activité, clos après silence, éloignement ou à la
+  demande ; état du joueur (équipement, vie, faim, biome, lieux visités → « base »).
+- Analyseurs : construction (forme, dimensions, palette, symétrie, ordre vertical, contour d'abord,
+  échafaudage), minage (cibles, profondeur, escalier/tunnel/puits/carrière, outil), récolte, combat
+  (cibles, distance d'engagement, arme, bouclier, seuil de repli, style), artisanat (séquence),
+  exploration (distance, biomes), survie (seuils pour manger, équipement).
+- Arbre (partie ingestion) : situation fusionnée par similarité ≥ 0,88 dans le même domaine,
+  mécanismes concurrents distingués par signature, préférences fusionnées (moyennes et décomptes pondérés).
+- Adaptateurs : Easy LLM (format relevé sur le vrai mod, fixture de 390 messages réels) et mineflayer
+  (attaques et mobs tués ; repli pour les blocs, déplacements, équipement quand Easy LLM est absent).
+- Mods Easy LLM + Easy LLM Voice réinstallés ; image Docker du bot ; service `minecraftia` dans le
+  compose du VPS ; `scripts/deploy.sh` ; joueur scripté `scripts/test-player.ts`.
+
+**Testé** — 89 tests verts, dont la chaîne complète sur la capture réelle (→ épisode « mur en pierre
+taillée, de bas en haut »). Essai réel en production (bot dans Docker sur le VPS, joueur scripté) :
+épisodes « mur 7×3 en stone bricks (symétrique, de bas en haut) », « 8 oak planks, 1 crafting table »,
+« 3× zombie à l'épée en fer à 2 blocs, style offensif, 1 tué » → 3 situations et 3 mécanismes en base.
+
+**Appris**
+- Easy LLM : les poses (`block_update`) ne sont pas attribuées ; pas d'événement d'attaque ;
+  `players_tick` donne vie, faim, biome, équipement et inventaire de chaque joueur.
+- Premier essai de combat sans épisode : la blessure du mob arrive avant le coup de bras (vu avec un
+  bot espion) → attribution indépendante de l'ordre.
+- La fusion des listes perdait l'ordre des fabrications → champ `sequence`.
+
+**Incertain**
+- Bot à 1,5 PV près d'un zombie immobile : fuite puis retour vers le joueur, en boucle. Les réflexes
+  priment (voulu), mais l'oscillation est à traiter côté décideur (ne pas suivre vers une menace).
+- Lieux visités tenus en mémoire seulement (la « base » se réapprend après un redémarrage).
