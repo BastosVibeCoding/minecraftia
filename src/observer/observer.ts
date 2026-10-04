@@ -82,6 +82,11 @@ export class Observer {
     bucket.lastAt = e.t;
   }
 
+  /** Activités en cours du joueur (épisodes encore ouverts). */
+  activity(): Domain[] {
+    return [...this.buckets.keys()].filter((d) => d !== 'explore' || (this.buckets.get(d)?.events.length ?? 0) > 3);
+  }
+
   /** À appeler régulièrement : clôt les épisodes dont l'activité s'est tue. */
   tick(now: number): void {
     this.closeExpired(now);

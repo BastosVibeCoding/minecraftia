@@ -17,12 +17,19 @@ import { ReflexEngine } from './reflexes/engine.js';
 import { MineflayerReflexExecutor } from './reflexes/mineflayerExecutor.js';
 import { MineflayerReflexHost } from './reflexes/mineflayerHost.js';
 import { ActionController } from './skills/actionController.js';
-import { followAction } from './skills/follow.js';
+import { DecisionLoop } from './decider/loop.js';
+import type { Decider } from './decider/decider.js';
+import type { DecisionCache } from './decider/cache.js';
+import type { ModelRouter } from './decider/router.js';
+import { readWorld, snapshotOf } from './decider/mineflayerWorld.js';
+import { plugin as collectBlockPlugin } from 'mineflayer-collectblock';
+import { plugin as pvpPlugin } from 'mineflayer-pvp';
 
 const { pathfinder, Movements } = pathfinderPkg;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
-const FOLLOW_SLICE_MS = 10000;
+const RECENT_EPISODES = 5;
+const OWN_BLOCK_MS = 15_000;
 
 /** Session de jeu : tout ce qui vit entre une apparition du bot et sa déconnexion. */
 interface Session {
@@ -30,12 +37,17 @@ interface Session {
   actions: ActionController;
   reflexes: ReflexEngine;
   events: MineflayerEventSource;
+  loop: DecisionLoop;
   idleTimer: NodeJS.Timeout;
+  deaths: number;
 }
 
 export interface CompanionDeps {
   tree: BehaviorTree;
   playClock: PlayClock;
+  decider: Decider;
+  cache: DecisionCache;
+  router: ModelRouter;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -48,6 +60,10 @@ export class Companion {
   private readonly mapper: EasyLlmMapper;
   private observerTimer: NodeJS.Timeout | null = null;
   private ingestQueue: Promise<void> = Promise.resolve();
+  /** Résumés des derniers épisodes du joueur (le plus récent d'abord), pour l'état du monde. */
+  private recent: string[] = [];
+  /** Blocs modifiés par le bot lui-même (clé « x,y,z » → instant) : jamais attribués au joueur. */
+  private ownBlocks = new Map<string, number>();
 
   constructor(
     private readonly config: Config,
@@ -98,7 +114,20 @@ export class Companion {
 
   /** Point d'entrée unique des événements du joueur, quelle que soit leur source. */
   observe(e: RawEvent): void {
+    if ((e.type === 'block_placed' || e.type === 'block_broken') && this.isOwnBlock(e.pos, e.t)) return;
     this.observer.push(e);
+  }
+
+  /** Le bot va modifier ce bloc : on s'en souvient quelques secondes pour ne pas apprendre de soi-même. */
+  touchBlock(pos: { x: number; y: number; z: number }): void {
+    const now = this.clock.now();
+    this.ownBlocks.set(`${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`, now);
+    if (this.ownBlocks.size > 2000) for (const [k, t] of this.ownBlocks) if (now - t > OWN_BLOCK_MS) this.ownBlocks.delete(k);
+  }
+
+  private isOwnBlock(pos: { x: number; y: number; z: number }, t: number): boolean {
+    const at = this.ownBlocks.get(`${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`);
+    return at !== undefined && Math.abs(t - at) <= OWN_BLOCK_MS;
   }
 
   /** Les épisodes sont versés dans l'arbre un par un, dans l'ordre (calcul d'embedding asynchrone). */
@@ -107,7 +136,10 @@ export class Companion {
     this.ingestQueue = this.ingestQueue
       .then(async () => {
         const result = await this.deps.tree.ingest(episode);
+        this.recent = [episode.summary, ...this.recent].slice(0, RECENT_EPISODES);
         this.bus.emit('episode:observed', { episode, result });
+        // le joueur vient de faire quelque chose : occasion de décider (imiter, proposer, agir)
+        this.session?.loop.request('épisode du joueur');
       })
       .catch((err: unknown) => this.logger.error({ err }, "ingestion d'épisode en erreur"));
   }
@@ -116,6 +148,8 @@ export class Companion {
     this.endSession();
     try {
       if (!bot.pathfinder) bot.loadPlugin(pathfinder);
+      if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);
+      if (!bot.pvp) bot.loadPlugin(pvpPlugin);
       const movements = new Movements(bot);
       movements.canDig = false;
       bot.pathfinder.setMovements(movements);
@@ -127,6 +161,8 @@ export class Companion {
       this.clock,
       () => {
         bot.pathfinder?.setGoal(null);
+        bot.pvp?.forceStop();
+        void bot.collectBlock?.cancelTask().catch(() => undefined);
         bot.clearControlStates();
       },
       (r) => this.bus.emit('action:result', r),
@@ -144,6 +180,7 @@ export class Companion {
     reflexes.start();
     bot.on('death', () => {
       this.logger.warn('le bot est mort');
+      if (this.session) this.session.deaths++;
       actions.abort('mort', 'death');
     });
 
@@ -156,12 +193,20 @@ export class Companion {
     );
     events.start();
 
-    const idleTimer = setInterval(() => {
-      if (actions.isBusy || actions.blockReason) return;
-      void actions.run(followAction(bot, this.config.followPlayer, this.config.actions.followDistance, FOLLOW_SLICE_MS));
-    }, IDLE_CHECK_MS);
+    const loop = new DecisionLoop({
+      decider: this.deps.decider,
+      actions,
+      tree: this.deps.tree,
+      router: this.deps.router,
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos) },
+      world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
+      snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
+      clock: this.clock,
+      logger: this.logger.child({ module: 'décideur' }),
+    });
+    const idleTimer = setInterval(() => loop.onIdle(), IDLE_CHECK_MS);
 
-    this.session = { bot, actions, reflexes, events, idleTimer };
+    this.session = { bot, actions, reflexes, events, loop, idleTimer, deaths: 0 };
     this.bus.emit('bot:ready', { username: bot.username });
   }
 
@@ -175,6 +220,7 @@ export class Companion {
     if (!s) return;
     this.session = null;
     clearInterval(s.idleTimer);
+    s.loop.stop();
     s.events.stop();
     s.reflexes.stop();
     s.actions.abort('fin de session');

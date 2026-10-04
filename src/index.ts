@@ -10,6 +10,14 @@ import { createEmbedder } from './store/embedder.js';
 import { Store } from './store/store.js';
 import { PlayClock } from './tree/playClock.js';
 import { BehaviorTree } from './tree/tree.js';
+import { DOMAINS, type Domain } from './core/types.js';
+import { Budget } from './decider/budget.js';
+import { DecisionCache } from './decider/cache.js';
+import { Decider } from './decider/decider.js';
+import { OpenRouterClient } from './decider/llm.js';
+import type { Band } from './decider/prompt.js';
+import { ModelRouter } from './decider/router.js';
+import { createStrategy, StrategyNotImplementedError, type RoleStrategy } from './strategy/strategy.js';
 
 async function main(): Promise<void> {
   let config;
@@ -30,9 +38,15 @@ async function main(): Promise<void> {
   });
   installProcessGuards(logger);
 
-  if (config.strategy !== 'mirror') {
-    logger.fatal({ strategy: config.strategy }, 'stratégie non implémentée : seule "mirror" est disponible');
-    process.exit(1);
+  let strategy: RoleStrategy;
+  try {
+    strategy = createStrategy(config.strategy);
+  } catch (err) {
+    if (err instanceof StrategyNotImplementedError) {
+      logger.fatal(err.message);
+      process.exit(1);
+    }
+    throw err;
   }
 
   const embedder = await createEmbedder('transformers', join(config.dataDir, 'models'), logger);
@@ -41,7 +55,16 @@ async function main(): Promise<void> {
   const playClock = new PlayClock(store.db, systemClock);
   const tree = new BehaviorTree(store, { playTime: () => playClock.now(), logger: logger.child({ module: 'arbre' }) });
 
-  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree, playClock });
+  const budget = new Budget(store.db, systemClock, config.openrouter.dailyBudgetUsd);
+  const cache = new DecisionCache(store.db, systemClock);
+  const router = new ModelRouter(config.openrouter.modelFast, config.openrouter.modelStrong);
+  const llm = config.openrouter.apiKey ? new OpenRouterClient({ apiKey: config.openrouter.apiKey, baseUrl: config.openrouter.baseUrl }) : null;
+  if (!llm) logger.warn('OPENROUTER_API_KEY absente : le bot suit et survit, sans décideur LLM');
+  // phase 5 : mode imitation dans tous les domaines (l'autonomie graduelle arrive en phase 6)
+  const imitate = () => Object.fromEntries(DOMAINS.map((d) => [d, { band: 'imitate' as Band, score: 0.3 }])) as Record<Domain, { band: Band; score: number }>;
+  const decider = new Decider({ tree, llm, budget, cache, router, strategy, autonomy: imitate, clock: systemClock, logger: logger.child({ module: 'décideur' }) });
+
+  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree, playClock, decider, cache, router });
   companion.start();
   logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, 'Minecraftia démarré');
 

@@ -126,3 +126,44 @@ en tête (0,50) ; « bâtir une muraille » → « construire un mur » (0,85) s
 **Appris**
 - L'embedder de test (lexical) ne rapproche que des textes au vocabulaire partagé : les tests de
   recherche utilisent des requêtes cohérentes avec cette limite ; le sens est vérifié en production.
+
+## 2026-10-04 — Phase 5 : décideur + compétences (mode imitation)
+
+**Fait**
+- Compétences génériques (`follow`, `collect`, `build`, `attack`, `craft`, `explore`, `eat`, `equip`, `say`),
+  paramètres validés par zod, délai maximal chacune ; plans de construction bornés (forme, dimensions,
+  contour d'abord) ; plugins collectblock et pvp coupés lors d'une préemption.
+- Décideur : état du monde compact → recherche des branches → JSON validé (schéma + paramètres de la
+  compétence) ; une nouvelle tentative avec l'erreur, puis repli sûr ; aucun appel sans branche apprise,
+  en bande « observe », budget épuisé ou cache valide ; justification et nœuds utilisés conservés.
+- Règles imposées par le code : la bande d'autonomie fixe `needsApproval` ; « observe » interdit d'agir ;
+  `basedOn` filtré aux mécanismes réellement proposés.
+- Routage : Haiku 4.5 par défaut ; Sonnet 5.5 après 3 échecs dans la même situation, ou pour composer.
+- Budget quotidien (journal `llm_calls` : tokens, coût réel OpenRouter, latence), cache par signature
+  quantifiée (invalidé par domaine), stratégie `mirror` / `complement` (refusé explicitement).
+- Boucle : déclenchée par épisode du joueur, inactivité (20 s), correction/ordre (forcés) ; intervalle
+  minimal 5 s ; suivi sans LLM entre deux décisions ; résultat → `outcomes`, arbre, routeur.
+- Résultat : instantanés avant/après (inventaire, vie, morts) ; les préconditions (pas de matériaux,
+  pas de cible) et préemptions ne jugent pas la branche.
+- LLM simulé rationnel (`src/sim/stubLlm.ts`) pour les tests et la future simulation d'une heure.
+
+**Testé** — 135 tests verts : routage (escalade réelle vers le gros modèle), JSON invalide → nouvelle
+tentative → repli, cache, budget, panne LLM récupérable ou non, bande d'autonomie imposée,
+**correction effective dès la décision suivante** (mur corrigé → pilier, mur présenté « à éviter »),
+**divergence des comportements** (mêmes stimuli : le combattant attaque avec bouclier, le bâtisseur
+construit en pierre taillée), boucle complète, garde contre l'auto-apprentissage.
+Essai réel en production avec le vrai Haiku 4.5 : le joueur scripté pose un mur → épisode → décision
+« build » appuyée sur le mécanisme appris → murs 7×3 en pierre taillée effectivement construits ;
+décision servie par le cache ; échec propre quand les blocs manquent. Coût mesuré : ≈ 1 300 tokens
+en entrée, 220 en sortie, **≈ 0,0025 $ par décision**, 3 s de latence.
+
+**Appris**
+- Haiku mettait `needsApproval: true` en bande « imitate » → rien ne s'exécutait : la règle est
+  désormais appliquée par le code, plus seulement demandée au modèle.
+- Le bot apprenait de ses propres murs (épisode « enceinte » mêlant son mur et celui du joueur) :
+  les blocs qu'il modifie sont mémorisés 15 s et jamais attribués au joueur.
+- Paliers de vie `floor(h/5)` : 20 et 19 PV donnaient deux signatures → paliers ok / moyen / bas.
+
+**Incertain**
+- Les compétences `collect`, `attack`, `craft`, `explore` sont couvertes par la validation et la
+  boucle, mais seul `build` a été exercé en réel à ce stade.
