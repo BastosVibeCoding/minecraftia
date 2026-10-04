@@ -39,6 +39,11 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
   fichiers TypeScript avec l'outil Write/Edit, et des titres de test entre guillemets doubles.
 - Easy LLM Voice : `heard_audio_batch` vient des paquets de micro d'un client Simple Voice Chat ;
   une voix injectée par un point d'accès n'est pas « entendue ».
+- Skins (FabricTailor 2.5.0) : `skin set URL` est cassé (MineSkin refuse son format, échec silencieux).
+  Copier le PNG dans `/opt/minecraft/data/skins/` puis `execute as <bot> run skin set upload slim /data/skins/<f>.png`.
+  Source des skins : `deploy/skins/`. Vérifier dans le playerdata (`fabrictailor:skin_data`).
+- Whitelist en offline-mode : `whitelist add` met l'UUID en ligne ; écrire l'UUID offline
+  (md5 « OfflinePlayer:<nom> », v3) dans `whitelist.json` puis `whitelist reload`.
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 
