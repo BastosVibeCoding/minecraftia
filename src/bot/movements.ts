@@ -36,13 +36,25 @@ export function adaptDoor(b: PathBlock): void {
   }
 }
 
+export interface MovementOptions {
+  /** Autoriser à creuser pour passer (récolte) ; sinon jamais. */
+  canDig?: boolean;
+  /** Blocs à ne jamais casser (posés par un joueur, blocs de construction). */
+  isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
+}
+
 /**
- * Déplacements des bots : jamais de minage pour passer, ouverture des portes et portillons,
- * l'eau évitée quand c'est possible.
+ * Déplacements des bots : ouverture des portes et portillons, l'eau évitée quand c'est possible,
+ * et jamais un bloc protégé cassé, même quand creuser est permis.
  */
-export function companionMovements(bot: Bot): InstanceType<typeof Movements> {
+export function companionMovements(bot: Bot, opts: MovementOptions = {}): InstanceType<typeof Movements> {
   const m = new Movements(bot);
-  m.canDig = false;
+  m.canDig = opts.canDig ?? false;
+  const isProtected = opts.isProtected;
+  if (isProtected) {
+    const areas = (m as unknown as { exclusionAreasBreak: ((b: { name: string; position: { x: number; y: number; z: number } }) => number)[] }).exclusionAreasBreak;
+    areas.push((b) => (isProtected(b) ? 100 : 0));
+  }
   m.canOpenDoors = true;
   (m as unknown as { liquidCost: number }).liquidCost = LIQUID_COST;
   const getBlock = m.getBlock.bind(m);

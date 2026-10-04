@@ -15,6 +15,7 @@ import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
 import { companionMovements } from './bot/movements.js';
+import { PlacedBlocks } from './bot/placedBlocks.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -83,6 +84,7 @@ export class Companion {
   private ownBlocks = new Map<string, number>();
   readonly feedback: FeedbackHandler;
   readonly gaps: GapRecorder;
+  readonly placed: PlacedBlocks;
   private readonly voiceClient: VoiceClient | null;
   private readonly voiceLink: VoiceLink;
   private readonly heard: HeardAudioExtractor;
@@ -107,6 +109,7 @@ export class Companion {
         if (pos) this.telemetry.setFocus(pos);
       },
     );
+    this.placed = new PlacedBlocks(deps.tree.store.db, clock);
     this.gaps = new GapRecorder(deps.tree.store.db, clock, logger.child({ module: 'manques' }));
     this.heard = new HeardAudioExtractor(config.followPlayer);
     this.voiceClient = config.voice.url
@@ -183,6 +186,9 @@ export class Companion {
   /** Point d'entrée unique des événements du joueur, quelle que soit leur source. */
   observe(e: RawEvent): void {
     if ((e.type === 'block_placed' || e.type === 'block_broken') && this.isOwnBlock(e.pos, e.t)) return;
+    // tout bloc posé par un joueur (ou l'autre bot) devient intouchable ; cassé, il sort du registre
+    if (e.type === 'block_placed') this.placed.placed(e.pos, e.block, e.player);
+    else if (e.type === 'block_broken') this.placed.broken(e.pos);
     if (e.player === this.config.followPlayer) this.gaps.observe(e);
     this.observer.push(e);
   }
@@ -242,7 +248,10 @@ export class Companion {
       if (!bot.pathfinder) bot.loadPlugin(pathfinder);
       if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);
       if (!bot.pvp) bot.loadPlugin(pvpPlugin);
-      bot.pathfinder.setMovements(companionMovements(bot));
+      const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.placed.isProtected(b);
+      bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
+      // collectblock impose ses réglages (creuser partout) : on lui donne les nôtres, protégés
+      bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
     } catch (err) {
       this.logger.error({ err }, 'initialisation du pathfinder impossible');
     }
@@ -292,7 +301,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), speak: (text) => void this.speaker.speak(text) },
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.placed.isProtected(b), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.placed.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,

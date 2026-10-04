@@ -22,6 +22,10 @@ export interface SkillContext {
   touch?: (pos: { x: number; y: number; z: number }) => void;
   /** Voix du bot (chat + voix en jeu si disponible) ; à défaut, le chat. */
   speak?: (text: string) => void;
+  /** Bloc à ne jamais casser (posé par un joueur, bloc de construction). */
+  isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
+  /** Réglages de déplacement normaux, remis après une récolte (collectblock impose les siens). */
+  restoreMovements?: () => void;
 }
 
 export interface Skill<P extends z.ZodType = z.ZodType> {
@@ -98,7 +102,11 @@ const collect = {
     if (ids.length === 0) return fail('blocs inconnus', { blocks: p.blocks });
     const positions = bot.findBlocks({ matching: ids, maxDistance: 32, count: p.count });
     if (positions.length === 0) return fail('aucun bloc à portée', { blocks: p.blocks });
-    const targets = positions.map((pos) => bot.blockAt(pos)).filter((b): b is NonNullable<typeof b> => b !== null);
+    // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
+    const targets = positions
+      .map((pos) => bot.blockAt(pos))
+      .filter((b): b is NonNullable<typeof b> => b !== null && !ctx.isProtected?.(b));
+    if (targets.length === 0) return fail('seulement des blocs posés par un joueur à portée', { blocks: p.blocks });
     for (const t of targets) ctx.touch?.(t.position);
     const before = p.blocks.reduce((s, b) => s + countItem(bot, b), 0);
     // collectblock abandonne parfois en route (« Took to long to decide path to goal ») après avoir déjà
@@ -108,6 +116,8 @@ const collect = {
       await cancellable(bot.collectBlock.collect(targets, { ignoreNoPath: true }), signal, () => void bot.collectBlock.cancelTask());
     } catch (err) {
       interruption = err instanceof Error ? err.message : String(err);
+    } finally {
+      ctx.restoreMovements?.();
     }
     const gained = p.blocks.reduce((s, b) => s + countItem(bot, b), 0) - before;
     if (gained > 0) return { status: 'success', detail: { gained, ...(interruption ? { partial: interruption } : {}) } };

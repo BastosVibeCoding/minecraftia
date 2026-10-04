@@ -163,4 +163,16 @@ CREATE TABLE skill_gaps (
 );
 `,
   },
+  {
+    version: 3,
+    name: 'blocs posés par les joueurs (protégés)',
+    sql: `
+CREATE TABLE placed_blocks (
+  pos TEXT PRIMARY KEY,
+  block TEXT NOT NULL,
+  player TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+`,
+  },
 ];
