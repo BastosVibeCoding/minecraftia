@@ -7,6 +7,8 @@ import { MineflayerEventSource } from './bot/mineflayerEvents.js';
 import { Observer } from './observer/observer.js';
 import type { Episode, RawEvent } from './observer/types.js';
 import type { PlayClock } from './tree/playClock.js';
+import type { Autonomy } from './autonomy/autonomy.js';
+import type { ProposalBroker } from './autonomy/proposals.js';
 import type { BehaviorTree } from './tree/tree.js';
 import type { Config } from './config/schema.js';
 import { EventBus } from './core/bus.js';
@@ -48,6 +50,8 @@ export interface CompanionDeps {
   decider: Decider;
   cache: DecisionCache;
   router: ModelRouter;
+  autonomy: Autonomy;
+  proposals: ProposalBroker;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -136,6 +140,7 @@ export class Companion {
     this.ingestQueue = this.ingestQueue
       .then(async () => {
         const result = await this.deps.tree.ingest(episode);
+        this.deps.autonomy.observe(episode.domain, episode.source, result.episodeId);
         this.recent = [episode.summary, ...this.recent].slice(0, RECENT_EPISODES);
         this.bus.emit('episode:observed', { episode, result });
         // le joueur vient de faire quelque chose : occasion de décider (imiter, proposer, agir)
@@ -203,6 +208,8 @@ export class Companion {
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,
       logger: this.logger.child({ module: 'décideur' }),
+      autonomy: this.deps.autonomy,
+      proposals: this.deps.proposals,
     });
     const idleTimer = setInterval(() => loop.onIdle(), IDLE_CHECK_MS);
 

@@ -12,6 +12,8 @@ import { HashingEmbedder } from '../src/store/embedder.js';
 import { Store } from '../src/store/store.js';
 import { MirrorStrategy } from '../src/strategy/strategy.js';
 import { PlayClock } from '../src/tree/playClock.js';
+import { Autonomy } from '../src/autonomy/autonomy.js';
+import { ProposalBroker } from '../src/autonomy/proposals.js';
 import { BehaviorTree } from '../src/tree/tree.js';
 import { silentLogger } from './helpers.js';
 
@@ -33,7 +35,7 @@ async function companion() {
     logger: silentLogger,
   });
   const config = loadConfig({ FOLLOW_PLAYER: 'Bastien' });
-  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router });
+  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router, autonomy: new Autonomy(store), proposals: new ProposalBroker(clock) });
   return { c, clock };
 }
 

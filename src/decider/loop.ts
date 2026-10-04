@@ -1,10 +1,12 @@
+import { graded, type Autonomy } from '../autonomy/autonomy.js';
+import type { ProposalBroker } from '../autonomy/proposals.js';
 import type { Clock } from '../core/clock.js';
 import type { Logger } from '../core/logger.js';
 import type { Domain } from '../core/types.js';
 import { evaluateOutcome, judged, type Outcome, type StateSnapshot } from '../outcome/outcome.js';
 import type { ActionController, ActionResult } from '../skills/actionController.js';
 import { SkillParamsError, toAction, type SkillContext } from '../skills/library.js';
-import type { BehaviorTree } from '../tree/tree.js';
+import { FEEDBACK, type BehaviorTree } from '../tree/tree.js';
 import type { Decider, DecisionRecord } from './decider.js';
 import type { ModelRouter } from './router.js';
 import type { WorldState } from './world.js';
@@ -24,8 +26,10 @@ export interface LoopDeps {
   /** Inactivité au bout de laquelle le bot redemande une décision. */
   idleDecideMs?: number;
   onExecuted?: (e: { record: DecisionRecord; result: ActionResult; outcome: Outcome }) => void;
-  /** Proposition à faire valider par le joueur (bande « propose ») : renvoie vrai si acceptée. */
-  propose?: (record: DecisionRecord) => Promise<boolean>;
+  /** Scores d'autonomie : cadence des initiatives, délais, et retour des résultats. */
+  autonomy?: Autonomy;
+  /** Propositions de la bande « propose » (réponses fournies par les retours du joueur). */
+  proposals?: ProposalBroker;
 }
 
 /**
@@ -69,7 +73,9 @@ export class DecisionLoop {
   /** Appelé quand le contrôleur est libre : décision si l'inactivité dure, sinon suivi sans LLM. */
   onIdle(): void {
     if (this.stopped || this.inFlight || this.deps.actions.isBusy || this.deps.actions.blockReason) return;
-    if (this.deps.clock.now() - this.lastDecisionAt >= (this.deps.idleDecideMs ?? 20_000)) this.request('inactivité');
+    // sous la bande « propose », pas d'initiative : le bot imite quand le joueur agit (épisodes)
+    const interval = this.deps.autonomy ? graded.initiativeIntervalMs(this.deps.autonomy.max()) : (this.deps.idleDecideMs ?? 20_000);
+    if (interval !== null && this.deps.clock.now() - this.lastDecisionAt >= interval) this.request('initiative');
     else void this.execute(null, 'follow', { distance: 3, seconds: 5 });
   }
 
@@ -84,8 +90,7 @@ export class DecisionLoop {
       this.deps.logger.info({ trigger, source: record.source, skill: d.skill, domain: d.domain, basedOn: d.basedOn, model: record.model }, `décision : ${d.intent}`);
       if (this.stopped) return;
       if (d.needsApproval) {
-        const accepted = this.deps.propose ? await this.deps.propose(record) : false;
-        if (!accepted) return;
+        if (!(await this.propose(record))) return;
       } else if (d.say) {
         this.deps.skillContext.bot.chat(d.say);
       }
@@ -109,6 +114,11 @@ export class DecisionLoop {
       this.deps.logger.warn({ err: err.message }, 'action refusée, repli sur le suivi');
       action = toAction(this.deps.skillContext, 'follow', { seconds: 5 });
     }
+    // le suivi dure par construction : son délai ne se réduit pas (il expirerait avant la fin)
+    if (record && this.deps.autonomy && action.name !== 'follow' && action.name !== 'say') {
+      // prudence graduée : moins de confiance, délai plus court
+      action = { ...action, timeoutMs: Math.max(10_000, Math.round(action.timeoutMs * graded.timeoutFactor(this.deps.autonomy.get(action.domain).score))) };
+    }
     const before = this.deps.snapshot();
     const result = await this.deps.actions.run(action);
     const outcome = evaluateOutcome(result, before, this.deps.snapshot());
@@ -118,13 +128,40 @@ export class DecisionLoop {
       .prepare('INSERT INTO outcomes(decision_id, status, details_json, at) VALUES (?, ?, ?, ?)')
       .run(record.id, outcome.status, JSON.stringify({ ...outcome, reason: result.reason, detail: result.detail }), this.deps.clock.now());
     this.lastOutcome = outcome.summary;
-    if (judged(outcome) && record.decision.basedOn.length > 0) {
+    if (judged(outcome)) {
       const success = outcome.status === 'success';
       for (const id of record.decision.basedOn) this.deps.tree.recordOutcome(id, success, record.id);
-      this.deps.router.recordOutcome(record.situationHash, success);
+      if (record.decision.basedOn.length > 0) this.deps.router.recordOutcome(record.situationHash, success);
+      if (this.deps.autonomy && record.decision.skill !== 'follow' && record.decision.skill !== 'say') {
+        this.deps.autonomy.apply(record.decision.domain, success ? 'success' : outcome.status === 'death' ? 'death' : 'failure', record.id);
+      }
     }
     this.deps.logger.info({ status: outcome.status, decision: record.id }, outcome.summary);
     this.deps.onExecuted?.({ record, result, outcome });
+  }
+
+  /**
+   * Bande « propose » : annonce, puis attend. Oui → approbation (arbre + autonomie) et action ;
+   * non → renoncement (léger recul) ; silence → accord tacite, action sans bonus.
+   */
+  private async propose(record: DecisionRecord): Promise<boolean> {
+    const d = record.decision;
+    const text = d.say ?? `Je peux ${d.intent.charAt(0).toLowerCase()}${d.intent.slice(1)} ?`;
+    this.deps.skillContext.bot.chat(text);
+    if (!this.deps.proposals) return false;
+    const answer = await this.deps.proposals.ask(text);
+    this.deps.logger.info({ answer, decision: record.id }, 'réponse à la proposition');
+    if (answer === 'yes') {
+      for (const id of d.basedOn) this.deps.tree.approve(id, { decisionId: record.id });
+      this.deps.autonomy?.apply(d.domain, 'approval', record.id);
+      return true;
+    }
+    if (answer === 'no') {
+      for (const id of d.basedOn) this.deps.tree.adjust(id, FEEDBACK.failure, 'refusal', { decisionId: record.id });
+      this.deps.autonomy?.apply(d.domain, 'refusal', record.id);
+      return false;
+    }
+    return !this.stopped;
   }
 
   /** Domaines concernés par la dernière décision (pour les retours du joueur). */

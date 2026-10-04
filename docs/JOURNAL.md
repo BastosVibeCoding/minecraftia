@@ -167,3 +167,29 @@ en entrée, 220 en sortie, **≈ 0,0025 $ par décision**, 3 s de latence.
 **Incertain**
 - Les compétences `collect`, `attack`, `craft`, `explore` sont couvertes par la validation et la
   boucle, mais seul `build` a été exercé en réel à ce stade.
+
+## 2026-10-04 — Phase 6 : autonomie
+
+**Fait**
+- Score continu par domaine (0 au départ partout), persisté avec historique : réussite +0,04, approbation
+  +0,08 (proportionnels à la distance à 1) ; échec et refus −6 %, correction −20 %, mort −30 %.
+- Observation passive +0,02, enseignement +0,06, plafonnés à 0,35 : regarder mène d'observer à imiter,
+  jamais au-delà — il faut ensuite réussir.
+- Bandes observe / imitate / propose / act avec hystérésis (0,03).
+- Gradué, pas en paliers : pas d'initiative sous « propose », puis une initiative toutes les 90 s à 0,5
+  jusqu'à 20 s à 1 ; délai maximal des actions × (0,5 + 0,5·score) (sauf suivi).
+- Propositions : annonce « je peux … ? » ; oui → approbation (arbre + autonomie) et action ;
+  non → renoncement et recul ; silence au bout de 20 s → accord tacite, sans bonus.
+
+**Testé** — 149 tests verts : montée/baisse, domaines indépendants (« act » en construction,
+« observe » en combat), plafond d'observation, hystérésis, cadence graduée, persistance,
+proposition acceptée/refusée dans la boucle, aucune décision LLM en bande « observe ».
+Essai réel : un mur du joueur → construction à 0,02 « observe » → le bot suit, 0 appel LLM.
+
+**Appris**
+- Le facteur de délai faisait expirer le suivi (durée fixe) : exclu pour `follow` et `say`.
+- Gain d'observation initial trop lent (~24 épisodes pour imiter) → 0,02 (~14 épisodes, ~5 enseignés).
+
+**Incertain**
+- Les réponses oui/non aux propositions arrivent avec les retours du joueur (phase 7) ; d'ici là,
+  seul l'accord tacite est possible en jeu réel.
