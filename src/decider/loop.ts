@@ -156,7 +156,8 @@ export class DecisionLoop {
       action = toAction(this.deps.skillContext, 'follow', { seconds: 5 });
     }
     // le suivi dure par construction : son délai ne se réduit pas (il expirerait avant la fin)
-    if (record && this.deps.autonomy && action.name !== 'follow' && action.name !== 'say') {
+    // un ordre du joueur garde son délai plein : la prudence graduée ne vaut que pour les initiatives
+    if (record && !order && this.deps.autonomy && action.name !== 'follow' && action.name !== 'say') {
       // prudence graduée : moins de confiance, délai plus court
       action = { ...action, timeoutMs: Math.max(10_000, Math.round(action.timeoutMs * graded.timeoutFactor(this.deps.autonomy.get(action.domain).score))) };
     }

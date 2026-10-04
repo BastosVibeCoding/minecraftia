@@ -64,31 +64,51 @@ describe('bibliothèque de compétences', () => {
   });
 });
 
-describe('récolte interrompue par le pathfinder (cas réel)', () => {
-  function fakeBot(gainOnCollect: number) {
+describe("récolte bloc par bloc (cas réel : 3 bûches rapportées sur 30 demandées)", () => {
+  /** Chaque appel à collectblock rapporte `gains[i]` puis abandonne le trajet, comme en jeu. */
+  function fakeBot(gains: number[], trees = 40) {
     let logs = 2;
-    return {
+    let call = 0;
+    const targets: string[] = [];
+    const cut = new Set<number>();
+    const bot = {
       registry: { blocksByName: { oak_log: { id: 7 } } },
-      findBlocks: () => [{ x: 1, y: 64, z: 1 }],
-      blockAt: (p: unknown) => ({ position: p }),
+      findBlocks: () => Array.from({ length: trees }, (_, i) => ({ x: i, y: 64, z: 0 })).filter((p) => !cut.has(p.x)),
+      blockAt: (p: { x: number }) => ({ name: 'oak_log', position: p }),
       inventory: { items: () => [{ name: 'oak_log', count: logs }] },
       collectBlock: {
-        collect: async () => {
-          logs += gainOnCollect;
+        collect: async (t: { position: { x: number } }) => {
+          targets.push(String(t.position.x));
+          const g = gains[call++] ?? 0;
+          logs += g;
+          if (g > 0) cut.add(t.position.x); // bloc coupé : il disparaît du monde
           throw new Error('Took to long to decide path to goal!');
         },
         cancelTask: async () => {},
       },
     } as unknown as Bot;
+    return { bot, targets };
   }
-  const run = (bot: Bot) => SKILLS.collect!.run({ bot, followPlayer: 'B' }, { blocks: ['oak_log'], count: 8 }, new AbortController().signal);
+  const run = (bot: Bot, count = 8) => SKILLS.collect!.run({ bot, followPlayer: 'B' }, { blocks: ['oak_log'], count }, new AbortController().signal);
 
-  it("ce qui est arrivé dans l'inventaire compte, même si le trajet a été abandonné", async () => {
-    expect(await run(fakeBot(6))).toMatchObject({ status: 'success', detail: { gained: 6, partial: 'Took to long to decide path to goal!' } });
+  it("continue après un trajet abandonné jusqu'au nombre demandé", async () => {
+    const { bot } = fakeBot(Array(30).fill(1));
+    expect(await run(bot, 30)).toMatchObject({ status: 'success', detail: { gained: 30, requested: 30 } });
+  });
+
+  it("un bloc inaccessible est sauté, pas retenté en boucle", async () => {
+    const { bot, targets } = fakeBot([0, 1, 1]);
+    await run(bot, 2);
+    expect(targets).toEqual(['0', '1', '2']);
+  });
+
+  it("4 échecs d'affilée : arrêt, avec ce qui a été récolté et la vraie raison", async () => {
+    const { bot } = fakeBot([3, 0, 0, 0, 0, 5]);
+    expect(await run(bot, 30)).toMatchObject({ status: 'success', detail: { gained: 3, requested: 30, partial: 'Took to long to decide path to goal!' } });
   });
 
   it("sans rien récolté, c'est un échec avec la vraie raison", async () => {
-    expect(await run(fakeBot(0))).toMatchObject({ status: 'failure', detail: { reason: 'Took to long to decide path to goal!' } });
+    expect(await run(fakeBot([]).bot)).toMatchObject({ status: 'failure', detail: { reason: 'Took to long to decide path to goal!' } });
   });
 });
 

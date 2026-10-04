@@ -90,38 +90,67 @@ const follow: Skill<z.ZodObject<{ distance: z.ZodDefault<z.ZodNumber>; seconds: 
   },
 };
 
+/** Rayon de recherche des blocs à récolter, et essais ratés d'affilée avant d'abandonner. */
+const COLLECT_RADIUS = 48;
+const MAX_COLLECT_MISSES = 4;
+
 const collect = {
   name: 'collect',
   domain: 'gather' as Domain,
   description: 'collect {blocks: string[] (noms Minecraft, ex. ["oak_log"]), count: 1-32} — récolter ou miner des blocs proches',
   params: z.object({ blocks: z.array(z.string().min(1)).min(1).max(5), count: z.number().int().min(1).max(32).default(8) }),
-  timeoutMs: (p: { count: number }) => Math.min(180_000, 15_000 * p.count + 10_000),
+  timeoutMs: (p: { count: number }) => Math.min(300_000, 10_000 * p.count + 20_000),
   async run(ctx: SkillContext, p: { blocks: string[]; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
     const ids = p.blocks.map((b) => bot.registry.blocksByName[b]?.id).filter((id): id is number => id !== undefined);
     if (ids.length === 0) return fail('blocs inconnus', { blocks: p.blocks });
-    const positions = bot.findBlocks({ matching: ids, maxDistance: 32, count: p.count });
-    if (positions.length === 0) return fail('aucun bloc à portée', { blocks: p.blocks });
-    // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
-    const targets = positions
-      .map((pos) => bot.blockAt(pos))
-      .filter((b): b is NonNullable<typeof b> => b !== null && !ctx.isProtected?.(b));
-    if (targets.length === 0) return fail('seulement des blocs posés par un joueur à portée', { blocks: p.blocks });
-    for (const t of targets) ctx.touch?.(t.position);
-    const before = p.blocks.reduce((s, b) => s + countItem(bot, b), 0);
-    // collectblock abandonne parfois en route (« Took to long to decide path to goal ») après avoir déjà
-    // récolté : ce qui compte, c'est ce qui est arrivé dans l'inventaire
-    let interruption: string | undefined;
+    const have = () => p.blocks.reduce((s, b) => s + countItem(bot, b), 0);
+    const before = have();
+    const gained = () => have() - before;
+    // un bloc à la fois, le plus proche d'abord : collectblock abandonne toute sa liste dès qu'un trajet
+    // tarde (« Took to long to decide path to goal »), ce qui ramenait 2 ou 3 bûches sur 30 demandées
+    const skipped = new Set<string>();
+    let misses = 0;
+    let lastError: string | undefined;
+    let seen = false;
+    let onlyPlaced = true;
     try {
-      await cancellable(bot.collectBlock.collect(targets, { ignoreNoPath: true }), signal, () => void bot.collectBlock.cancelTask());
-    } catch (err) {
-      interruption = err instanceof Error ? err.message : String(err);
+      while (!signal.aborted && gained() < p.count && misses < MAX_COLLECT_MISSES) {
+        const candidates = bot.findBlocks({ matching: ids, maxDistance: COLLECT_RADIUS, count: 32 }).map((pos) => bot.blockAt(pos));
+        let target: NonNullable<(typeof candidates)[number]> | undefined;
+        for (const b of candidates) {
+          if (!b) continue;
+          seen = true;
+          // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
+          if (ctx.isProtected?.(b)) continue;
+          onlyPlaced = false;
+          if (!skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) {
+            target = b;
+            break;
+          }
+        }
+        if (!target) break;
+        ctx.touch?.(target.position);
+        const g0 = gained();
+        try {
+          await cancellable(bot.collectBlock.collect(target, { ignoreNoPath: true }), signal, () => void bot.collectBlock.cancelTask());
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+        }
+        if (gained() > g0) misses = 0;
+        else {
+          misses++;
+          skipped.add(`${target.position.x},${target.position.y},${target.position.z}`);
+        }
+      }
     } finally {
       ctx.restoreMovements?.();
     }
-    const gained = p.blocks.reduce((s, b) => s + countItem(bot, b), 0) - before;
-    if (gained > 0) return { status: 'success', detail: { gained, ...(interruption ? { partial: interruption } : {}) } };
-    return fail(interruption ?? 'rien récolté');
+    const total = gained();
+    if (total > 0) return { status: 'success', detail: { gained: total, requested: p.count, ...(total < p.count && lastError ? { partial: lastError } : {}) } };
+    if (!seen) return fail('aucun bloc à portée', { blocks: p.blocks });
+    if (onlyPlaced) return fail('seulement des blocs posés par un joueur à portée', { blocks: p.blocks });
+    return fail(lastError ?? 'rien récolté');
   },
 };
 

@@ -253,6 +253,8 @@ export class Companion {
       const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.placed.isProtected(b);
       bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
       installDoorOpener(bot, () => this.clock.now());
+      // 5 s par défaut : trop court autour des arbres et des constructions protégées
+      bot.pathfinder.thinkTimeout = 10_000;
       // collectblock impose ses réglages (creuser partout) : on lui donne les nôtres, protégés
       bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
     } catch (err) {

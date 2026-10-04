@@ -34,18 +34,18 @@ describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pou
   it('la récolte ignore les bûches posées et remet les réglages de déplacement', async () => {
     const placed = new PlacedBlocks(openDatabase(':memory:').db, new ManualClock(0));
     placed.placed({ x: 1, y: 64, z: 1 }, 'oak_log', 'Bilboquet86');
-    let collected: unknown[] = [];
+    const collected: unknown[] = [];
     let restored = 0;
     const bot = {
       registry: { blocksByName: { oak_log: { id: 7 } } },
       findBlocks: () => [{ x: 1, y: 64, z: 1 }, { x: 5, y: 64, z: 5 }],
       blockAt: (p: { x: number; y: number; z: number }) => ({ name: 'oak_log', position: p }),
       inventory: { items: () => [] },
-      collectBlock: { collect: async (t: unknown[]) => void (collected = t), cancelTask: async () => {} },
+      collectBlock: { collect: async (t: unknown) => void collected.push(t), cancelTask: async () => {} },
     } as unknown as Bot;
     const ctx = { bot, followPlayer: 'B', isProtected: (b: { name: string; position: { x: number; y: number; z: number } }) => placed.isProtected(b), restoreMovements: () => void restored++ };
     await SKILLS.collect!.run(ctx, { blocks: ['oak_log'], count: 2 }, new AbortController().signal);
-    expect((collected as { position: { x: number } }[]).map((b) => b.position.x)).toEqual([5]);
+    expect(new Set((collected as { position: { x: number } }[]).map((b) => b.position.x))).toEqual(new Set([5]));
     expect(restored).toBe(1);
   });
 
