@@ -33,6 +33,9 @@ export interface Skill<P extends z.ZodType = z.ZodType> {
   run(ctx: SkillContext, params: z.infer<P>, signal: AbortSignal): Promise<ActionRunOutput>;
 }
 
+const LOW_HEALTH = 8;
+const LOW_HEALTH_SAFE_RADIUS = 8;
+
 const fail = (reason: string, extra: Record<string, unknown> = {}): ActionRunOutput => ({ status: 'failure', detail: { reason, ...extra } });
 
 /** Exécute une promesse mineflayer en la rattachant au signal : annulation → `onAbort` et fin immédiate. */
@@ -69,6 +72,12 @@ const follow: Skill<z.ZodObject<{ distance: z.ZodDefault<z.ZodNumber>; seconds: 
   async run({ bot, followPlayer }, p, signal) {
     const target = playerEntity(bot, followPlayer);
     if (!target) return fail('joueur hors de vue');
+    // vie basse et monstre près du joueur : ne pas revenir dans la menace que les réflexes viennent de fuir
+    const threatened = Object.values(bot.entities).some((e) => e !== bot.entity && e.position && isHostile(e) && e.position.distanceTo(target.position) < LOW_HEALTH_SAFE_RADIUS);
+    if (bot.health <= LOW_HEALTH && threatened) {
+      await abortableSleep(Math.min(5000, p.seconds * 1000), signal);
+      return fail('vie basse, je garde mes distances avec la menace', { precondition: true });
+    }
     bot.pathfinder.setGoal(new goals.GoalFollow(target, p.distance), true);
     await abortableSleep(p.seconds * 1000, signal);
     if (!signal.aborted) bot.pathfinder.setGoal(null);

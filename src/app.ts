@@ -4,6 +4,7 @@ import { BotConnection, type CreateBot } from './bot/connection.js';
 import { EasyLlmTelemetry } from './bot/easyLlm.js';
 import { EasyLlmMapper } from './bot/easyLlmMapping.js';
 import { MineflayerEventSource } from './bot/mineflayerEvents.js';
+import { installSafeChat } from './bot/chat.js';
 import { Observer } from './observer/observer.js';
 import type { Episode, RawEvent } from './observer/types.js';
 import type { PlayClock } from './tree/playClock.js';
@@ -11,6 +12,8 @@ import type { Autonomy } from './autonomy/autonomy.js';
 import type { ProposalBroker } from './autonomy/proposals.js';
 import type { UtteranceClassifier } from './feedback/classifier.js';
 import { FeedbackHandler } from './feedback/feedback.js';
+import { chatLines, runCommand } from './commands/commands.js';
+import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
 import { VoiceLink } from './voice/voiceLink.js';
@@ -59,6 +62,7 @@ export interface CompanionDeps {
   autonomy: Autonomy;
   proposals: ProposalBroker;
   classifier: UtteranceClassifier;
+  budget: Budget;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -180,8 +184,23 @@ export class Companion {
 
   /** Énoncé du joueur suivi (chat ou voix transcrite). Les commandes `!…` sont traitées à part. */
   hear(player: string, text: string, channel: 'chat' | 'voice'): void {
-    if (player !== this.config.followPlayer || text.trim().startsWith('!')) return;
+    if (player !== this.config.followPlayer) return;
+    if (text.trim().startsWith('!')) {
+      void this.command(text);
+      return;
+    }
     void this.feedback.handle(player, text, channel).catch((err: unknown) => this.logger.error({ err }, "traitement d'un retour en erreur"));
+  }
+
+  /** Commandes d'inspection (`!arbre`, `!autonomie`, `!pourquoi`, `!oublie`, `!budget`, `!aide`). */
+  async command(text: string): Promise<void> {
+    try {
+      const { tree, autonomy, decider, budget, cache } = this.deps;
+      const answer = await runCommand(text, { tree, autonomy, decider, budget, cache });
+      if (answer) for (const line of chatLines(answer)) this.session?.bot.chat(line);
+    } catch (err) {
+      this.logger.error({ err, text }, 'commande en erreur');
+    }
   }
 
   /** Le bot va modifier ce bloc : on s'en souvient quelques secondes pour ne pas apprendre de soi-même. */
@@ -213,6 +232,7 @@ export class Companion {
 
   private onReady(bot: Bot): void {
     this.endSession();
+    installSafeChat(bot);
     try {
       if (!bot.pathfinder) bot.loadPlugin(pathfinder);
       if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);

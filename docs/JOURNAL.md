@@ -236,3 +236,37 @@ Essai réel : un mur du joueur → construction à 0,02 « observe » → le bot
   l'amont doit être confirmé par Bastien en parlant en jeu (procédure dans le README).
 - **Voix sortante audible non vérifiée** pour la même raison (pas d'oreille équipée de SVC) ;
   le mod accepte la connexion et les trames sans erreur.
+
+## 2026-10-04 — Phase 8 : durcissement
+
+**Fait**
+- Commandes en jeu : `!arbre` (spécialité émergente, situations, façons de faire retenues ou
+  corrigées), `!autonomie`, `!pourquoi` (rechargé depuis la base après un redémarrage), `!oublie <chose>`
+  (oubli en cascade des façons de faire d'une situation oubliée), `!budget`, `!aide`.
+- Simulation d'une heure (`npm run sim:hour`, `src/sim/hour.ts`) à travers les vrais modules, et test
+  automatisé du budget.
+- Cache plus efficace : les nombres des résumés d'épisodes sont neutralisés dans la signature.
+- Sécurité : tout message sortant est neutralisé (jamais de « / » en tête → pas de commande serveur
+  exécutée avec les droits du bot), trouvé par la revue de code (`/code-review`).
+- Suivi : à vie basse, le bot ne revient plus vers un joueur menacé (fin de l'oscillation fuite/retour
+  notée en phase 3).
+- README complet (installation, lancement, configuration, commandes, architecture, coûts, voix).
+
+**Testé** — 191 tests Node + 6 Python verts. Heure simulée : bâtisseur 0,15 $, combattant 0,23 $,
+mixte 0,21 $ (avant normalisation du cache : jusqu'à 0,33 $), pour un budget quotidien de 1 $.
+En réel : les six commandes répondent dans le chat ; dépense réelle du jour 15 appels pour 0,04 $ ;
+bot à 4 PV près d'un zombie : une seule fuite, plus d'oscillation pendant 35 s.
+
+**Appris**
+- `!oublie` laissait actives les façons de faire de la situation oubliée (elles comptaient encore dans
+  le profil) → oubli en cascade.
+- Revue de code : une réponse de commande coupée au bon endroit, ou une phrase du LLM, pouvait commencer
+  par « / » et devenir une commande serveur → neutralisation centrale de `bot.chat`.
+
+**Incertain**
+- Voix entrante et voix sortante en jeu à confirmer avec un vrai client Simple Voice Chat (procédure
+  dans le README).
+- Compétences `collect`, `attack`, `craft`, `explore` validées par schéma et par la boucle, mais
+  seule `build` a été exercée en jeu réel par le décideur.
+- Joueur suivi en production : réglé sur « Testeur » (joueur scripté) ; à remplacer par le pseudo de
+  Bastien dans `/opt/minecraftia/.env` (`FOLLOW_PLAYER`).

@@ -102,8 +102,12 @@ bot.once('spawn', async () => {
       await sleep(Number(scenario.slice(5)) * 1000); // reste en jeu (essais de voix)
     }
     if (scenario.startsWith('say:')) {
-      bot.chat(scenario.slice(4));
-      log(`a dit : ${scenario.slice(4)}`);
+      // plusieurs messages séparés par « | »
+      for (const msg of scenario.slice(4).split('|')) {
+        bot.chat(msg.trim());
+        log(`a dit : ${msg.trim()}`);
+        await sleep(2500);
+      }
     }
   } catch (err) {
     log(`échec : ${(err as Error).message}`);
@@ -111,6 +115,9 @@ bot.once('spawn', async () => {
   await sleep(12000);
   bot.quit();
   process.exit(0);
+});
+bot.on('chat', (username, message) => {
+  if (username !== bot.username) log(`<${username}> ${message}`);
 });
 bot.on('kicked', (r) => log(`expulsé : ${JSON.stringify(r)}`));
 bot.on('error', (e) => log(`erreur : ${e.message}`));

@@ -8,6 +8,7 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
 - `npm test` — vitest (aucun appel réseau ni LLM réel dans les tests)
 - `npm run dev` — lance le bot (lit `.env`)
 - `python -m graphify update .` — régénère le graphe du code dans `graphify-out/`
+- `npm run test:voice` — tests Python du service vocal ; `npm run sim:hour` — heure simulée et coût
 - `/fin-de-phase` — checklist de clôture d'une phase ; `/rcon <cmd>` — commande serveur
 
 ## Règles du projet
@@ -20,6 +21,8 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
 - Horloge injectable (`Clock`) : jamais `Date.now()` dans une logique testée.
 - Pas de fonction factice, pas de TODO, pas de test désactivé.
 - Code et commentaires en français, comme le reste du dépôt.
+- Tout texte envoyé au chat passe par `installSafeChat` (jamais de « / » en tête).
+- Règles d'autonomie et liste « à éviter » appliquées par le code (`Decider.enforce`), pas seulement demandées au LLM.
 
 ## Pièges connus
 - Deux copies de `vec3` dans `node_modules` : utiliser le type `Bot['entity']['position']`, construire
@@ -32,6 +35,10 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
 - Easy LLM : `block_update` n'a pas de joueur (pose attribuée par coup de bras + portée) ; `block_break`
   et `craft_item` sont attribués ; aucun événement d'attaque. Fixture réelle : `test/fixtures/easyllm-capture.jsonl`.
 - mineflayer : la blessure d'un mob (`entityHurt`) arrive souvent AVANT le coup de bras (`entitySwingArm`).
+- Heredocs bash + Python sous Windows : les apostrophes et contre-obliques se perdent ; écrire les
+  fichiers TypeScript avec l'outil Write/Edit, et des titres de test entre guillemets doubles.
+- Easy LLM Voice : `heard_audio_batch` vient des paquets de micro d'un client Simple Voice Chat ;
+  une voix injectée par un point d'accès n'est pas « entendue ».
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 

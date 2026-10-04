@@ -239,17 +239,15 @@ export class BehaviorTree {
   }
 
   /** Vue d'ensemble pour `!arbre` : situations les plus lourdes et leur meilleur mécanisme. */
-  overview(limit = 5): { domain: Domain; situation: string; weight: number; best: string | null }[] {
+  overview(limit = 5): { domain: Domain; situation: string; weight: number; best: string | null; corrected: string | null }[] {
     const at = this.playTime();
     return this.store
       .listNodes({ level: 'situation', status: 'active' })
       .map((s) => {
-        const best = this.store
-          .listNodes({ parentId: s.id, level: 'mechanism', status: 'active' })
-          .map((m) => ({ m, w: this.effectiveWeight(m, at) }))
-          .filter((x) => x.w > 0)
-          .sort((a, b) => b.w - a.w)[0];
-        return { domain: s.domain, situation: s.label, weight: round(this.effectiveWeight(s, at)), best: best?.m.label ?? null };
+        const mechs = this.store.listNodes({ parentId: s.id, level: 'mechanism', status: 'active' }).map((m) => ({ m, w: this.effectiveWeight(m, at) }));
+        const best = mechs.filter((x) => x.w > 0).sort((a, b) => b.w - a.w)[0];
+        const corrected = mechs.filter((x) => x.w < 0).sort((a, b) => a.w - b.w)[0];
+        return { domain: s.domain, situation: s.label, weight: round(this.effectiveWeight(s, at)), best: best?.m.label ?? null, corrected: corrected?.m.label ?? null };
       })
       .filter((x) => x.weight > 0)
       .sort((a, b) => b.weight - a.weight)
@@ -271,7 +269,10 @@ export class BehaviorTree {
     const mechanisms = this.store
       .listNodes({ level: 'mechanism', status: 'active' })
       .filter((m) => words.length > 0 && words.every((w) => m.label.toLowerCase().includes(w)));
-    const forgotten = [...situations, ...mechanisms];
+    // oublier une situation, c'est aussi oublier les façons de faire qui en dépendent
+    const children = situations.flatMap((s) => this.store.listNodes({ parentId: s.id, level: 'mechanism', status: 'active' }));
+    const byId = new Map([...situations, ...mechanisms, ...children].map((n) => [n.id, n]));
+    const forgotten = [...byId.values()];
     this.store.db.transaction(() => {
       for (const n of forgotten) {
         this.store.updateNode(n.id, { status: 'forgotten' });

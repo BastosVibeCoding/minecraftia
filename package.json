@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "migrate": "tsx scripts/migrate-json.ts",
-    "test:voice": "cd voice && python -m pytest -q tests"
+    "test:voice": "cd voice && python -m pytest -q tests",
+    "sim:hour": "tsx scripts/sim-hour.ts"
   },
   "repository": {
     "type": "git",

@@ -67,7 +67,8 @@ export function situationHash(w: WorldState, branchIds: number[], bands: Record<
     food: level(w.bot.food),
     threats: [...new Set(w.threats.map((t) => t.name))].sort(),
     activity: [...w.player.activity].sort(),
-    recent: w.player.recent[0] ?? null,
+    // les nombres (dimensions, compteurs, distances) varient d'un épisode à l'autre sans changer la situation
+    recent: w.player.recent[0]?.replace(/\d+(?:[.,]\d+)?/g, '#') ?? null,
     time: w.time,
     inv: Object.keys(topInventory(w.bot.inventory, 8)).sort(),
     branches: [...branchIds].sort((a, b) => a - b),

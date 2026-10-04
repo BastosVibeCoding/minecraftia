@@ -24,10 +24,11 @@ async function companion() {
   const tree = new BehaviorTree(store, { playTime: () => 0 });
   const cache = new DecisionCache(store.db, clock);
   const router = new ModelRouter('fast', 'strong');
+  const budget = new Budget(store.db, clock, 1);
   const decider = new Decider({
     tree,
     llm: null,
-    budget: new Budget(store.db, clock, 1),
+    budget,
     cache,
     router,
     strategy: new MirrorStrategy(),
@@ -36,7 +37,7 @@ async function companion() {
     logger: silentLogger,
   });
   const config = loadConfig({ FOLLOW_PLAYER: 'Bastien' });
-  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router, autonomy: new Autonomy(store), proposals: new ProposalBroker(clock), classifier: new UtteranceClassifier(null, null, 'fast') });
+  const c = new Companion(config, silentLogger, clock, () => ({}) as Bot, { tree, playClock: new PlayClock(store.db, clock), decider, cache, router, autonomy: new Autonomy(store), proposals: new ProposalBroker(clock), classifier: new UtteranceClassifier(null, null, 'fast'), budget });
   return { c, clock };
 }
 
