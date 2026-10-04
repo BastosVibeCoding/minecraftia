@@ -73,8 +73,13 @@ export function companionMovements(bot: Bot, opts: MovementOptions = {}): Instan
 }
 
 type Pos = { x: number; y: number; z: number };
+interface BotVec extends Pos {
+  distanceTo(p: Pos): number;
+  floored(): BotVec;
+  offset(dx: number, dy: number, dz: number): BotVec;
+}
 interface DoorBot {
-  entity: { position: Pos & { distanceTo(p: Pos): number } };
+  entity: { position: BotVec };
   blockAt(p: Pos): ({ name: string; position: Pos; getProperties?: () => Record<string, unknown> } & object) | null;
   activateBlock(b: object): Promise<void>;
   pathfinder: { isMoving(): boolean };
@@ -94,16 +99,22 @@ export class DoorOpener {
 
   constructor(private readonly bot: DoorBot) {}
 
+  /** `blockAt` de mineflayer exige un vrai vecteur : on le construit depuis la position du bot. */
+  private at(p: Pos) {
+    const o = this.bot.entity.position.floored();
+    return this.bot.blockAt(o.offset(p.x - o.x, p.y - o.y, p.z - o.z));
+  }
+
   step(path: Pos[], now: number): Pos | null {
     if (!this.bot.pathfinder.isMoving()) return null;
     const me = this.bot.entity.position;
     for (const node of path.slice(0, 3)) {
       for (const dy of [0, 1]) {
-        const b = this.bot.blockAt({ x: node.x, y: node.y + dy, z: node.z });
+        const b = this.at({ x: node.x, y: node.y + dy, z: node.z });
         if (!b || !isPassage(b.name) || isOpen(b)) continue;
         if (me.distanceTo({ x: b.position.x + 0.5, y: b.position.y + 0.5, z: b.position.z + 0.5 }) > OPEN_REACH) continue;
         // une porte ouverte par sa moitié haute s'ouvre entière : on vise la moitié basse
-        const target = isHandDoor(b.name) && b.getProperties?.().half === 'upper' ? this.bot.blockAt({ x: b.position.x, y: b.position.y - 1, z: b.position.z }) ?? b : b;
+        const target = isHandDoor(b.name) && b.getProperties?.().half === 'upper' ? this.at({ x: b.position.x, y: b.position.y - 1, z: b.position.z }) ?? b : b;
         const key = `${target.position.x},${target.position.y},${target.position.z}`;
         if (now - (this.tried.get(key) ?? -Infinity) < RETRY_MS) return null;
         this.tried.set(key, now);
@@ -130,6 +141,11 @@ export function installDoorOpener(bot: Bot, now: () => number): void {
     path = [];
   });
   bot.on('physicsTick', () => {
-    if (++tick % 4 === 0 && path.length > 0) opener.step(path, now());
+    if (++tick % 4 !== 0 || path.length === 0) return;
+    try {
+      opener.step(path, now());
+    } catch {
+      // bloc illisible (chunk en cours de chargement) : on réessaiera au prochain passage
+    }
   });
 }

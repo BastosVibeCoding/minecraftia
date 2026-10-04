@@ -36,12 +36,22 @@ describe('passage des portes (cas réel : le bot ouvrait la porte puis restait b
 describe('ouvreur de portes', () => {
   function world(doors: Record<string, { name: string; props: Record<string, unknown> }>, moving = true, at = { x: 0, y: 64, z: 0 }) {
     const activated: string[] = [];
-    const pos = { ...at, distanceTo: (p: { x: number; y: number; z: number }) => Math.hypot(p.x - at.x, p.y - at.y, p.z - at.z) };
+    // vrai vecteur minimal : mineflayer refuse un objet { x, y, z } dans blockAt (cas réel)
+    type V = { x: number; y: number; z: number; floored(): V; offset(a: number, b: number, c: number): V; distanceTo(p: { x: number; y: number; z: number }): number };
+    const vec = (x: number, y: number, z: number): V => ({
+      x, y, z,
+      floored: () => vec(Math.floor(x), Math.floor(y), Math.floor(z)),
+      offset: (a, b, c) => vec(x + a, y + b, z + c),
+      distanceTo: (p) => Math.hypot(p.x - x, p.y - y, p.z - z),
+    });
+    const pos = vec(at.x, at.y, at.z);
     const bot = {
       entity: { position: pos },
-      blockAt: (p: { x: number; y: number; z: number }) => {
+      blockAt: (p: V) => {
+        if (typeof p.floored !== 'function') throw new TypeError('pos.floored is not a function');
         const d = doors[`${p.x},${p.y},${p.z}`];
-        return d ? { name: d.name, position: p, getProperties: () => d.props } : { name: 'air', position: p };
+        const q = { x: p.x, y: p.y, z: p.z };
+        return d ? { name: d.name, position: q, getProperties: () => d.props } : { name: 'air', position: q };
       },
       activateBlock: async (b: { position: { x: number; y: number; z: number } }) => void activated.push(`${b.position.x},${b.position.y},${b.position.z}`),
       pathfinder: { isMoving: () => moving },
