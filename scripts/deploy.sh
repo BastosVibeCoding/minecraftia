@@ -19,4 +19,4 @@ for f in deploy/mc-config/*.json; do
 done
 
 echo "→ construction et relance"
-"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build ${*:-voice minecraftia} 2>&1 | tail -5"
+"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build ${*:-voice minecraftia lea} 2>&1 | tail -5"

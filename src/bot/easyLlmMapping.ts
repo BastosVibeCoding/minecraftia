@@ -70,6 +70,8 @@ export class EasyLlmMapper {
   private baseMs = 0;
   /** Messages dont le type n'est pas traduit, par type (pour repérer une évolution du protocole). */
   readonly ignored = new Map<string, number>();
+  /** Poses ignorées faute de pouvoir dire qui les a faites (plusieurs joueurs à portée). */
+  ambiguous = 0;
 
   constructor(private readonly now: () => number) {}
 
@@ -198,12 +200,18 @@ export class EasyLlmMapper {
     const newName = blockName(data.new);
     // les casses arrivent déjà attribuées par block_break ; ici on ne garde que les poses
     if (REPLACEABLE.has(newName) || !REPLACEABLE.has(oldName)) return [];
-    let best: { name: string; d: number } | null = null;
+    const candidates: { name: string; d: number }[] = [];
     for (const [name, tr] of this.players) {
       if (!tr.pos || tick - tr.lastSwingTick > SWING_WINDOW_TICKS || tick < tr.lastSwingTick) continue;
       const d = distance(tr.pos, pos);
-      if (d <= REACH && (!best || d < best.d)) best = { name, d };
+      if (d <= REACH) candidates.push({ name, d });
     }
-    return best ? [{ t, type: 'block_placed', player: best.name, pos, block: newName }] : [];
+    // plusieurs joueurs (bots compris) viennent de frapper à portée : impossible de savoir qui a posé,
+    // on ignore plutôt que d'attribuer à tort (un bot apprendrait des blocs d'un autre bot)
+    if (candidates.length !== 1) {
+      if (candidates.length > 1) this.ambiguous++;
+      return [];
+    }
+    return [{ t, type: 'block_placed', player: candidates[0]!.name, pos, block: newName }];
   }
 }

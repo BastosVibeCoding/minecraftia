@@ -65,6 +65,19 @@ describe('traduction Easy LLM (capture réelle)', () => {
     expect(out).toEqual([]);
   });
 
+  it("deux joueurs frappent à portée du même bloc : pose ignorée plutôt qu'attribuée à tort", () => {
+    const mapper = new EasyLlmMapper(() => 0);
+    mapper.map({ type: 'players_tick', tick: 1, data: { players: {
+      a: { name: 'Bilboquet86', visible: { position: [0, 64, 0], equipment: {} }, hidden: {} },
+      b: { name: 'Lea', visible: { position: [2, 64, 0], equipment: {} }, hidden: {} },
+    } } });
+    mapper.map({ type: 'swing_hand', tick: 98, data: { playerName: 'Bilboquet86' } });
+    mapper.map({ type: 'swing_hand', tick: 99, data: { playerName: 'Lea' } });
+    const out = mapper.map({ type: 'block_update', tick: 100, data: { pos: [1, 64, 1], old: { blockName: 'air' }, new: { blockName: 'stone' } } });
+    expect(out).toEqual([]);
+    expect(mapper.ambiguous).toBe(1);
+  });
+
   it('compte les types inconnus sans planter', () => {
     const mapper = new EasyLlmMapper(() => 0);
     expect(mapper.map({ type: 'nouveau_type', data: {} })).toEqual([]);

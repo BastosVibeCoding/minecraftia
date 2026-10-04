@@ -40,11 +40,24 @@ services:
       MC_HOST: "minecraft"
       MC_PORT: "25565"
       DATA_DIR: "/app/data"
-      OLLAMA_URL: "http://host.docker.internal:11434/v1"   # Ollama tourne sur l'hôte (dernier secours)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - /opt/minecraftia/data:/app/data
+    depends_on:
+      - minecraft
+      - voice
+    restart: unless-stopped
+
+  # deuxième compagne : même image, mémoire et réglages séparés (/opt/minecraftia-lea), suit un autre joueur
+  lea:
+    build: /opt/minecraftia/app
+    container_name: lea
+    env_file: /opt/minecraftia-lea/.env
+    environment:
+      MC_HOST: "minecraft"
+      MC_PORT: "25565"
+      DATA_DIR: "/app/data"
+    volumes:
+      - /opt/minecraftia-lea/data:/app/data
     depends_on:
       - minecraft
       - voice
