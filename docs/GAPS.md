@@ -11,10 +11,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments. Dernier déploiement : `749bbeb`.
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `b2ec736` (2026-10-04, sur `!deploy`).
 
-1. Ordres de rappel sans modèle (« arrête-toi », « viens ici »)
-2. Ouverture des portes en bois
-3. Eau évitée (coût 4)
-4. Compétence `give`
-5. Variantes de rappel (« arrête du », « reviens à la surface »)
+(aucun)
