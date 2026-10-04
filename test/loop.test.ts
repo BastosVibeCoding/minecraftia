@@ -5,7 +5,7 @@ import { DOMAINS } from '../src/core/types.js';
 import { Budget } from '../src/decider/budget.js';
 import { DecisionCache } from '../src/decider/cache.js';
 import { Decider } from '../src/decider/decider.js';
-import { DecisionLoop } from '../src/decider/loop.js';
+import { DecisionLoop, isRecallOrder } from '../src/decider/loop.js';
 import { ModelRouter } from '../src/decider/router.js';
 import type { Episode } from '../src/observer/types.js';
 import { RationalStubLlm } from '../src/sim/stubLlm.js';
@@ -97,5 +97,24 @@ describe('boucle de décision', () => {
     loop.request('correction', true); // forcée
     await flush();
     expect(stub.calls.length).toBe(n + 1);
+  });
+});
+
+describe("ordres de rappel (manques réels de Léa)", () => {
+  it("reconnaît « arrête-toi » et « viens ici », pas les vrais ordres d'action", () => {
+    expect(isRecallOrder("Ok arrête toi, c'est moitié fait.")).toBe(true);
+    expect(isRecallOrder("Viens, arrête de creuser, essuie-moi.")).toBe(true);
+    expect(isRecallOrder("Viens, arrête-toi et viens ici.")).toBe(true);
+    expect(isRecallOrder("Léa arrête et suis-moi.")).toBe(true);
+    expect(isRecallOrder("tu peux venir ici ?")).toBe(true);
+    expect(isRecallOrder("viens m'aider à couper du bois")).toBe(false);
+    expect(isRecallOrder("construis un mur")).toBe(false);
+  });
+
+  it("exécute le suivi sans appeler le modèle", async () => {
+    const { stub, loop } = await setup();
+    loop.order("Viens, arrête-toi et viens ici.");
+    await flush();
+    expect(stub.calls.length).toBe(0);
   });
 });

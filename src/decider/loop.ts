@@ -35,6 +35,24 @@ export interface LoopDeps {
   gaps?: GapRecorder;
 }
 
+const normOrder = (t: string) =>
+  t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const RECALL = /\b(arrete|stop|stoppe|halte|attends|viens|reviens|rejoins moi|suis moi|ici)\b/;
+/** Verbes d'action : « viens m'aider à couper du bois » n'est pas un simple rappel. */
+const ACTION = /\b(construi\w*|bati\w*|pose\w*|min\w*|creus\w*|coup\w*|recolt\w*|ramass\w*|attaqu\w*|tue\w*|fabriqu\w*|craft\w*|mang\w*|explor\w*|donn\w*|equip\w*|apport\w*|ramen\w*|aid\w*|cherch\w*|plant\w*|cuis\w*|rang\w*|dor\w*)\b/;
+
+/**
+ * Ordre de rappel (« arrête-toi », « viens ici », « arrête de creuser, suis-moi ») : le code
+ * l'exécute directement (arrêt puis suivi), sans appel au modèle. « arrête de <verbe> » ne compte
+ * pas comme une demande d'action.
+ */
+export function isRecallOrder(text: string): boolean {
+  const t = normOrder(text);
+  if (!RECALL.test(t)) return false;
+  return !ACTION.test(t.replace(/\b(arrete|stop|stoppe) (de |d')?\w+/g, ' '));
+}
+
 /**
  * Boucle Décideur → Compétences → Monde → Résultat → Arbre.
  * Déclenchée par des événements (épisode du joueur, fin d'action, ordre, correction) ou par
@@ -46,6 +64,8 @@ export class DecisionLoop {
   private lastDecisionAt = -Infinity;
   private lastOutcome: string | null = null;
   private stopped = false;
+  /** Dernier rappel du joueur : une décision lancée avant est abandonnée. */
+  private recalledAt = -Infinity;
 
   constructor(private readonly deps: LoopDeps) {}
 
@@ -77,6 +97,14 @@ export class DecisionLoop {
   /** Ordre explicite du joueur : immédiat, prioritaire sur l'action en cours. */
   order(text: string): void {
     this.deps.actions.abort('ordre du joueur');
+    if (isRecallOrder(text)) {
+      this.pending = null;
+      this.recalledAt = this.deps.clock.now();
+      this.lastDecisionAt = this.deps.clock.now();
+      this.deps.logger.info({ order: text }, 'ordre de rappel : arrêt et suivi');
+      void this.execute(null, 'follow', { distance: 2, seconds: 20 });
+      return;
+    }
     this.request('ordre du joueur', true, text);
   }
 
@@ -94,11 +122,12 @@ export class DecisionLoop {
     try {
       const world = this.deps.world();
       if (!world) return;
+      const startedAt = this.deps.clock.now();
       const record = await this.deps.decider.decide(trigger, world, this.lastOutcome, order);
       this.lastDecisionAt = this.deps.clock.now();
       const d = record.decision;
       this.deps.logger.info({ trigger, source: record.source, skill: d.skill, domain: d.domain, basedOn: d.basedOn, model: record.model }, `décision : ${d.intent}`);
-      if (this.stopped) return;
+      if (this.stopped || this.recalledAt >= startedAt) return;
       // un ordre qui finit en simple suivi : le bot ne sait pas encore faire ce qu'on lui demande
       if (order && (d.skill === 'follow' || record.source === 'fallback')) this.deps.gaps?.unfulfilledOrder(order);
       if (d.needsApproval) {

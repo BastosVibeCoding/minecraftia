@@ -14,6 +14,7 @@ import type { UtteranceClassifier } from './feedback/classifier.js';
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
+import { companionMovements } from './bot/movements.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -37,7 +38,7 @@ import { readWorld, snapshotOf } from './decider/mineflayerWorld.js';
 import { plugin as collectBlockPlugin } from 'mineflayer-collectblock';
 import { plugin as pvpPlugin } from 'mineflayer-pvp';
 
-const { pathfinder, Movements } = pathfinderPkg;
+const { pathfinder } = pathfinderPkg;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
 const RECENT_EPISODES = 5;
@@ -241,9 +242,7 @@ export class Companion {
       if (!bot.pathfinder) bot.loadPlugin(pathfinder);
       if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);
       if (!bot.pvp) bot.loadPlugin(pvpPlugin);
-      const movements = new Movements(bot);
-      movements.canDig = false;
-      bot.pathfinder.setMovements(movements);
+      bot.pathfinder.setMovements(companionMovements(bot));
     } catch (err) {
       this.logger.error({ err }, 'initialisation du pathfinder impossible');
     }
