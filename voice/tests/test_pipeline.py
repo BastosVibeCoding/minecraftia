@@ -71,3 +71,16 @@ def test_reel_tts_puis_transcription_par_le_chemin_svc():
     text = Transcriber(os.environ.get("WHISPER_MODEL", "base")).transcribe(utt.pcm).lower()
     print("transcription :", text)
     assert "mur" in text and "pierre" in text
+
+
+def test_une_voix_par_bot():
+    from minecraftia_voice.server import VoiceService
+    from minecraftia_voice.tts import EdgeTts
+
+    svc = VoiceService.__new__(VoiceService)
+    svc.tts = EdgeTts("fr-FR-DeniseNeural")
+    svc._voices = {}
+    assert svc.engine_for(None) is svc.tts
+    vivienne = svc.engine_for("fr-FR-VivienneMultilingualNeural")
+    assert vivienne.voice == "fr-FR-VivienneMultilingualNeural"
+    assert svc.engine_for("fr-FR-VivienneMultilingualNeural") is vivienne

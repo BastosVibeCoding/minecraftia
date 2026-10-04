@@ -152,3 +152,22 @@ describe('analyseur d\'artisanat', () => {
     expect(ep.mechanism.counts).toEqual({ oak_planks: 8, crafting_table: 1 });
   });
 });
+
+describe('semis et torches', () => {
+  it('semer du blé devient un mécanisme « plant », pas une construction', () => {
+    const episodes: Episode[] = [];
+    const obs = new Observer(P, (e) => episodes.push(e));
+    for (let i = 0; i < 6; i++) obs.push({ t: i * 400, type: 'block_placed', player: P, pos: { x: i, y: 64, z: 0 }, block: 'wheat' });
+    obs.flush();
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0]).toMatchObject({ domain: 'gather', kind: 'plant', mechanism: { skill: 'plant', seed: 'wheat_seeds', count: 6 } });
+  });
+
+  it('poser des torches devient un mécanisme « torch »', () => {
+    const episodes: Episode[] = [];
+    const obs = new Observer(P, (e) => episodes.push(e));
+    for (let i = 0; i < 3; i++) obs.push({ t: i * 400, type: 'block_placed', player: P, pos: { x: i * 4, y: 64, z: 0 }, block: 'torch' });
+    obs.flush();
+    expect(episodes[0]).toMatchObject({ domain: 'survive', kind: 'light', mechanism: { skill: 'torch', count: 3 } });
+  });
+});

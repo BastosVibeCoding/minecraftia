@@ -10,6 +10,7 @@ import type { Domain } from '../core/types.js';
 import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
+import { EXTRA_SKILLS } from './extra.js';
 
 const { goals } = pathfinderPkg;
 type Vec3 = Bot['entity']['position'];
@@ -313,7 +314,7 @@ const say = {
 
 /** Bibliothèque : des primitives génériques ; leurs paramètres et leur enchaînement viennent de l'arbre. */
 export const SKILLS: Record<string, Skill> = Object.fromEntries(
-  [follow, collect, build, attack, craft, explore, eat, equip, say].map((s) => [s.name, s as unknown as Skill]),
+  [follow, collect, build, attack, craft, explore, eat, equip, say, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
 );
 
 export type SkillName = keyof typeof SKILLS;

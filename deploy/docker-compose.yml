@@ -18,8 +18,8 @@ services:
       ENFORCE_WHITELIST: "TRUE"
       MEMORY: "10G"
       USE_AIKAR_FLAGS: "TRUE"
-      # performances + voix + télémétrie pour le bot
-      MODRINTH_PROJECTS: "lithium,ferrite-core,chunky,simple-voice-chat,easy-llm,easy-llm-voice"
+      # performances + voix + télémétrie pour les bots + skins (FabricTailor)
+      MODRINTH_PROJECTS: "lithium,ferrite-core,chunky,simple-voice-chat,easy-llm,easy-llm-voice,fabrictailor"
       MODRINTH_DOWNLOAD_DEPENDENCIES: "required"
       MC_SERVER_ID: "minecraftia"   # exigé par Easy LLM (plantage au démarrage sinon)
       SYNC_CHUNK_WRITES: "FALSE"

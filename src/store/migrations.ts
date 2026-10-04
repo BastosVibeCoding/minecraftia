@@ -148,4 +148,19 @@ CREATE TABLE legacy_import (
 CREATE UNIQUE INDEX legacy_import_unique ON legacy_import(content_hash, json_path);
 `,
   },
+  {
+    version: 2,
+    name: 'compétences manquantes repérées',
+    sql: `
+CREATE TABLE skill_gaps (
+  key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('ordre','outil','pose')),
+  label TEXT NOT NULL,
+  example TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 1,
+  first_at INTEGER NOT NULL,
+  last_at INTEGER NOT NULL
+);
+`,
+  },
 ];

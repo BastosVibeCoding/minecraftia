@@ -13,6 +13,7 @@ import type { ProposalBroker } from './autonomy/proposals.js';
 import type { UtteranceClassifier } from './feedback/classifier.js';
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
+import { GapRecorder } from './gaps/gaps.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -80,6 +81,7 @@ export class Companion {
   /** Blocs modifiés par le bot lui-même (clé « x,y,z » → instant) : jamais attribués au joueur. */
   private ownBlocks = new Map<string, number>();
   readonly feedback: FeedbackHandler;
+  readonly gaps: GapRecorder;
   private readonly voiceClient: VoiceClient | null;
   private readonly voiceLink: VoiceLink;
   private readonly heard: HeardAudioExtractor;
@@ -104,6 +106,7 @@ export class Companion {
         if (pos) this.telemetry.setFocus(pos);
       },
     );
+    this.gaps = new GapRecorder(deps.tree.store.db, clock, logger.child({ module: 'manques' }));
     this.heard = new HeardAudioExtractor(config.followPlayer);
     this.voiceClient = config.voice.url
       ? new VoiceClient(config.voice.url, logger.child({ module: 'voix' }), (t) => {
@@ -118,7 +121,7 @@ export class Companion {
       new ChatSpeaker((text) => this.session?.bot.chat(text)),
       voiceClient
         ? new VoiceSpeaker({
-            synth: (text) => voiceClient.synth(text),
+            synth: (text) => voiceClient.synth(text, config.voice.ttsVoice),
             play: (frames) => link.play(frames),
             get available() {
               return voiceClient.connected && link.connected;
@@ -179,6 +182,7 @@ export class Companion {
   /** Point d'entrée unique des événements du joueur, quelle que soit leur source. */
   observe(e: RawEvent): void {
     if ((e.type === 'block_placed' || e.type === 'block_broken') && this.isOwnBlock(e.pos, e.t)) return;
+    if (e.player === this.config.followPlayer) this.gaps.observe(e);
     this.observer.push(e);
   }
 
@@ -196,7 +200,7 @@ export class Companion {
   async command(text: string): Promise<void> {
     try {
       const { tree, autonomy, decider, budget, cache } = this.deps;
-      const answer = await runCommand(text, { tree, autonomy, decider, budget, cache });
+      const answer = await runCommand(text, { tree, autonomy, decider, budget, cache, gaps: this.gaps });
       if (answer) for (const line of chatLines(answer)) this.session?.bot.chat(line);
     } catch (err) {
       this.logger.error({ err, text }, 'commande en erreur');
@@ -296,6 +300,7 @@ export class Companion {
       logger: this.logger.child({ module: 'décideur' }),
       autonomy: this.deps.autonomy,
       proposals: this.deps.proposals,
+      gaps: this.gaps,
     });
     const idleTimer = setInterval(() => loop.onIdle(), IDLE_CHECK_MS);
 

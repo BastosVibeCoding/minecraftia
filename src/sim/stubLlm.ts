@@ -81,6 +81,10 @@ export function toSkill(m: Record<string, unknown>): { skill: string; params: Re
       return { skill: 'explore', params: { radius: Math.min(64, Math.max(8, num(m.radius, 24))) } };
     case 'eat':
       return { skill: 'eat', params: {} };
+    case 'plant':
+      return { skill: 'plant', params: { seed: m.seed, count: Math.min(32, Math.max(1, Math.round(num(m.count, 8)))) } };
+    case 'torch':
+      return { skill: 'torch', params: { count: Math.min(8, Math.max(1, Math.round(num(m.count, 2)))) } };
     case 'equip': {
       const gear = Object.values((m.gear ?? {}) as Record<string, string>)[0];
       return gear ? { skill: 'equip', params: { item: gear } } : null;

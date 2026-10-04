@@ -3,7 +3,7 @@ Service vocal local de Minecraftia (WebSocket, port 8800, réseau Docker interne
 
 Bot -> service :
   {"type": "audio", "speaker": "<pseudo>", "t": <ms>, "opus": "<base64>"}   paquet Opus 48 kHz entendu
-  {"type": "tts", "id": "<id>", "text": "<phrase>"}                          synthèse demandée
+  {"type": "tts", "id": "<id>", "text": "<phrase>", "voice": "<voix>"?}     synthèse demandée (voix facultative)
   {"type": "ping"}
 Service -> bot :
   {"type": "transcript", "speaker", "text", "audio_ms", "latency_ms"}
@@ -37,6 +37,7 @@ class VoiceService:
     def __init__(self, transcriber: Transcriber, tts=None) -> None:
         self.transcriber = transcriber
         self.tts = tts or create_engine()
+        self._voices: dict[str, object] = {}
         self.assembler = UtteranceAssembler()
         self.decoders: dict[str, OpusDecoder] = {}
         self.clients: set = set()
@@ -95,12 +96,20 @@ class VoiceService:
     async def on_tts(self, ws, msg: dict) -> None:
         req_id = msg.get("id")
         try:
-            pcm = await self.tts.synth(str(msg.get("text", ""))[:400])
+            pcm = await self.engine_for(msg.get("voice")).synth(str(msg.get("text", ""))[:400])
             frames = [base64.b64encode(p).decode("ascii") for p in encode_opus(pcm, SVC_RATE, FRAME_MS)]
             await ws.send(json.dumps({"type": "tts_result", "id": req_id, "frames": frames, "frame_ms": FRAME_MS, "duration_ms": int(len(pcm) * 1000 / SVC_RATE)}))
         except Exception as err:
             log.warning("synthèse impossible : %s", err)
             await ws.send(json.dumps({"type": "error", "id": req_id, "message": str(err)}))
+
+    def engine_for(self, voice):
+        """Chaque bot peut avoir sa voix : un moteur par voix demandée, créé à la première utilisation."""
+        if not voice or not isinstance(voice, str):
+            return self.tts
+        if voice not in self._voices:
+            self._voices[voice] = type(self.tts)(voice)
+        return self._voices[voice]
 
     async def ticker(self) -> None:
         while True:

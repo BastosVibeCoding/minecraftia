@@ -58,7 +58,7 @@ export class VoiceClient {
   }
 
   /** Synthèse : renvoie les trames Opus (base64, 20 ms) prêtes à jouer dans le jeu. */
-  synth(text: string, timeoutMs = 15_000): Promise<string[]> {
+  synth(text: string, voice?: string, timeoutMs = 15_000): Promise<string[]> {
     if (!this.connected) return Promise.reject(new Error('service vocal indisponible'));
     const id = String(this.nextId++);
     return new Promise((resolve, reject) => {
@@ -67,7 +67,7 @@ export class VoiceClient {
         reject(new Error('synthèse : délai dépassé'));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.ws!.send(JSON.stringify({ type: 'tts', id, text }));
+      this.ws!.send(JSON.stringify({ type: 'tts', id, text, ...(voice ? { voice } : {}) }));
     });
   }
 

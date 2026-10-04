@@ -1,6 +1,6 @@
 import type { Domain, Vec3Like } from '../core/types.js';
 import { distance } from '../core/types.js';
-import { isOre, readable } from './blocks.js';
+import { CROP_SEED, isCrop, isOre, isTorch, readable } from './blocks.js';
 import { situationContext, withContext, type PlayerState } from './context.js';
 import { boundingBox, histogram, key, median, mostCommon, round, spearman } from './stats.js';
 import type { Episode, RawEvent } from './types.js';
@@ -126,6 +126,24 @@ export function analyzeBreaking(events: RawEvent[], state: PlayerState, domain: 
   };
 }
 
+/** Semis : quelle culture, combien (les récoltes du même épisode sont analysées à part). */
+export function analyzePlanting(events: RawEvent[], state: PlayerState): Draft | null {
+  const sown = events.filter((e): e is Of<'block_placed'> => e.type === 'block_placed' && isCrop(e.block));
+  const broken = events.filter((e) => e.type === 'block_broken').length;
+  if (sown.length < 3 || sown.length < broken) return null;
+  const crop = mostCommon(sown.map((e) => e.block))!;
+  const seed = CROP_SEED[crop]!;
+  const { context, tags } = situationContext(state, sown[0]!.pos);
+  return {
+    domain: 'gather',
+    kind: 'plant',
+    summary: `a semé ${sown.length} ${readable(crop)}`,
+    situation: { text: withContext(`semer ${readable(crop)}`, context), crop, ...tags },
+    mechanism: { skill: 'plant', seed, count: sown.length },
+    params: { sown: sown.length },
+  };
+}
+
 /** Combat : cibles, distance d'engagement, arme, bouclier, seuil de repli. */
 export function analyzeCombat(events: RawEvent[], state: PlayerState): Draft | null {
   const attacks = events.filter((e): e is Of<'attack'> => e.type === 'attack');
@@ -212,6 +230,18 @@ export function analyzeExplore(events: RawEvent[], state: PlayerState): Draft | 
 
 /** Gestion de la survie : quand le joueur mange, ce qu'il porte. */
 export function analyzeSurvive(events: RawEvent[], state: PlayerState): Draft | null {
+  const torches = events.filter((e) => e.type === 'block_placed' && isTorch(e.block)).length;
+  if (torches >= 2) {
+    const { context, tags } = situationContext(state, state.pos);
+    return {
+      domain: 'survive',
+      kind: 'light',
+      summary: `a posé ${torches} torches`,
+      situation: { text: withContext('éclairer les environs', context), ...tags },
+      mechanism: { skill: 'torch', count: Math.min(8, torches) },
+      params: { torches },
+    };
+  }
   const eats = events.filter((e): e is Of<'eat'> => e.type === 'eat');
   const equips = events.filter((e): e is Of<'equip'> => e.type === 'equip' && e.item !== null && e.slot !== 'hand');
   const { context, tags } = situationContext(state, state.pos);

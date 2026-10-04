@@ -1,8 +1,8 @@
 import type { Domain, Vec3Like } from '../core/types.js';
 import { distance } from '../core/types.js';
 import type { Logger } from '../core/logger.js';
-import { analyzeBreaking, analyzeBuild, analyzeCombat, analyzeCraft, analyzeExplore, analyzeSurvive } from './analyzers.js';
-import { brokenBlockDomain } from './blocks.js';
+import { analyzeBreaking, analyzePlanting, analyzeBuild, analyzeCombat, analyzeCraft, analyzeExplore, analyzeSurvive } from './analyzers.js';
+import { brokenBlockDomain, isCrop, isTorch } from './blocks.js';
 import { cellOf, newPlayerState, type PlayerState } from './context.js';
 import type { Episode, RawEvent } from './types.js';
 
@@ -104,6 +104,9 @@ export class Observer {
   private classify(e: RawEvent): Domain | null {
     switch (e.type) {
       case 'block_placed':
+        // semer et éclairer ne sont pas construire
+        if (isCrop(e.block)) return 'gather';
+        if (isTorch(e.block)) return 'survive';
         return 'build';
       case 'block_broken':
         return brokenBlockDomain(e.block);
@@ -169,8 +172,10 @@ export class Observer {
           draft = analyzeBuild(b.events, this.state);
           break;
         case 'mine':
-        case 'gather':
           draft = analyzeBreaking(b.events, this.state, domain);
+          break;
+        case 'gather':
+          draft = analyzePlanting(b.events, this.state) ?? analyzeBreaking(b.events, this.state, domain);
           break;
         case 'combat':
           draft = analyzeCombat(b.events, this.state);

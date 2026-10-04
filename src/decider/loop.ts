@@ -1,5 +1,6 @@
 import { graded, type Autonomy } from '../autonomy/autonomy.js';
 import type { ProposalBroker } from '../autonomy/proposals.js';
+import type { GapRecorder } from '../gaps/gaps.js';
 import type { Clock } from '../core/clock.js';
 import type { Logger } from '../core/logger.js';
 import type { Domain } from '../core/types.js';
@@ -30,6 +31,8 @@ export interface LoopDeps {
   autonomy?: Autonomy;
   /** Propositions de la bande « propose » (réponses fournies par les retours du joueur). */
   proposals?: ProposalBroker;
+  /** Repère les ordres que le bot n'a pas su traduire en action. */
+  gaps?: GapRecorder;
 }
 
 /**
@@ -96,6 +99,8 @@ export class DecisionLoop {
       const d = record.decision;
       this.deps.logger.info({ trigger, source: record.source, skill: d.skill, domain: d.domain, basedOn: d.basedOn, model: record.model }, `décision : ${d.intent}`);
       if (this.stopped) return;
+      // un ordre qui finit en simple suivi : le bot ne sait pas encore faire ce qu'on lui demande
+      if (order && (d.skill === 'follow' || record.source === 'fallback')) this.deps.gaps?.unfulfilledOrder(order);
       if (d.needsApproval) {
         if (!(await this.propose(record))) return;
       } else if (d.say) {

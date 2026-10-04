@@ -4,6 +4,7 @@ import type { Budget } from '../decider/budget.js';
 import type { DecisionCache } from '../decider/cache.js';
 import type { Decider } from '../decider/decider.js';
 import type { BehaviorTree } from '../tree/tree.js';
+import type { GapRecorder } from '../gaps/gaps.js';
 import { sanitizeChat } from '../bot/chat.js';
 
 const DOMAIN_FR: Record<Domain, string> = {
@@ -23,6 +24,7 @@ export interface CommandDeps {
   decider: Decider;
   budget: Budget;
   cache: DecisionCache;
+  gaps?: GapRecorder;
 }
 
 /** Une ligne de chat Minecraft fait au plus 256 caractères : on découpe proprement. */
@@ -52,7 +54,7 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
   const arg = rest.join(' ');
   switch (name?.toLowerCase()) {
     case '!aide':
-      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget.';
+      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget, !manques (ce que je ne sais pas encore faire).';
 
     case '!arbre': {
       const profile = d.tree.profile();
@@ -94,6 +96,12 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
       if (forgotten.length === 0) return `Je ne trouve rien qui ressemble à « ${arg} ».`;
       d.cache.clear();
       return `J'oublie ${forgotten.length} élément(s) : ${forgotten.slice(0, 3).map((n) => short(n.label, 50)).join(' ; ')}`;
+    }
+
+    case '!manques': {
+      const gaps = d.gaps?.top(6) ?? [];
+      if (gaps.length === 0) return "Je n'ai repéré aucune compétence qui me manque pour l'instant.";
+      return ['Ce que je ne sais pas encore faire :', ...gaps.map((g) => `• ${g.label} (${g.count}×)`)].join('\n');
     }
 
     case '!budget': {

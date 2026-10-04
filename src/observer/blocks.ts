@@ -5,6 +5,17 @@ const GATHER = [/_log$/, /_wood$/, /_stem$/, /_leaves$/, /^(wheat|carrots|potato
 const MINE = [/_ore$/, /^ancient_debris$/, /^(stone|deepslate|cobbled_deepslate|granite|diorite|andesite|tuff|calcite|netherrack|basalt|blackstone|obsidian|end_stone|dripstone_block|cobblestone)$/];
 const ORE = /(_ore$|^ancient_debris$)/;
 
+/** Cultures (le bloc posé quand on sème) et graine correspondante. */
+export const CROP_SEED: Record<string, string> = { wheat: 'wheat_seeds', carrots: 'carrot', potatoes: 'potato', beetroots: 'beetroot_seeds' };
+
+export function isCrop(block: string): boolean {
+  return block in CROP_SEED;
+}
+
+export function isTorch(block: string): boolean {
+  return block === 'torch' || block === 'wall_torch' || block === 'soul_torch' || block === 'soul_wall_torch';
+}
+
 export function isOre(block: string): boolean {
   return ORE.test(block);
 }

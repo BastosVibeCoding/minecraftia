@@ -40,7 +40,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
       dailyBudgetUsd: env.DAILY_BUDGET_USD,
     },
     telemetry: { port: env.TELEMETRY_PORT, capturePath: env.TELEMETRY_CAPTURE },
-    voice: { url: env.VOICE_URL, linkPort: env.VOICE_LINK_PORT },
+    voice: { url: env.VOICE_URL, linkPort: env.VOICE_LINK_PORT, ttsVoice: env.BOT_VOICE },
     log: { level: env.LOG_LEVEL, pretty: env.LOG_PRETTY },
     dataDir: env.DATA_DIR,
   });

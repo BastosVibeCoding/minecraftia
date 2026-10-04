@@ -37,7 +37,18 @@ describe('bibliothèque de compétences', () => {
 
   it('chaque compétence a un délai maximal et un domaine', () => {
     for (const s of Object.values(SKILLS)) {
-      const params = s.params.parse(s.name === 'build' ? { shape: 'wall', material: 'stone' } : s.name === 'collect' ? { blocks: ['oak_log'] } : s.name === 'attack' ? { targets: ['zombie'] } : s.name === 'craft' || s.name === 'equip' ? { item: 'stick' } : s.name === 'say' ? { text: 'salut' } : {});
+      const examples: Record<string, unknown> = {
+        build: { shape: 'wall', material: 'stone' },
+        collect: { blocks: ['oak_log'] },
+        attack: { targets: ['zombie'] },
+        craft: { item: 'stick' },
+        equip: { item: 'stick' },
+        say: { text: 'salut' },
+        plant: { seed: 'wheat_seeds' },
+        smelt: { item: 'raw_iron' },
+        retrieve: { item: 'coal' },
+      };
+      const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
       expect(s.timeoutMs(params)).toBeLessThanOrEqual(300_000);
     }

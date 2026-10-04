@@ -1,0 +1,272 @@
+import type { Bot } from 'mineflayer';
+import type { Block } from 'prismarine-block';
+import pathfinderPkg from 'mineflayer-pathfinder';
+import { z } from 'zod';
+import { abortableSleep } from '../core/abort.js';
+import type { Domain } from '../core/types.js';
+import type { ActionRunOutput } from './actionController.js';
+import type { SkillContext } from './library.js';
+
+const { goals } = pathfinderPkg;
+
+const fail = (reason: string, extra: Record<string, unknown> = {}): ActionRunOutput => ({ status: 'failure', detail: { reason, ...extra } });
+
+function countItem(bot: Bot, name: string): number {
+  return bot.inventory.items().filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
+}
+
+async function goNear(bot: Bot, b: { x: number; y: number; z: number }, range: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  const onAbort = () => bot.pathfinder.setGoal(null);
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    await bot.pathfinder.goto(new goals.GoalNear(b.x, b.y, b.z, range));
+  } catch {
+    // trajet impossible ou interrompu : l'appelant constate le résultat
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+/** Bloc nommé le plus proche (dans `maxDistance`). */
+function nearest(bot: Bot, names: string[], maxDistance = 16): Block | null {
+  const ids = names.map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+  return ids.length ? bot.findBlock({ matching: ids, maxDistance }) : null;
+}
+
+/** Pose un bloc de l'inventaire à côté du bot (sur le sol), pour le four ou le coffre manquant. */
+async function placeNearby(bot: Bot, itemName: string): Promise<Block | null> {
+  const item = bot.inventory.items().find((i) => i.name === itemName);
+  if (!item) return null;
+  const me = bot.entity.position.floored();
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) {
+    const target = me.offset(dx!, 0, dz!);
+    const ground = bot.blockAt(target.offset(0, -1, 0));
+    const here = bot.blockAt(target);
+    if (!ground || ground.boundingBox !== 'block' || !here || here.boundingBox !== 'empty') continue;
+    try {
+      await bot.equip(item, 'hand');
+      await bot.placeBlock(ground, ground.position.minus(ground.position).offset(0, 1, 0));
+      return bot.blockAt(target);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+const SEEDS: Record<string, string> = { wheat_seeds: 'wheat', carrot: 'carrots', potato: 'potatoes', beetroot_seeds: 'beetroots' };
+
+/** Planter : sème sur une terre labourée libre ; laboure d'abord la terre voisine si une houe est disponible. */
+export const plant = {
+  name: 'plant',
+  domain: 'gather' as Domain,
+  description: 'plant {seed: wheat_seeds|carrot|potato|beetroot_seeds, count: 1-32} — semer (laboure la terre avec une houe si besoin)',
+  params: z.object({ seed: z.enum(['wheat_seeds', 'carrot', 'potato', 'beetroot_seeds']), count: z.number().int().min(1).max(32).default(8) }),
+  timeoutMs: (p: { count: number }) => Math.min(180_000, 10_000 + 5_000 * p.count),
+  async run(ctx: SkillContext, p: { seed: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    if (countItem(bot, p.seed) === 0) return fail(`pas de ${p.seed}`, { precondition: true });
+    const hoe = bot.inventory.items().find((i) => i.name.endsWith('_hoe'));
+    let planted = 0;
+    for (let n = 0; n < p.count && !signal.aborted; n++) {
+      const farmland = bot.findBlock({
+        matching: bot.registry.blocksByName.farmland!.id,
+        maxDistance: 16,
+        useExtraInfo: (b) => bot.blockAt(b.position.offset(0, 1, 0))?.name === 'air',
+      });
+      let soil: Block | null = farmland;
+      if (!soil && hoe) {
+        const dirt = bot.findBlock({
+          matching: ['dirt', 'grass_block'].map((x) => bot.registry.blocksByName[x]!.id),
+          maxDistance: 8,
+          useExtraInfo: (b) => bot.blockAt(b.position.offset(0, 1, 0))?.name === 'air',
+        });
+        if (dirt) {
+          await goNear(bot, dirt.position, 3, signal);
+          await bot.equip(hoe, 'hand');
+          ctx.touch?.(dirt.position);
+          await bot.activateBlock(dirt).catch(() => undefined);
+          await abortableSleep(250, signal);
+          soil = bot.blockAt(dirt.position);
+          if (soil?.name !== 'farmland') soil = null;
+        }
+      }
+      if (!soil) break;
+      await goNear(bot, soil.position, 3, signal);
+      const seed = bot.inventory.items().find((i) => i.name === p.seed);
+      if (!seed || signal.aborted) break;
+      try {
+        await bot.equip(seed, 'hand');
+        ctx.touch?.(soil.position.offset(0, 1, 0));
+        await bot.placeBlock(soil, soil.position.minus(soil.position).offset(0, 1, 0));
+        if (bot.blockAt(soil.position.offset(0, 1, 0))?.name === SEEDS[p.seed]) planted++;
+      } catch {
+        break;
+      }
+    }
+    if (planted > 0) return { status: 'success', detail: { planted } };
+    return fail(hoe ? 'aucune terre à semer' : 'aucune terre labourée et pas de houe', { precondition: true });
+  },
+};
+
+/** Cuire au four : utilise un four proche (ou en pose un), attend la cuisson, reprend le résultat. */
+export const smelt = {
+  name: 'smelt',
+  domain: 'craft' as Domain,
+  description: 'smelt {item: objet à cuire (raw_iron, raw_gold, beef, porkchop, sand…), count: 1-16, fuel?: coal|charcoal|oak_planks…} — cuire au four',
+  params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(16).default(4), fuel: z.string().optional() }),
+  timeoutMs: (p: { count: number }) => 30_000 + 11_000 * p.count,
+  async run(ctx: SkillContext, p: { item: string; count: number; fuel?: string }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const input = bot.registry.itemsByName[p.item];
+    if (!input || countItem(bot, p.item) === 0) return fail(`pas de ${p.item}`, { precondition: true });
+    const fuels = p.fuel ? [p.fuel] : ['coal', 'charcoal', 'coal_block', 'oak_planks', 'spruce_planks', 'birch_planks', 'oak_log', 'stick'];
+    const fuelName = fuels.find((f) => countItem(bot, f) > 0);
+    if (!fuelName) return fail('pas de combustible', { precondition: true });
+    let furnace = nearest(bot, ['furnace'], 16);
+    if (!furnace) furnace = await placeNearby(bot, 'furnace');
+    if (!furnace) return fail('aucun four', { precondition: true });
+    await goNear(bot, furnace.position, 2, signal);
+    const window = await bot.openFurnace(furnace);
+    try {
+      const count = Math.min(p.count, countItem(bot, p.item));
+      const fuelPerItem = fuelName.includes('coal') ? 1 / 8 : fuelName.endsWith('_log') || fuelName.endsWith('_planks') ? 1 / 1.5 : 1;
+      await window.putFuel(bot.registry.itemsByName[fuelName]!.id, null, Math.min(countItem(bot, fuelName), Math.max(1, Math.ceil(count * fuelPerItem))));
+      await window.putInput(input.id, null, count);
+      let taken = 0;
+      const deadline = Date.now() + 11_000 * count + 5_000;
+      while (!signal.aborted && taken < count && Date.now() < deadline) {
+        await abortableSleep(1000, signal);
+        const out = window.outputItem();
+        if (out && out.count > 0) {
+          const got = await window.takeOutput().catch(() => null);
+          taken += got?.count ?? 0;
+        }
+      }
+      return taken > 0 ? { status: 'success', detail: { smelted: taken } } : fail('cuisson sans résultat');
+    } finally {
+      window.close();
+    }
+  },
+};
+
+/** Ranger dans le coffre le plus proche (tout, ou les objets demandés), en gardant outils, armes et nourriture. */
+export const store = {
+  name: 'store',
+  domain: 'survive' as Domain,
+  description: 'store {items?: string[]} — ranger dans le coffre le plus proche (tout sauf outils, armes et nourriture si items est absent)',
+  params: z.object({ items: z.array(z.string().min(1)).max(10).optional() }),
+  timeoutMs: () => 40_000,
+  async run({ bot }: SkillContext, p: { items?: string[] }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], 16);
+    if (!chest) return fail('aucun coffre à portée', { precondition: true });
+    await goNear(bot, chest.position, 2, signal);
+    const keep = (name: string) => /_(sword|axe|pickaxe|shovel|hoe|helmet|chestplate|leggings|boots)$|^(shield|bow|crossbow|torch)$/.test(name) || bot.registry.foodsByName[name] !== undefined;
+    const window = await bot.openContainer(chest);
+    let moved = 0;
+    try {
+      for (const item of bot.inventory.items()) {
+        if (signal.aborted) break;
+        if (p.items ? !p.items.includes(item.name) : keep(item.name)) continue;
+        try {
+          await window.deposit(item.type, null, item.count);
+          moved += item.count;
+        } catch {
+          break; // coffre plein
+        }
+      }
+    } finally {
+      window.close();
+    }
+    return moved > 0 ? { status: 'success', detail: { moved } } : fail('rien à ranger ou coffre plein');
+  },
+};
+
+/** Prendre des objets dans le coffre le plus proche. */
+export const retrieve = {
+  name: 'retrieve',
+  domain: 'survive' as Domain,
+  description: 'retrieve {item: nom d\'objet, count: 1-64} — prendre un objet dans le coffre le plus proche',
+  params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(64).default(16) }),
+  timeoutMs: () => 30_000,
+  async run({ bot }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const type = bot.registry.itemsByName[p.item];
+    if (!type) return fail('objet inconnu', { precondition: true });
+    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], 16);
+    if (!chest) return fail('aucun coffre à portée', { precondition: true });
+    await goNear(bot, chest.position, 2, signal);
+    const before = countItem(bot, p.item);
+    const window = await bot.openContainer(chest);
+    try {
+      const available = window.containerItems().filter((i) => i.type === type.id).reduce((s, i) => s + i.count, 0);
+      if (available === 0) return fail(`pas de ${p.item} dans le coffre`, { precondition: true });
+      await window.withdraw(type.id, null, Math.min(p.count, available));
+    } finally {
+      window.close();
+    }
+    const got = countItem(bot, p.item) - before;
+    return got > 0 ? { status: 'success', detail: { got } } : fail('rien pris');
+  },
+};
+
+/** Poser des torches autour de soi, sur le sol, là où il fait sombre en priorité. */
+export const torch = {
+  name: 'torch',
+  domain: 'survive' as Domain,
+  description: 'torch {count: 1-8} — poser des torches au sol autour de soi',
+  params: z.object({ count: z.number().int().min(1).max(8).default(2) }),
+  timeoutMs: (p: { count: number }) => 5_000 + 3_000 * p.count,
+  async run(ctx: SkillContext, p: { count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    if (countItem(bot, 'torch') === 0) return fail('pas de torche', { precondition: true });
+    const me = bot.entity.position.floored();
+    const spots = [[2, 0], [-2, 0], [0, 2], [0, -2], [3, 3], [-3, -3], [3, -3], [-3, 3]]
+      .map(([dx, dz]) => me.offset(dx!, 0, dz!))
+      .filter((pos) => bot.blockAt(pos)?.name === 'air' && bot.blockAt(pos.offset(0, -1, 0))?.boundingBox === 'block')
+      .sort((a, b) => (bot.blockAt(a)?.light ?? 15) - (bot.blockAt(b)?.light ?? 15));
+    let placed = 0;
+    for (const pos of spots.slice(0, p.count)) {
+      if (signal.aborted) break;
+      const item = bot.inventory.items().find((i) => i.name === 'torch');
+      const ground = bot.blockAt(pos.offset(0, -1, 0));
+      if (!item || !ground) break;
+      try {
+        await bot.equip(item, 'hand');
+        ctx.touch?.(pos);
+        await bot.placeBlock(ground, ground.position.minus(ground.position).offset(0, 1, 0));
+        placed++;
+      } catch {
+        continue;
+      }
+    }
+    return placed > 0 ? { status: 'success', detail: { placed } } : fail('aucun endroit où poser');
+  },
+};
+
+/** Dormir dans le lit le plus proche (la nuit ou pendant un orage). */
+export const sleep = {
+  name: 'sleep',
+  domain: 'survive' as Domain,
+  description: 'sleep {} — dormir dans le lit le plus proche (la nuit)',
+  params: z.object({}),
+  timeoutMs: () => 60_000,
+  async run({ bot }: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
+    const bed = bot.findBlock({ matching: (b) => bot.isABed(b), maxDistance: 24 });
+    if (!bed) return fail('aucun lit à portée', { precondition: true });
+    const tod = bot.time?.timeOfDay ?? 0;
+    if (tod < 12_542 && !bot.isRaining) return fail('il fait jour', { precondition: true });
+    await goNear(bot, bed.position, 2, signal);
+    try {
+      await bot.sleep(bed);
+    } catch (err) {
+      return fail(`impossible de dormir : ${(err as Error).message}`);
+    }
+    // dort jusqu'au matin (ou jusqu'à interruption par un réflexe)
+    while (!signal.aborted && bot.isSleeping) await abortableSleep(1000, signal);
+    if (bot.isSleeping) await bot.wake().catch(() => undefined);
+    return { status: 'success' };
+  },
+};
+
+export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep];

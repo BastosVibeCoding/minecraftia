@@ -57,6 +57,8 @@ export const ConfigSchema = z.object({
     url: z.string().default('ws://voice:8800'),
     /** Port où se connecte le mod Easy LLM Voice pour faire parler le bot dans le jeu. */
     linkPort: intFromEnv(8765),
+    /** Voix de synthèse propre au bot (ex. fr-FR-DeniseNeural) ; vide = voix par défaut du service. */
+    ttsVoice: z.string().optional(),
   }),
   log: z.object({
     level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
