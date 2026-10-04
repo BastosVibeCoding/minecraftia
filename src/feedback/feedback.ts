@@ -9,7 +9,8 @@ import type { Observer } from '../observer/observer.js';
 import type { ActionController } from '../skills/actionController.js';
 import type { Store } from '../store/store.js';
 import type { BehaviorTree } from '../tree/tree.js';
-import type { Classification, UtteranceClassifier } from './classifier.js';
+import type { GapRecorder } from '../gaps/gaps.js';
+import { isAddressed, type Classification, type UtteranceClassifier } from './classifier.js';
 
 export interface FeedbackDeps {
   classifier: UtteranceClassifier;
@@ -27,6 +28,9 @@ export interface FeedbackDeps {
   lastDecisionAt: () => number;
   say: (text: string) => void;
   teachWindowMs?: number;
+  /** Phrases adressées au bot mais non comprises → manques. */
+  gaps?: GapRecorder;
+  botName?: string;
 }
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
@@ -78,6 +82,7 @@ export class FeedbackHandler {
         d.loop()?.order(text);
         break;
       case 'chatter':
+        if (d.gaps && d.botName && isAddressed(text, d.botName)) d.gaps.misunderstood(text);
         break;
     }
     return c;

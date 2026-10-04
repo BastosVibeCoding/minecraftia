@@ -135,7 +135,7 @@ export class DecisionLoop {
       } else if (d.say) {
         this.say(d.say);
       }
-      await this.execute(record, d.skill, d.params);
+      await this.execute(record, d.skill, d.params, order);
     } catch (err) {
       this.deps.logger.error({ err }, 'boucle de décision en erreur');
     } finally {
@@ -146,7 +146,7 @@ export class DecisionLoop {
     }
   }
 
-  private async execute(record: DecisionRecord | null, skill: string, params: Record<string, unknown>): Promise<void> {
+  private async execute(record: DecisionRecord | null, skill: string, params: Record<string, unknown>, order?: string): Promise<void> {
     let action;
     try {
       action = toAction(this.deps.skillContext, skill, params);
@@ -169,6 +169,8 @@ export class DecisionLoop {
       .prepare('INSERT INTO outcomes(decision_id, status, details_json, at) VALUES (?, ?, ?, ?)')
       .run(record.id, outcome.status, JSON.stringify({ ...outcome, reason: result.reason, detail: result.detail }), this.deps.clock.now());
     this.lastOutcome = outcome.summary;
+    // un ordre exécuté mais raté : souvent une compétence à compléter (la raison réelle est gardée)
+    if (order && outcome.status === 'failure' && !outcome.precondition) this.deps.gaps?.failedOrder(order, action.name, result.reason ?? outcome.summary);
     if (judged(outcome)) {
       const success = outcome.status === 'success';
       for (const id of record.decision.basedOn) this.deps.tree.recordOutcome(id, success, record.id);

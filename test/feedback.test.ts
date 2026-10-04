@@ -7,7 +7,7 @@ import { DecisionCache } from '../src/decider/cache.js';
 import type { DecisionRecord } from '../src/decider/decider.js';
 import type { DecisionLoop } from '../src/decider/loop.js';
 import type { LlmClient } from '../src/decider/llm.js';
-import { classifyByRules, UtteranceClassifier } from '../src/feedback/classifier.js';
+import { classifyByRules, isAddressed, UtteranceClassifier } from '../src/feedback/classifier.js';
 import { FeedbackHandler } from '../src/feedback/feedback.js';
 import { Observer } from '../src/observer/observer.js';
 import type { Episode } from '../src/observer/types.js';
@@ -167,4 +167,27 @@ describe('effets des retours', () => {
     await handler.handle('Bastien', 'coupe du bois', 'chat');
     expect(loopCalls).toEqual(['order:coupe du bois']);
   });
+});
+
+describe("ordres oraux réels (2026-10-04) mal compris", () => {
+  it.each([
+    ['alex fait 3 echelles', 'Alex'],
+    ["Là tu peux couper du bois aussi s'il te plaît.", 'Lea'],
+    ['Là, donne-moi ton bois, s\'il te plaît.', 'Lea'],
+    ["Ok, tu vas ramasser 5 bûches encore et tu vas me les donner.", 'Lea'],
+    ['Allez, récupère du bois', 'Alex'],
+    ['bon, plutot coupe du bois', 'Alex'],
+  ])("« %s » est un ordre", (text, bot) => {
+    expect(classifyByRules(text, bot)).toMatchObject({ label: 'order', ambiguous: false });
+  });
+
+  it("repère qu'une phrase interpelle le bot par son nom", () => {
+    expect(isAddressed('Alex, 5-3-HEL.', 'Alex')).toBe(true);
+    expect(isAddressed('Léa suis-moi', 'Lea')).toBe(true);
+    expect(isAddressed('on va miner', 'Alex')).toBe(false);
+  });
+});
+
+it("« non, plutôt coupe du bois » : correction accompagnée d'un ordre", () => {
+  expect(classifyByRules('non, plutot coupe du bois', 'Alex')).toMatchObject({ label: 'correction', also: 'order' });
 });

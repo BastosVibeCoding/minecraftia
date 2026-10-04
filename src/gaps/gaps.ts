@@ -53,6 +53,18 @@ export class GapRecorder {
     if (key) this.record('ordre', key, `ordre non exécuté : « ${order.trim().slice(0, 60)} »`, order);
   }
 
+  /** Phrase adressée au bot par son nom, mais comprise comme du bavardage. */
+  misunderstood(text: string): void {
+    const key = norm(text);
+    if (key) this.record('ordre', `incompris ${key}`, `phrase non comprise : « ${text.trim().slice(0, 60)} »`, text);
+  }
+
+  /** Ordre traduit en action, mais l'action a échoué (raison réelle conservée dans l'exemple). */
+  failedOrder(order: string, skill: string, reason: string): void {
+    const key = norm(order);
+    if (key) this.record('ordre', `echec ${skill} ${key}`, `ordre échoué (${skill}) : « ${order.trim().slice(0, 50)} »`, `${order} → ${reason}`);
+  }
+
   /** Événement du joueur suivi : outil en main ou bloc posé hors des compétences connues. */
   observe(e: RawEvent): void {
     if (e.type === 'equip' && e.slot === 'hand' && e.item && UNSUPPORTED_TOOLS.test(e.item)) {

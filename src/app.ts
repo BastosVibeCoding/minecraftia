@@ -149,6 +149,8 @@ export class Companion {
       lastDecision: () => deps.decider.lastDecision,
       lastDecisionAt: () => this.session?.loop.lastDecisionTime ?? -Infinity,
       say: (text) => void this.speaker.speak(text),
+      gaps: this.gaps,
+      botName: config.minecraft.username,
     });
     this.connection = new BotConnection(
       { ...config.minecraft, ...config.reconnect },

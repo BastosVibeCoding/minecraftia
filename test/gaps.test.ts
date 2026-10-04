@@ -25,3 +25,16 @@ describe('compétences manquantes', () => {
     expect(g.top().map((x) => x.key).sort()).toEqual(['outil:fishing_rod', 'pose:redstone_wire']);
   });
 });
+
+describe("manques relevés en jeu (2026-10-04)", () => {
+  it("phrase adressée au bot mais incomprise, et ordre exécuté qui échoue", () => {
+    const g = new GapRecorder(openDatabase(':memory:').db, new ManualClock(0));
+    g.misunderstood('Alex, 5-3-HEL.');
+    g.failedOrder('alex fait 3 echelles', 'craft', 'recette introuvable');
+    g.failedOrder('alex fait 3 echelles', 'craft', 'recette introuvable');
+    const top = g.top();
+    expect(top[0]).toMatchObject({ kind: 'ordre', count: 2, example: 'alex fait 3 echelles → recette introuvable' });
+    expect(top[0]!.label).toContain('ordre échoué (craft)');
+    expect(top[1]!.label).toContain('phrase non comprise');
+  });
+});

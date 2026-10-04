@@ -22,6 +22,9 @@ const norm = (t: string) =>
     .replace(/[’`]/g, "'")
     .trim();
 
+/** Mots de remplissage en tête de phrase, fréquents à l'oral : « là, », « ok, », « allez », « euh »… */
+const FILLER = '(?:(?:la|ok|okay|bon|allez|alors|euh|donc|bah|ben|vas[- ]y|et)[ ,!]+)*';
+
 const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
   correction: [
     /^(non|nan|nope|no)\b/,
@@ -39,8 +42,9 @@ const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
   teaching: [/\bregarde\b|\bobserve\b/, /je (te )?montre/, /(?<!pas )comme (ca|ça)\b(?! ?\?)/, /fais comme moi|voila comment|apprends/],
   order: [
     // verbe à l'impératif en tête de phrase ou après « non, » / « plutôt »
-    /(^|[,;.!] *|plutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|ramasse|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |apporte|ramene|aide[- ]moi|cherche)/,
-    /^(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais)\b/,
+    new RegExp(`(^${FILLER}|[,;.!] *|\\bplutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|recupere|ramasse|prends|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |fait |apporte|rapporte|ramene|aide[- ]moi|cherche|plante|seme|cuis|range|dors|allume)`),
+    new RegExp(`^${FILLER}(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais|tu vas|il faut que tu|j'ai besoin)\\b`),
+    /(s'il te plait|s'te plait|\bstp\b)/,
   ],
 };
 
@@ -70,6 +74,12 @@ export function stripVocative(normalized: string, botName: string): string {
   return normalized.replace(leading, '').replace(trailing, '').trim();
 }
 
+/** La phrase interpelle le personnage par son nom (« Alex, … », « …, Léa »). */
+export function isAddressed(text: string, botName: string): boolean {
+  const t = norm(text);
+  return stripVocative(t, botName) !== t;
+}
+
 /** Étage 1 : règles locales, gratuites. `ambiguous` = laisser trancher le LLM. */
 export function classifyByRules(text: string, botName = 'Alex'): Classification & { ambiguous: boolean } {
   const t = stripVocative(norm(text), botName);
@@ -85,7 +95,9 @@ export function classifyByRules(text: string, botName = 'Alex'): Classification 
   const label = sorted[0]!;
   const also = sorted[1];
   // « non » seul est une correction sûre ; « non mais construis… » mêle correction et ordre : cohérent
-  const ambiguous = sorted.length > 1 && !(label === 'correction' && also === 'order') && !(label === 'teaching' && also === 'order');
+  // « ok, tu vas ramasser… » : l'ordre l'emporte sur l'acquiescement
+  const ambiguous =
+    sorted.length > 1 && !(label === 'correction' && also === 'order') && !(label === 'teaching' && also === 'order') && !(label === 'order' && also === 'approval');
   return { label, ...(also ? { also } : {}), ...(domain ? { domain } : {}), confidence: ambiguous ? 0.5 : 0.9, classifier: 'rules', ambiguous };
 }
 

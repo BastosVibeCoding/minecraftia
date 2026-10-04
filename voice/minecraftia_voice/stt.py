@@ -62,6 +62,16 @@ class UtteranceAssembler:
         return u if u.duration_ms >= self.min_ms else None
 
 
+# Contexte donné à Whisper : prénoms des bots et vocabulaire de Minecraft, pour éviter
+# « bushes » au lieu de « bûches » ou « beau » au lieu de « bois ».
+DEFAULT_PROMPT = (
+    "Alex, Léa, Minecraft. Coupe du bois, récolte des bûches, donne-moi tes bûches, suis-moi, viens ici, "
+    "arrête-toi, mine du fer, du charbon, des diamants, creuse, construis un mur, une maison, des planches, "
+    "une pioche, une hache, une épée, un établi, un four, un coffre, une échelle, des torches, "
+    "un creeper, un zombie, un squelette."
+)
+
+
 class Transcriber:
     """faster-whisper sur CPU (int8), en français, filtre VAD Silero pour ignorer bruits et silences."""
 
@@ -82,7 +92,8 @@ class Transcriber:
         segments, _info = self._model.transcribe(
             audio,
             language="fr",
-            beam_size=1,
+            beam_size=int(os.environ.get("WHISPER_BEAM", "5")),
+            initial_prompt=os.environ.get("WHISPER_PROMPT", DEFAULT_PROMPT),
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
             condition_on_previous_text=False,
