@@ -1,23 +1,61 @@
 import { describe, expect, it } from 'vitest';
+import { isBuildingBlock } from '../src/bot/placedBlocks.js';
+import { clarifyingQuestion } from '../src/feedback/clarify.js';
+import { answerInventoryQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
-import { craftableTier, hasTool, toolFor } from '../src/skills/tools.js';
-import { answerInventoryQuestion } from '../src/feedback/questions.js';
+import { askForTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
 
 describe("outils : se refaire une hache cassée (question du joueur, 2026-10-05)", () => {
   it("choisit l'outil selon le bloc", () => {
     expect(toolFor('oak_log')).toBe('axe');
     expect(toolFor('deepslate_iron_ore')).toBe('pickaxe');
     expect(toolFor('stone')).toBe('pickaxe');
-    expect(toolFor('dirt')).toBeNull();
+    expect(toolFor('dirt')).toBe('shovel');
+    expect(toolFor('white_wool')).toBeNull();
   });
 
-  it("repère qu'il n'a plus d'outil, et le meilleur qu'il peut fabriquer", () => {
+  it("repère qu'il n'a plus d'outil", () => {
     expect(hasTool([{ name: 'stone_axe' }], 'axe')).toBe(true);
     expect(hasTool([{ name: 'stone_pickaxe' }], 'axe')).toBe(false);
-    expect(craftableTier({ cobblestone: 5, oak_planks: 4 }, 'pickaxe')).toBe('stone_pickaxe');
-    expect(craftableTier({ oak_log: 2 }, 'axe')).toBe('wooden_axe');
-    expect(craftableTier({ dirt: 64 }, 'axe')).toBeNull();
+  });
+});
+
+describe("pioche adaptée au minerai (demande du joueur, 2026-10-05)", () => {
+  const ironOre = ['stone_pickaxe', 'iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'];
+  const diamondOre = ['iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'];
+
+  it("une pioche en bois ne suffit pas pour le fer : il fabrique une pioche en pierre avec ses pavés", () => {
+    expect(toolPlan({ wooden_pickaxe: 1, cobblestone: 8, oak_planks: 2 }, 'pickaxe', ironOre, true)).toEqual({ craft: 'stone_pickaxe' });
+  });
+
+  it("garde l'outil qu'il a quand il convient", () => {
+    expect(toolPlan({ iron_pickaxe: 1 }, 'pickaxe', diamondOre, true)).toEqual({ have: 'iron_pickaxe' });
+  });
+
+  it("diamant sans fer : il dit au joueur ce qui lui manque", () => {
+    const plan = toolPlan({ cobblestone: 64, oak_log: 10 }, 'pickaxe', diamondOre, true);
+    expect(plan).toEqual({ missing: 'une pioche en fer ou 3 lingots de fer' });
+    expect(askForTool('diamond_ore', 'une pioche en fer ou 3 lingots de fer')).toBe(
+      "Pour récolter du diamant, il me faut une pioche en fer ou 3 lingots de fer. Je n'en ai pas, ni dans les coffres à côté : tu peux m'en donner ?",
+    );
+  });
+
+  it("pierre avec 3 bûches et rien d'autre : pioche en bois (établi compris)", () => {
+    expect(toolPlan({ oak_log: 3 }, 'pickaxe', null, false)).toEqual({ craft: 'wooden_pickaxe' });
+  });
+});
+
+describe("ordre vague : le bot demande quoi avant d'obéir", () => {
+  it.each([
+    ['Alex, va miner', 'Je mine quoi'],
+    ['va récolter', 'Je récolte quoi'],
+  ])("« %s » → « %s… »", (order, start) => {
+    expect(clarifyingQuestion(order)).toMatch(new RegExp(`^${start}`));
+  });
+
+  it.each(['va miner du fer', 'mine tous les minerais', "creuse en escalier jusqu'en y=-10", 'récolte du bois', 'coupe 30 bûches'])("« %s » est assez précis", (order) => {
+    expect(clarifyingQuestion(order)).toBeNull();
   });
 });
 
@@ -56,4 +94,8 @@ describe("escalier jusqu'à une hauteur (demande de JuicyBerries1993)", () => {
 
 it("« alex t'as combien de buches » sans point d'interrogation est une question", () => {
   expect(answerInventoryQuestion("alex t'as combien de buches", { oak_log: 4 })).toBe("J'ai 4 bûches.");
+});
+
+it("les vitres et le verre sont des blocs de construction protégés", () => {
+  for (const n of ['glass', 'glass_pane', 'white_stained_glass_pane', 'tinted_glass']) expect(isBuildingBlock(n), n).toBe(true);
 });

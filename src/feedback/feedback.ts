@@ -12,6 +12,7 @@ import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { isAddressed, type Classification, type UtteranceClassifier } from './classifier.js';
 import { answerInventoryQuestion } from './questions.js';
+import { clarifyingQuestion } from './clarify.js';
 
 export interface FeedbackDeps {
   classifier: UtteranceClassifier;
@@ -38,6 +39,8 @@ export interface FeedbackDeps {
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
 const FEEDBACK_WINDOW_MS = 120_000;
+/** Délai pour répondre à « je mine quoi ? » ; ensuite la question est oubliée. */
+const CLARIFY_WINDOW_MS = 60_000;
 
 /**
  * Retours du joueur (chat ou voix) → effets sur l'arbre, l'autonomie et la boucle.
@@ -45,10 +48,22 @@ const FEEDBACK_WINDOW_MS = 120_000;
  * le mécanisme pénalisé, le cache du domaine vidé, et une nouvelle décision est demandée.
  */
 export class FeedbackHandler {
+  /** Ordre vague en attente de précision (« va miner » → « je mine quoi ? »). */
+  private pendingOrder: { text: string; until: number } | null = null;
+
   constructor(private readonly deps: FeedbackDeps) {}
 
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
+    // réponse à « je mine quoi ? » : elle complète l'ordre en attente
+    const pending = this.pendingOrder;
+    this.pendingOrder = null;
+    if (pending && d.clock.now() <= pending.until) {
+      const order = `${pending.text} : ${text}`;
+      d.logger.info({ channel }, `précision du joueur : « ${order} »`);
+      d.loop()?.order(order);
+      return { label: 'order', confidence: 0.9, classifier: 'rules' };
+    }
     // question sur l'inventaire : réponse directe, ni ordre ni retour sur la dernière action
     const inv = d.inventory?.();
     const answer = inv ? answerInventoryQuestion(text, inv) : null;
@@ -89,9 +104,15 @@ export class FeedbackHandler {
         d.say('Je regarde !');
         if (c.also === 'order') d.loop()?.order(text);
         break;
-      case 'order':
-        d.loop()?.order(text);
+      case 'order': {
+        // ordre trop vague pour choisir l'outil : on demande d'abord quoi
+        const question = clarifyingQuestion(text);
+        if (question) {
+          this.pendingOrder = { text, until: d.clock.now() + CLARIFY_WINDOW_MS };
+          d.say(question);
+        } else d.loop()?.order(text);
         break;
+      }
       case 'chatter':
         if (d.gaps && d.botName && isAddressed(text, d.botName)) d.gaps.misunderstood(text);
         break;

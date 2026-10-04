@@ -142,6 +142,15 @@ describe('effets des retours', () => {
     expect(b.autonomy.get('build').onRequestOnly).toBeUndefined();
   });
 
+  it("ordre vague : le bot demande quoi, puis la réponse complète l'ordre", async () => {
+    const { handler, loopCalls, said } = await setup();
+    await handler.handle('Bastien', 'va miner', 'voice');
+    expect(loopCalls).toEqual([]);
+    expect(said.at(-1)).toMatch(/^Je mine quoi/);
+    await handler.handle('Bastien', 'du fer', 'voice');
+    expect(loopCalls).toEqual(['order:va miner : du fer']);
+  });
+
   it('correction avec alternative : la consigne devient un ordre', async () => {
     const { handler, loopCalls } = await setup();
     await handler.handle('Bastien', 'non, construis plutôt en bois', 'voice');

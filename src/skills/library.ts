@@ -12,7 +12,7 @@ import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
 import { staircase } from './staircase.js';
-import { ensureTool, toolFor } from './tools.js';
+import { ensureHarvestTool } from './tools.js';
 
 const { goals } = pathfinderPkg;
 type Vec3 = Bot['entity']['position'];
@@ -135,7 +135,6 @@ const collect = {
       if (item) counted.add(item.name);
     }
     const have = () => [...counted].reduce((s, b) => s + countItem(bot, b), 0);
-    const tool = toolFor(names[0]!);
     const before = have();
     const gained = () => have() - before;
     // un bloc à la fois, le plus proche d'abord : collectblock abandonne toute sa liste dès qu'un trajet
@@ -161,8 +160,14 @@ const collect = {
           }
         }
         if (!target) break;
-        // hache cassée en pleine récolte, pas de pioche pour la pierre : il s'en refait une si possible
-        if (tool) await ensureTool(bot, tool, signal).catch(() => null);
+        // outil adapté avant chaque bloc (hache cassée en pleine récolte, pioche trop faible pour le
+        // minerai) : inventaire, fabrication, coffres proches ; sinon on le demande au joueur
+        const tool = await ensureHarvestTool(bot, target.name, signal).catch(() => ({ ok: true as const }));
+        if (!tool.ok) {
+          ctx.speak?.(tool.ask);
+          if (gained() > 0) break;
+          return fail(tool.ask, { precondition: true, blocks: p.blocks });
+        }
         ctx.touch?.(target.position);
         const g0 = gained();
         try {
