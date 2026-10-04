@@ -8,6 +8,7 @@ import type {} from 'mineflayer-pvp';
 import { abortableSleep, untilAborted } from '../core/abort.js';
 import type { Domain } from '../core/types.js';
 import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
+import { canSee } from '../bot/sight.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
@@ -284,7 +285,8 @@ const attack = {
   timeoutMs: () => 45_000,
   async run({ bot }: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
     const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : p.targets.includes(e.name ?? ''));
-    const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS);
+    // seulement ce qu'il voit : pas de cible repérée à travers un mur
+    const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS && canSee(bot, e));
     if (!nextTarget()) return fail('aucune cible', { targets: p.targets, precondition: true });
     const weapon = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ?? bot.inventory.items().find((i) => i.name.endsWith('_axe'));
     if (weapon) await bot.equip(weapon, 'hand');

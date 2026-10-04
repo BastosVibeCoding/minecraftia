@@ -1,6 +1,7 @@
 import type { Bot } from 'mineflayer';
 import type { Domain } from '../core/types.js';
 import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
+import { canSee } from '../bot/sight.js';
 import type { StateSnapshot } from '../outcome/outcome.js';
 import { topInventory, type WorldState } from './world.js';
 
@@ -16,7 +17,7 @@ export function readWorld(bot: Bot, followPlayer: string, activity: Domain[], re
   if (!me?.position) return null;
   const player = playerEntity(bot, followPlayer);
   const threats = Object.values(bot.entities)
-    .filter((e) => e !== me && e.position && isHostile(e))
+    .filter((e) => e !== me && e.position && isHostile(e) && e.position.distanceTo(me.position) <= 16 && canSee(bot, e))
     .map((e) => ({ name: e.name ?? 'inconnu', distance: Math.round(e.position.distanceTo(me.position)) }))
     .filter((t) => t.distance <= 16)
     .sort((a, b) => a.distance - b.distance)

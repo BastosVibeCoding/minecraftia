@@ -3,6 +3,7 @@ import type { Bot } from 'mineflayer';
 type Vec3 = Bot['entity']['position'];
 import pathfinderPkg from 'mineflayer-pathfinder';
 import { isHostile, isOnFire, oxygenOf, physicsFlags, playerEntity } from '../bot/mineflayerTypes.js';
+import { canSee } from '../bot/sight.js';
 import { abortableSleep } from '../core/abort.js';
 import type { ReflexExecutor } from './engine.js';
 import type { ReflexDecision } from './types.js';
@@ -170,7 +171,7 @@ export class MineflayerReflexExecutor implements ReflexExecutor {
   private threatsWithin(radius: number) {
     const me = this.bot.entity.position;
     return Object.values(this.bot.entities).filter(
-      (e) => e !== this.bot.entity && e.position && isHostile(e) && e.position.distanceTo(me) < radius,
+      (e) => e !== this.bot.entity && e.position && isHostile(e) && e.position.distanceTo(me) < radius && canSee(this.bot, e),
     );
   }
 

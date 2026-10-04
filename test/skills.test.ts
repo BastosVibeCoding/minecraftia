@@ -5,6 +5,7 @@ import { blueprint } from '../src/skills/blueprint.js';
 import { SkillParamsError, SKILLS, toAction } from '../src/skills/library.js';
 import type { ActionResult } from '../src/skills/actionController.js';
 import { matchingItems } from '../src/skills/extra.js';
+import { openWorld, vec } from './helpers.js';
 import { isAddressed } from '../src/feedback/classifier.js';
 
 describe('plans de construction', () => {
@@ -282,9 +283,10 @@ it("« reprends tes affaires au sol » : va sur chaque objet tombé, du plus pro
 });
 
 it("« tue les poules » : enchaîne les cibles à portée, puis s'arrête (manque réel)", async () => {
-  const chickens = [1, 2].map((id) => ({ id, name: 'chicken', isValid: true, position: { distanceTo: () => 20 } }));
+  const chickens = [1, 2].map((id) => ({ id, name: 'chicken', isValid: true, position: vec(20, 64, id) }));
   const bot = {
-    entity: { position: {} },
+    entity: { position: vec(0, 64, 0) },
+    world: openWorld,
     health: 20,
     inventory: { items: () => [] },
     nearestEntity: (f: (e: unknown) => boolean) => chickens.find((c) => c.isValid && f(c)) ?? null,

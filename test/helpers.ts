@@ -58,3 +58,29 @@ export function world(over: Partial<WorldState> = {}): WorldState {
     ...over,
   };
 }
+
+/** Vecteur minimal compatible avec ce que le code lit de mineflayer (offset, distanceTo, minus, scaled). */
+export interface FakeVec {
+  x: number;
+  y: number;
+  z: number;
+  offset(a: number, b: number, c: number): FakeVec;
+  distanceTo(o: { x: number; y: number; z: number }): number;
+  minus(o: { x: number; y: number; z: number }): FakeVec;
+  scaled(k: number): FakeVec;
+  floored(): FakeVec;
+  clone(): FakeVec;
+}
+export function vec(x: number, y: number, z: number): FakeVec {
+  return {
+    x, y, z,
+    offset: (a, b, c) => vec(x + a, y + b, z + c),
+    distanceTo: (o) => Math.hypot(o.x - x, o.y - y, o.z - z),
+    minus: (o) => vec(x - o.x, y - o.y, z - o.z),
+    scaled: (k) => vec(x * k, y * k, z * k),
+    floored: () => vec(Math.floor(x), Math.floor(y), Math.floor(z)),
+    clone: () => vec(x, y, z),
+  };
+}
+/** Monde sans aucun mur : tout est en vue. */
+export const openWorld = { raycast: () => null };

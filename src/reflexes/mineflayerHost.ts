@@ -1,6 +1,7 @@
 import type { Bot } from 'mineflayer';
 import { distance } from '../core/types.js';
 import { isHostile, isOnFire, oxygenOf, physicsFlags, playerEntity } from '../bot/mineflayerTypes.js';
+import { canSee } from '../bot/sight.js';
 import type { ReflexHost } from './engine.js';
 import type { SurvivalSnapshot } from './types.js';
 
@@ -27,9 +28,10 @@ export class MineflayerReflexHost implements ReflexHost {
     const flags = physicsFlags(me);
     const eye = bot.blockAt(pos.offset(0, 1.62, 0));
     const hostiles = Object.values(bot.entities)
-      .filter((e) => e !== me && e.position && isHostile(e))
-      .map((e) => ({ name: e.name ?? 'unknown', distance: distance(e.position, pos), position: e.position.clone() }))
-      .filter((h) => h.distance <= HOSTILE_SCAN_RADIUS);
+      .filter((e) => e !== me && e.position && isHostile(e) && distance(e.position, pos) <= HOSTILE_SCAN_RADIUS)
+      // pas de vision à travers les murs : seuls les monstres en vue comptent
+      .filter((e) => canSee(bot, e))
+      .map((e) => ({ name: e.name ?? 'unknown', distance: distance(e.position, pos), position: e.position.clone() }));
     const items = bot.inventory.items();
     const foods = bot.registry.foodsByName;
     const followed = playerEntity(bot, this.followPlayer)?.position;

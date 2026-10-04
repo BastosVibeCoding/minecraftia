@@ -15,7 +15,7 @@ import { HashingEmbedder } from '../src/store/embedder.js';
 import { Store } from '../src/store/store.js';
 import { MirrorStrategy } from '../src/strategy/strategy.js';
 import { BehaviorTree } from '../src/tree/tree.js';
-import { silentLogger, world } from './helpers.js';
+import { openWorld, silentLogger, vec, world } from './helpers.js';
 
 const wall: Episode = {
   player: 'Bastien',
@@ -132,9 +132,10 @@ describe("ordre coupé par un réflexe (cas réel : « défends-moi » puis fuit
     const deps = (loop as unknown as { deps: { actions: import('../src/skills/actionController.js').ActionController; skillContext: { bot: Record<string, unknown> } } }).deps;
     const actions = deps.actions;
     // un zombie qui reste en vie : l'attaque dure jusqu'à ce qu'on la coupe
-    const zombie = { name: 'zombie', isValid: true, position: { distanceTo: () => 3 } };
+    const zombie = { name: 'zombie', isValid: true, position: vec(3, 64, 0) };
     Object.assign(deps.skillContext.bot, {
-      entity: { position: {} },
+      entity: { position: vec(0, 64, 0) },
+      world: openWorld,
       health: 20,
       nearestEntity: (f: (e: unknown) => boolean) => (f(zombie) ? zombie : null),
       pvp: { attack: async () => {}, stop: async () => {}, forceStop: () => {}, attackRange: 3 },
