@@ -85,6 +85,8 @@ export interface NewNode {
   mechanism?: Record<string, unknown> | null;
   weight?: number;
   uses?: number;
+  /** Instant (en temps de jeu actif) à partir duquel le poids décroît. Par défaut : maintenant. */
+  decayedAt?: number;
 }
 
 /**
@@ -193,7 +195,7 @@ export class Store {
           n.mechanism ? JSON.stringify(n.mechanism) : null,
           n.weight ?? 0,
           n.uses ?? 0,
-          now,
+          n.decayedAt ?? now,
           now,
         );
       const id = Number(r.lastInsertRowid);
@@ -234,7 +236,7 @@ export class Store {
   /** Met à jour les champs dynamiques d'un nœud (poids, compteurs, statut, paramètres fusionnés). */
   updateNode(
     id: number,
-    patch: Partial<Pick<NodeRecord, 'weight' | 'uses' | 'successes' | 'failures' | 'lastUsedAt' | 'decayedAt' | 'status' | 'situation' | 'mechanism'>>,
+    patch: Partial<Pick<NodeRecord, 'weight' | 'uses' | 'successes' | 'failures' | 'lastUsedAt' | 'decayedAt' | 'status' | 'situation' | 'mechanism' | 'label'>>,
   ): void {
     const cols: string[] = [];
     const args: unknown[] = [];
@@ -246,6 +248,7 @@ export class Store {
       lastUsedAt: 'last_used_at',
       decayedAt: 'decayed_at',
       status: 'status',
+      label: 'label',
     };
     for (const [k, col] of Object.entries(map)) {
       const v = patch[k as keyof typeof patch];

@@ -6,6 +6,7 @@ import { EasyLlmMapper } from './bot/easyLlmMapping.js';
 import { MineflayerEventSource } from './bot/mineflayerEvents.js';
 import { Observer } from './observer/observer.js';
 import type { Episode, RawEvent } from './observer/types.js';
+import type { PlayClock } from './tree/playClock.js';
 import type { BehaviorTree } from './tree/tree.js';
 import type { Config } from './config/schema.js';
 import { EventBus } from './core/bus.js';
@@ -34,6 +35,7 @@ interface Session {
 
 export interface CompanionDeps {
   tree: BehaviorTree;
+  playClock: PlayClock;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -77,7 +79,11 @@ export class Companion {
 
   start(): void {
     this.telemetry.start();
-    this.observerTimer = setInterval(() => this.observer.tick(this.clock.now()), OBSERVER_TICK_MS);
+    this.observerTimer = setInterval(() => {
+      this.observer.tick(this.clock.now());
+      // le temps de jeu actif (décroissance des poids) n'avance que si le joueur suivi est là
+      this.deps.playClock.setActive(Boolean(this.session?.bot.players[this.config.followPlayer]));
+    }, OBSERVER_TICK_MS);
     this.connection.start();
   }
 
@@ -85,6 +91,7 @@ export class Companion {
     this.endSession();
     this.connection.stop();
     if (this.observerTimer) clearInterval(this.observerTimer);
+    this.deps.playClock.setActive(false);
     this.observer.flush();
     this.telemetry.stop();
   }

@@ -8,6 +8,7 @@ import { createLogger } from './core/logger.js';
 import { join } from 'node:path';
 import { createEmbedder } from './store/embedder.js';
 import { Store } from './store/store.js';
+import { PlayClock } from './tree/playClock.js';
 import { BehaviorTree } from './tree/tree.js';
 
 async function main(): Promise<void> {
@@ -37,9 +38,10 @@ async function main(): Promise<void> {
   const embedder = await createEmbedder('transformers', join(config.dataDir, 'models'), logger);
   const store = await Store.open(join(config.dataDir, 'minecraftia.db'), embedder, systemClock, { logger });
   logger.info({ embedder: embedder.name, vectorIndex: store.index.kind }, 'mémoire ouverte');
-  const tree = new BehaviorTree(store, { logger: logger.child({ module: 'arbre' }) });
+  const playClock = new PlayClock(store.db, systemClock);
+  const tree = new BehaviorTree(store, { playTime: () => playClock.now(), logger: logger.child({ module: 'arbre' }) });
 
-  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree });
+  const companion = new Companion(config, logger, systemClock, mineflayer.createBot, { tree, playClock });
   companion.start();
   logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, 'Minecraftia démarré');
 

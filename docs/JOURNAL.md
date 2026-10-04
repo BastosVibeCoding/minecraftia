@@ -102,3 +102,27 @@ taillée, de bas en haut »). Essai réel en production (bot dans Docker sur le 
 - Bot à 1,5 PV près d'un zombie immobile : fuite puis retour vers le joueur, en boucle. Les réflexes
   priment (voulu), mais l'oscillation est à traiter côté décideur (ne pas suivre vers une menace).
 - Lieux visités tenus en mémoire seulement (la « base » se réapprend après un redémarrage).
+
+## 2026-10-04 — Phase 4 : arbre
+
+**Fait**
+- Décroissance paresseuse (`w · 2^(−Δt/demi-vie)`, demi-vie 6 h) mesurée en **temps de jeu actif**
+  (`PlayClock`, persisté ; n'avance que si le bot est connecté et le joueur suivi en ligne).
+- Renforcement : observation +1, enseignement +3, correction montrée +5, approbation +2 (+1 situation),
+  réussite +0,5, échec −1 ; correction : `w × 0,2 − 5` → le mécanisme passe « à éviter ».
+  Chaque variation laisse une preuve (`node_evidence`).
+- Recherche : top-k situations par similarité × (1 + ln(1 + poids)), mécanismes positifs classés,
+  mécanismes corrigés renvoyés à part (`avoid`) pour que le décideur les évite.
+- `profile()` (spécialité émergente), `overview()` (pour `!arbre`), `forget()` / `restore()` (pour `!oublie`).
+- Outil `scripts/tree-query.ts` pour inspecter l'arbre.
+
+**Testé** — 102 tests verts. **Test de divergence (arbres)** automatisé : deux bases vierges nourries
+d'une heure de bâtisseur et d'une heure de combattant simulés → domaines dominants `build` / `combat`,
+profils quasi orthogonaux (cosinus < 0,3), préférences fidèles (pierre taillée de bas en haut ;
+épée en fer, bouclier, engagement < 3,5 blocs). Correction : même un mécanisme de poids 10 passe à éviter.
+En production, avec le vrai modèle : « un monstre approche, il faut se défendre » → branche combat
+en tête (0,50) ; « bâtir une muraille » → « construire un mur » (0,85) sans mot commun.
+
+**Appris**
+- L'embedder de test (lexical) ne rapproche que des textes au vocabulaire partagé : les tests de
+  recherche utilisent des requêtes cohérentes avec cette limite ; le sens est vérifié en production.
