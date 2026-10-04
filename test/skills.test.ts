@@ -51,6 +51,7 @@ describe('bibliothèque de compétences', () => {
         give: { item: 'log' },
         staircase: { targetY: -10 },
         place: { item: 'furnace' },
+        furnace_take: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
@@ -166,4 +167,21 @@ describe("donner des objets (manque réel : « Alex, donne ton bois »)", () => 
     const bot = { inventory: { items: () => [] }, players: {} } as unknown as Bot;
     expect(await SKILLS.give!.run({ bot, followPlayer: 'B' }, { item: 'log' }, new AbortController().signal)).toMatchObject({ status: 'failure', detail: { precondition: true } });
   });
+});
+
+it("« donne » tout court (item « all ») : tout sauf l'équipement et la nourriture (manque réel)", async () => {
+  const tossed: string[] = [];
+  const pos = { offset: () => pos, x: 0, y: 64, z: 0 };
+  const items = [{ name: 'raw_iron', count: 6, type: 1 }, { name: 'stone_pickaxe', count: 1, type: 2 }, { name: 'bread', count: 3, type: 3 }, { name: 'cobblestone', count: 12, type: 4 }];
+  const bot = {
+    registry: { foodsByName: { bread: {} } },
+    inventory: { items: () => items },
+    players: { B: { entity: { position: pos } } },
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    lookAt: async () => {},
+    toss: async (type: number, _m: null, n: number) => void tossed.push(`${type}x${n}`),
+  } as unknown as Bot;
+  const r = await SKILLS.give!.run({ bot, followPlayer: 'B' }, { item: 'all' }, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'success', detail: { given: 18 } });
+  expect(tossed).toEqual(['1x6', '4x12']);
 });

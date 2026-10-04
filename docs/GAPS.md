@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | non relevés : « donne » (pas de all), « récolte le fer dans le four et mets-le dans le coffre » (pas de raw_iron, 2×) | Le registre ignorait les échecs « précondition » : désormais relevés pour tout ordre. `give all` (tout sauf équipement/nourriture), compétence `furnace_take`, ordres en plusieurs étapes (`splitOrder` : « et/puis » + verbe) exécutés à la suite avec le résultat précédent en contexte |
 | 2026-10-05 | Léa | « raconte-moi une blague » | Conversation : phrase adressée au bot (ni ordre ni question d'inventaire) → réponse courte du modèle gratuit, dans le personnage, au plus toutes les 15 s. « récolter 10 de charbon » : minerai inaccessible (No path), abandon après 4 essais, normal |
 | 2026-10-05 | Léa | « pose le four à côté de la table de craft » (3×), « t'as un four ? » | Compétence `place {item, near?}` (sur ordre seulement) ; questions : four, établi, coffre, lit, seau, bâtons |
 | 2026-10-05 | joueurs | « défends-moi » / « attaque » annulé par la survie | En combat (attack en cours), la fuite pour le nombre demande 6 monstres au lieu de 3 ; vie basse au contact et creeper restent prioritaires ; un ordre coupé par un réflexe est repris dans les 30 s |
@@ -32,9 +33,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `4c82ce2` (2026-10-05, sur `!deploy`).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 8 éléments (combat sur ordre, poser, questions four/établi, conversation, donne tout, récupérer au four, ordres en étapes, échecs d'ordres relevés).
 
-1. Combat sur ordre : seuil de fuite relevé, reprise de l'ordre après un réflexe
-2. Compétence « poser » (four à côté de l'établi)
-3. Questions : four, établi, coffre…
-4. Conversation (réponse courte quand on parle au bot)
+(aucun)

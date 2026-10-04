@@ -155,6 +155,34 @@ export const smelt = {
   },
 };
 
+/** Outils, armes, armure et torches : le bot les garde (ni rangés, ni donnés sans le demander). */
+export const isEquipment = (name: string) => /_(sword|axe|pickaxe|shovel|hoe|helmet|chestplate|leggings|boots)$|^(shield|bow|crossbow|torch)$/.test(name);
+
+/** Récupérer ce qui a cuit dans le four le plus proche (« récupère le fer dans le four »). */
+export const furnaceTake = {
+  name: 'furnace_take',
+  domain: 'craft' as Domain,
+  description: 'furnace_take {} — récupérer ce qui a cuit (lingots, nourriture…) dans le four le plus proche',
+  params: z.object({}),
+  timeoutMs: () => 30_000,
+  async run(ctx: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const furnace = nearest(bot, ['furnace', 'blast_furnace', 'smoker'], 24);
+    if (!furnace) return fail('aucun four à portée', { precondition: true });
+    await goNear(bot, furnace.position, 2, signal);
+    if (signal.aborted) return fail('interrompu');
+    const window = await bot.openFurnace(furnace);
+    try {
+      const out = window.outputItem();
+      if (!out || out.count === 0) return fail('le four est vide', { precondition: true });
+      const got = await window.takeOutput();
+      return { status: 'success', detail: { taken: got?.count ?? out.count, item: out.name } };
+    } finally {
+      window.close();
+    }
+  },
+};
+
 /** Ranger dans le coffre le plus proche (tout, ou les objets demandés), en gardant outils, armes et nourriture. */
 export const store = {
   name: 'store',
@@ -166,7 +194,7 @@ export const store = {
     const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], 16);
     if (!chest) return fail('aucun coffre à portée', { precondition: true });
     await goNear(bot, chest.position, 2, signal);
-    const keep = (name: string) => /_(sword|axe|pickaxe|shovel|hoe|helmet|chestplate|leggings|boots)$|^(shield|bow|crossbow|torch)$/.test(name) || bot.registry.foodsByName[name] !== undefined;
+    const keep = (name: string) => isEquipment(name) || bot.registry.foodsByName[name] !== undefined;
     const window = await bot.openContainer(chest);
     let moved = 0;
     try {
@@ -287,12 +315,14 @@ export function matchingItems<T extends { name: string }>(items: T[], wanted: st
 export const give = {
   name: 'give',
   domain: 'gather' as Domain,
-  description: 'give {item: string (nom Minecraft ou famille, ex. "oak_log", "log", "planks"), count?: 1-256} — donner des objets au joueur (tous si count absent)',
+  description: "give {item: string (nom Minecraft ou famille, ex. \"oak_log\", \"log\", \"planks\", ou \"all\" pour tout sauf l'équipement), count?: 1-256} — donner des objets au joueur (tous si count absent)",
   params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(256).optional() }),
   timeoutMs: () => 40_000,
   async run(ctx: SkillContext, p: { item: string; count?: number | undefined }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
-    const stacks = matchingItems(bot.inventory.items(), p.item);
+    // « donne » tout court (all, tout) : tout sauf l'équipement et la nourriture
+    const everything = /^(all|tout|tous|everything|\*)$/i.test(p.item.trim());
+    const stacks = everything ? bot.inventory.items().filter((i) => !isEquipment(i.name) && bot.registry.foodsByName?.[i.name] === undefined) : matchingItems(bot.inventory.items(), p.item);
     if (stacks.length === 0) return fail(`pas de ${p.item} dans l'inventaire`, { precondition: true });
     const target = bot.players[ctx.followPlayer]?.entity;
     if (!target) return fail('joueur hors de vue');
@@ -338,4 +368,4 @@ export const place = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep, give, place];
+export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place];

@@ -11,6 +11,7 @@ import { FEEDBACK, type BehaviorTree } from '../tree/tree.js';
 import type { Decider, DecisionRecord } from './decider.js';
 import type { ModelRouter } from './router.js';
 import type { WorldState } from './world.js';
+import { splitOrder } from './orders.js';
 
 export interface LoopDeps {
   decider: Decider;
@@ -71,6 +72,8 @@ export class DecisionLoop {
   private recalledAt = -Infinity;
   /** Ordre coupé par un réflexe de survie : repris une fois le danger passé. */
   private interruptedOrder: { text: string; until: number } | null = null;
+  /** Étapes restantes d'un ordre en plusieurs temps (« … et mets-le dans le coffre »). */
+  private nextSteps: { steps: string[]; original: string } | null = null;
 
   constructor(private readonly deps: LoopDeps) {}
 
@@ -100,10 +103,17 @@ export class DecisionLoop {
   }
 
   /** Ordre explicite du joueur : immédiat, prioritaire sur l'action en cours. */
-  order(text: string): void {
+  order(text: string, continuing = false): void {
+    if (!continuing) {
+      const steps = splitOrder(text);
+      this.nextSteps = steps.length > 1 ? { steps: steps.slice(1), original: text } : null;
+      if (steps.length > 1) this.deps.logger.info({ steps }, 'ordre en plusieurs étapes');
+      text = steps[0] ?? text;
+    }
     this.interruptedOrder = null;
     this.deps.actions.abort('ordre du joueur');
     if (isRecallOrder(text)) {
+      this.nextSteps = null;
       this.pending = null;
       this.recalledAt = this.deps.clock.now();
       this.lastDecisionAt = this.deps.clock.now();
@@ -121,7 +131,7 @@ export class DecisionLoop {
     this.interruptedOrder = null;
     if (resume && this.deps.clock.now() <= resume.until) {
       this.deps.logger.info({ order: resume.text }, "reprise de l'ordre après le réflexe");
-      this.order(resume.text);
+      this.order(resume.text, true);
       return;
     }
     // sous la bande « propose », pas d'initiative : le bot imite quand le joueur agit (épisodes)
@@ -188,7 +198,17 @@ export class DecisionLoop {
       .run(record.id, outcome.status, JSON.stringify({ ...outcome, reason: result.reason, detail: result.detail }), this.deps.clock.now());
     this.lastOutcome = outcome.summary;
     // un ordre exécuté mais raté : souvent une compétence à compléter (la raison réelle est gardée)
-    if (order && outcome.status === 'failure' && !outcome.precondition) this.deps.gaps?.failedOrder(order, action.name, result.reason ?? outcome.summary);
+    // y compris « il manque quelque chose » : pour un ordre du joueur, c'est un manque à combler
+    if (order && outcome.status === 'failure') this.deps.gaps?.failedOrder(order, action.name, result.reason ?? outcome.summary);
+    // étape suivante d'un ordre en plusieurs temps, avec le résultat de celle-ci en contexte
+    if (order && this.nextSteps) {
+      const plan = this.nextSteps;
+      if (outcome.status === 'success' && plan.steps.length > 0) {
+        const next = plan.steps.shift()!;
+        if (plan.steps.length === 0) this.nextSteps = null;
+        this.order(`${next} (suite de « ${plan.original} » ; étape précédente : ${outcome.summary})`, true);
+      } else if (outcome.status !== 'success') this.nextSteps = null;
+    }
     if (judged(outcome)) {
       const success = outcome.status === 'success';
       for (const id of record.decision.basedOn) this.deps.tree.recordOutcome(id, success, record.id);

@@ -6,6 +6,7 @@ import { Budget } from '../src/decider/budget.js';
 import { DecisionCache } from '../src/decider/cache.js';
 import { Decider } from '../src/decider/decider.js';
 import { DecisionLoop, isRecallOrder } from '../src/decider/loop.js';
+import { splitOrder } from '../src/decider/orders.js';
 import { ModelRouter } from '../src/decider/router.js';
 import type { Episode } from '../src/observer/types.js';
 import { RationalStubLlm } from '../src/sim/stubLlm.js';
@@ -150,5 +151,27 @@ describe("ordre coupé par un réflexe (cas réel : « défends-moi » puis fuit
     loop.onIdle();
     await flush();
     expect(stub.calls.length).toBe(2);
+  });
+});
+
+describe("ordres en plusieurs étapes (manque réel : « récolte le fer dans le four et mets-le dans le coffre »)", () => {
+  it("découpe sur « et » / « puis » suivis d'un verbe d'action, pas ailleurs", () => {
+    expect(splitOrder('alex recole le fer dans le four et met le dans le coffre le plus proche')).toEqual(['alex recole le fer dans le four', 'met le dans le coffre le plus proche']);
+    expect(splitOrder('Alex, récupère le fer dans le four et mets-le dans le coffre juste à côté.')).toEqual(['Alex, récupère le fer dans le four', 'mets-le dans le coffre juste à côté.']);
+    expect(splitOrder('coupe du bois puis donne-moi tes bûches')).toEqual(['coupe du bois', 'donne-moi tes bûches']);
+    expect(splitOrder('récolte du fer et du charbon')).toEqual(['récolte du fer et du charbon']);
+    expect(splitOrder('construis un mur en bois')).toEqual(['construis un mur en bois']);
+  });
+
+  it("exécute la deuxième étape après la réussite de la première, avec son résultat en contexte", async () => {
+    const { stub, loop } = await setup();
+    const say = (t: string) => JSON.stringify({ skill: 'say', params: { text: t }, domain: 'build', intent: t, basedOn: [], rationale: 'ordre' });
+    stub.scripted.push(say('je récupère'), say('je range'));
+    loop.order('récupère le fer dans le four et mets-le dans le coffre');
+    await flush();
+    await flush();
+    expect(stub.calls.length).toBe(2);
+    expect(stub.calls[1]!.user).toContain('mets-le dans le coffre');
+    expect(stub.calls[1]!.user).toContain('étape précédente');
   });
 });
