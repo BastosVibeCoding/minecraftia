@@ -50,6 +50,7 @@ describe('bibliothèque de compétences', () => {
         retrieve: { item: 'coal' },
         give: { item: 'log' },
         staircase: { targetY: -10 },
+        place: { item: 'furnace' },
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);

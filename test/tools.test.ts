@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
 import { answerInventoryQuestion } from '../src/feedback/questions.js';
-import { expandBlockNames } from '../src/skills/library.js';
+import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
 import { askForTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
 
@@ -104,4 +104,31 @@ it("« t'as une pioche ? » / « t'as une hache ? » : il dit lesquelles (manque
   const inv = { stone_pickaxe: 1, wooden_pickaxe: 1, oak_log: 3 };
   expect(answerInventoryQuestion('ALEX T’as une pioche ?', inv)).toBe("Oui, j'ai une pioche en pierre et une pioche en bois.");
   expect(answerInventoryQuestion("alex t'as une hache ?", inv)).toBe("Non, je n'ai pas de hache.");
+});
+
+describe("poser un objet à un endroit (manque réel : « pose le four à côté de la table de craft », 3×)", () => {
+  it("« t'as un four ? » / « t'as un établi ? » sont des questions d'inventaire", () => {
+    expect(answerInventoryQuestion('Léa t\'as un four ?', { furnace: 1 })).toBe("J'ai 1 four.");
+    expect(answerInventoryQuestion("alex t'as un établi", {})).toBe("Je n'ai pas d'établi.");
+  });
+
+  it("pose le four sur une case libre à côté de l'établi", async () => {
+    type V = { x: number; y: number; z: number; offset(a: number, b: number, c: number): V; minus(o: V): V; floored(): V; distanceTo(): number };
+    const vec = (x: number, y: number, z: number): V => ({ x, y, z, offset: (a, b, c) => vec(x + a, y + b, z + c), minus: (o) => vec(x - o.x, y - o.y, z - o.z), floored: () => vec(x, y, z), distanceTo: () => 1 });
+    const table = { name: 'crafting_table', position: vec(10, 64, 10), boundingBox: 'block' };
+    const placed: string[] = [];
+    const bot = {
+      registry: { blocksByName: { crafting_table: { id: 1 } } },
+      inventory: { items: () => [{ name: 'furnace', count: 1, type: 5 }] },
+      entity: { position: vec(0, 64, 0) },
+      findBlock: () => table,
+      blockAt: (p: V) => (p.y === 63 ? { name: 'stone', boundingBox: 'block', position: p } : p.x === 10 && p.z === 10 ? table : { name: 'air', boundingBox: 'empty', position: p }),
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      equip: async () => {},
+      placeBlock: async (ground: { position: V }) => void placed.push(`${ground.position.x},${ground.position.z}`),
+    };
+    const r = await SKILLS.place!.run({ bot: bot as never, followPlayer: 'B' }, { item: 'furnace', near: 'crafting_table' }, new AbortController().signal);
+    expect(r.status).toBe('success');
+    expect(placed).toEqual(['11,10']);
+  });
 });

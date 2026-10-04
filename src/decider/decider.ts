@@ -71,7 +71,7 @@ export function applyGuards(
   if (ordered || d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
   // construire, c'est placer des blocs là où le joueur les veut : un bot ne peut pas le deviner ;
   // sans `buildInitiative`, jamais de construction d'initiative, quelle que soit l'autonomie
-  if (d.skill === 'build' && !buildInitiative) return fallbackDecision('construction : seulement sur demande du joueur');
+  if ((d.skill === 'build' || d.skill === 'place') && !buildInitiative) return fallbackDecision('construction : seulement sur demande du joueur');
   const key = actionKey(d.skill, d.params);
   const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
   const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);

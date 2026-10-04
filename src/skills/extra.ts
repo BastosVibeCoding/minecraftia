@@ -36,11 +36,15 @@ function nearest(bot: Bot, names: string[], maxDistance = 16): Block | null {
 
 /** Pose un bloc de l'inventaire à côté du bot (sur le sol), pour le four ou le coffre manquant. */
 export async function placeNearby(bot: Bot, itemName: string): Promise<Block | null> {
+  return placeAround(bot, itemName, bot.entity.position.floored(), [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]);
+}
+
+/** Pose un bloc de l'inventaire sur la première case libre (sol solide dessous) autour de `center`. */
+export async function placeAround(bot: Bot, itemName: string, center: Bot['entity']['position'], offsets: number[][]): Promise<Block | null> {
   const item = bot.inventory.items().find((i) => i.name === itemName);
   if (!item) return null;
-  const me = bot.entity.position.floored();
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) {
-    const target = me.offset(dx!, 0, dz!);
+  for (const [dx, dz] of offsets) {
+    const target = center.offset(dx!, 0, dz!);
     const ground = bot.blockAt(target.offset(0, -1, 0));
     const here = bot.blockAt(target);
     if (!ground || ground.boundingBox !== 'block' || !here || here.boundingBox !== 'empty') continue;
@@ -308,4 +312,30 @@ export const give = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep, give];
+/** Poser un objet de l'inventaire (four, coffre, établi…), à côté d'un bloc désigné ou du bot. */
+export const place = {
+  name: 'place',
+  domain: 'build' as Domain,
+  description: 'place {item: nom Minecraft (ex. "furnace", "chest", "crafting_table"), near?: bloc de référence (ex. "crafting_table")} — poser cet objet à côté du bloc désigné, sinon à côté de moi',
+  params: z.object({ item: z.string().min(1), near: z.string().min(1).optional() }),
+  timeoutMs: () => 30_000,
+  async run(ctx: SkillContext, p: { item: string; near?: string | undefined }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const stack = matchingItems(bot.inventory.items(), p.item)[0];
+    if (!stack) return fail(`pas de ${p.item} dans l'inventaire`, { precondition: true });
+    const ring = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+    let placed: Block | null;
+    if (p.near) {
+      const ref = nearest(bot, [p.near.replace(/^minecraft:/, '')], 24);
+      if (!ref) return fail(`pas de ${p.near} à portée`, { precondition: true });
+      await goNear(bot, ref.position, 2, signal);
+      if (signal.aborted) return fail('interrompu');
+      placed = await placeAround(bot, stack.name, ref.position, ring);
+    } else placed = await placeAround(bot, stack.name, bot.entity.position.floored(), ring);
+    if (!placed) return fail('aucune place libre à côté');
+    ctx.touch?.(placed.position);
+    return { status: 'success', detail: { item: stack.name, at: placed.position } };
+  },
+};
+
+export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep, give, place];

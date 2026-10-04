@@ -23,6 +23,12 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
   { words: /\btorches?\b/, label: 'torches', match: (i) => i === 'torch' },
   { words: /\b(bouffe|nourriture|manger|viande|pain)\b/, label: 'nourriture', match: (i) => /^(bread|apple|cooked_\w+|beef|porkchop|chicken|mutton|carrot|potato|baked_potato|cookie|golden_apple)$/.test(i) },
   { words: /\blaine\b/, label: 'laine', match: (i) => i.endsWith('_wool') },
+  { words: /\bfours?\b/, label: 'four', match: (i) => i === 'furnace' || i === 'blast_furnace' || i === 'smoker' },
+  { words: /\b(etablis?|tables? de craft|crafting table)\b/, label: 'établi', match: (i) => i === 'crafting_table' },
+  { words: /\bcoffres?\b/, label: 'coffre', match: (i) => i === 'chest' || i === 'barrel' },
+  { words: /\blits?\b/, label: 'lit', match: (i) => i.endsWith('_bed') },
+  { words: /\bseaux?\b/, label: 'seau', match: (i) => i.endsWith('bucket') },
+  { words: /\bbatons?\b/, label: 'bâtons', match: (i) => i === 'stick' },
 ];
 
 const TIER_FR: Record<string, string> = { wooden: 'en bois', stone: 'en pierre', iron: 'en fer', golden: 'en or', diamond: 'en diamant', netherite: 'en netherite' };
@@ -66,7 +72,7 @@ export function answerInventoryQuestion(text: string, inventory: Record<string, 
     return asked
       .map((f) => {
         const n = Object.entries(inventory).filter(([i]) => f.match(i)).reduce((s, [, c]) => s + c, 0);
-        return n > 0 ? `J'ai ${n} ${f.label}.` : `Je n'ai pas de ${f.label}.`;
+        return n > 0 ? `J'ai ${n} ${f.label}.` : `Je n'ai pas ${/^[aeiouéèê]/.test(f.label) ? "d'" : 'de '}${f.label}.`;
       })
       .join(' ');
   }
