@@ -5,6 +5,7 @@ import { blueprint } from '../src/skills/blueprint.js';
 import { SkillParamsError, SKILLS, toAction } from '../src/skills/library.js';
 import type { ActionResult } from '../src/skills/actionController.js';
 import { matchingItems } from '../src/skills/extra.js';
+import { isAddressed } from '../src/feedback/classifier.js';
 
 describe('plans de construction', () => {
   it('mur 7×4 : 28 blocs, posés couche par couche de bas en haut', () => {
@@ -201,4 +202,49 @@ it("« récupère le fer dans les trois fours » : passe par tous les fours, pas
   } as unknown as Bot;
   const r = await SKILLS.furnace_take!.run({ bot, followPlayer: 'B' }, {}, new AbortController().signal);
   expect(r).toMatchObject({ status: 'success', detail: { taken: { iron_ingot: 6 }, furnaces: 3 } });
+});
+
+describe("four sans combustible (manque réel : « Léa va mettre le fer au four »)", () => {
+  function furnaceBot(chestItems: { name: string; count: number; type: number }[]) {
+    const inv = [{ name: 'raw_iron', count: 4, type: 1 }];
+    const said: string[] = [];
+    const bot = {
+      registry: { itemsByName: { raw_iron: { id: 1 }, coal: { id: 2 } }, blocksByName: { chest: { id: 50 }, furnace: { id: 51 } } },
+      inventory: { items: () => inv },
+      findBlocks: () => (chestItems.length ? [{ x: 1, y: 64, z: 0 }] : []),
+      blockAt: (p: unknown) => ({ name: 'chest', position: p }),
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      openContainer: async () => ({
+        containerItems: () => chestItems,
+        withdraw: async (type: number, _m: null, n: number) => void inv.push({ name: chestItems.find((i) => i.type === type)!.name, count: n, type }),
+        close: () => {},
+      }),
+      findBlock: () => null,
+    } as unknown as Bot;
+    return { bot, said, inv };
+  }
+
+  it("prend du charbon dans un coffre proche", async () => {
+    const { bot, inv } = furnaceBot([{ name: 'coal', count: 10, type: 2 }]);
+    // la suite (four, cuisson) n'est pas simulée ici : seul compte le passage au coffre
+    await SKILLS.smelt!.run({ bot, followPlayer: 'B' }, { item: 'raw_iron', count: 4 }, new AbortController().signal).catch(() => null);
+    expect(inv.some((i) => i.name === 'coal')).toBe(true);
+  });
+
+  it("sans charbon nulle part : il le demande au joueur", async () => {
+    const said: string[] = [];
+    const { bot } = furnaceBot([]);
+    const r = await SKILLS.smelt!.run({ bot, followPlayer: 'B', speak: (t) => void said.push(t) }, { item: 'raw_iron', count: 4 }, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'failure', detail: { reason: 'pas de combustible', precondition: true } });
+    expect(said[0]).toContain('Il me faut du combustible');
+  });
+});
+
+it("« Léa, donne ton fer » dit par le joueur d'Alex s'adresse à Léa, pas à Alex (cas réel)", () => {
+  expect(isAddressed('lea donne ton fer', 'Lea')).toBe(true);
+  expect(isAddressed('lea donne ton fer', 'Alex')).toBe(false);
+  // « à Léa » en fin de phrase : le bot appelé par son propre nom l'emporte (règle de App.hear)
+  const forAlex = (t: string) => isAddressed(t, 'Alex') || !isAddressed(t, 'Lea');
+  expect(forAlex('Alex, donne ton fer à Léa')).toBe(true);
+  expect(forAlex('lea donne ton fer')).toBe(false);
 });

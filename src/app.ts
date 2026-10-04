@@ -10,7 +10,7 @@ import type { Episode, RawEvent } from './observer/types.js';
 import type { PlayClock } from './tree/playClock.js';
 import type { Autonomy } from './autonomy/autonomy.js';
 import type { ProposalBroker } from './autonomy/proposals.js';
-import type { UtteranceClassifier } from './feedback/classifier.js';
+import { isAddressed, type UtteranceClassifier } from './feedback/classifier.js';
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
@@ -202,6 +202,12 @@ export class Companion {
   /** Énoncé du joueur suivi (chat ou voix transcrite). Les commandes `!…` sont traitées à part. */
   hear(player: string, text: string, channel: 'chat' | 'voice'): void {
     if (player !== this.config.followPlayer) return;
+    // « Léa, donne ton fer » dit par mon joueur à l'autre bot : ce n'est pas pour moi
+    const peer = this.config.peers.find((p) => isAddressed(text, p) && !isAddressed(text, this.config.minecraft.username));
+    if (peer) {
+      this.logger.info({ peer }, `phrase adressée à ${peer}, ignorée : « ${text} »`);
+      return;
+    }
     if (text.trim().startsWith('!')) {
       void this.command(text);
       return;

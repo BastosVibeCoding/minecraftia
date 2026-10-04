@@ -30,6 +30,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
   return prune({
     minecraft: { host: env.MC_HOST, port: env.MC_PORT, username: env.MC_USERNAME, version: env.MC_VERSION },
     followPlayer: env.FOLLOW_PLAYER,
+    peers: env.BOT_PEERS ? env.BOT_PEERS.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     strategy: env.STRATEGY,
     gender: env.BOT_GENDER,
     buildInitiative: env.BOT_BUILD_INITIATIVE === undefined ? undefined : env.BOT_BUILD_INITIATIVE === 'true',

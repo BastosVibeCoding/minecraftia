@@ -59,6 +59,37 @@ export async function placeAround(bot: Bot, itemName: string, center: Bot['entit
   return null;
 }
 
+/**
+ * Prend dans les coffres proches (3 au plus, 16 blocs) les objets voulus, jusqu'à `max`.
+ * Renvoie le nombre d'objets pris.
+ */
+export async function withdrawFromChests(bot: Bot, wanted: (name: string) => boolean, max: number, signal: AbortSignal): Promise<number> {
+  const ids = ['chest', 'barrel', 'trapped_chest'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+  let got = 0;
+  for (const pos of bot.findBlocks({ matching: ids, maxDistance: 16, count: 3 })) {
+    if (signal.aborted || got >= max) break;
+    const chest = bot.blockAt(pos);
+    if (!chest) continue;
+    await goNear(bot, pos, 2, signal);
+    try {
+      const window = await bot.openContainer(chest);
+      try {
+        for (const it of window.containerItems().filter((i) => wanted(i.name))) {
+          if (got >= max) break;
+          const n = Math.min(it.count, max - got);
+          await window.withdraw(it.type, null, n);
+          got += n;
+        }
+      } finally {
+        window.close();
+      }
+    } catch {
+      // coffre inaccessible : on passe au suivant
+    }
+  }
+  return got;
+}
+
 const SEEDS: Record<string, string> = { wheat_seeds: 'wheat', carrot: 'carrots', potato: 'potatoes', beetroot_seeds: 'beetroots' };
 
 /** Planter : sème sur une terre labourée libre ; laboure d'abord la terre voisine si une houe est disponible. */
@@ -115,6 +146,9 @@ export const plant = {
 };
 
 /** Cuire au four : utilise un four proche (ou en pose un), attend la cuisson, reprend le résultat. */
+/** Combustibles acceptés, du meilleur au moins bon. */
+const FUELS = ['coal', 'charcoal', 'coal_block', 'oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log', 'oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'stick'];
+
 export const smelt = {
   name: 'smelt',
   domain: 'craft' as Domain,
@@ -124,10 +158,17 @@ export const smelt = {
   async run(ctx: SkillContext, p: { item: string; count: number; fuel?: string }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
     const input = bot.registry.itemsByName[p.item];
-    if (!input || countItem(bot, p.item) === 0) return fail(`pas de ${p.item}`, { precondition: true });
-    const fuels = p.fuel ? [p.fuel] : ['coal', 'charcoal', 'coal_block', 'oak_planks', 'spruce_planks', 'birch_planks', 'oak_log', 'stick'];
-    const fuelName = fuels.find((f) => countItem(bot, f) > 0);
-    if (!fuelName) return fail('pas de combustible', { precondition: true });
+    if (!input) return fail(`objet inconnu : ${p.item}`, { precondition: true });
+    if (countItem(bot, p.item) === 0) await withdrawFromChests(bot, (n) => n === p.item, p.count, signal);
+    if (countItem(bot, p.item) === 0) return fail(`pas de ${p.item}, ni sur moi ni dans les coffres`, { precondition: true });
+    const fuels = p.fuel ? [p.fuel] : FUELS;
+    let fuelName = fuels.find((f) => countItem(bot, f) > 0);
+    // pas de combustible sur soi : on en cherche dans les coffres, sinon on le demande au joueur
+    if (!fuelName && (await withdrawFromChests(bot, (n) => fuels.includes(n), 16, signal)) > 0) fuelName = fuels.find((f) => countItem(bot, f) > 0);
+    if (!fuelName) {
+      ctx.speak?.("Il me faut du combustible pour le four (du charbon ou du bois). Je n'en ai pas, ni dans les coffres à côté : tu peux m'en donner ?");
+      return fail('pas de combustible', { precondition: true });
+    }
     let furnace = nearest(bot, ['furnace'], 16);
     if (!furnace) furnace = await placeNearby(bot, 'furnace');
     if (!furnace) return fail('aucun four', { precondition: true });

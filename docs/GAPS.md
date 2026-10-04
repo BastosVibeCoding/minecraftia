@@ -7,6 +7,9 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | « Léa, donne ton fer » exécuté par Alex | `BOT_PEERS` : phrase adressée à l'autre bot ignorée (sauf si le bot est aussi appelé par son nom) |
+| 2026-10-05 | Léa | « va mettre le fer au four » → pas de combustible ; « Léa prend le charbon » incompris | Four : combustible et objet à cuire pris dans les coffres proches, sinon demande au joueur ; verbe « prend » |
+| 2026-10-05 | Alex | « attaque Léa » | Ignoré volontairement : les bots n'attaquent ni les joueurs ni l'autre bot |
 | 2026-10-05 | Alex | « récupère le fer dans les trois fours » → le four est vide (2×) | `furnace_take` passe par tous les fours à portée (24 blocs), pas seulement le plus proche |
 | 2026-10-05 | joueurs | « donne » devrait viser le dernier objet évoqué | « donne », « donne-le », « donne-les-moi » → dernier objet évoqué (question, ordre) ou récolté, le plus récent ; « donne tout » reste tout |
 | 2026-10-05 | Alex | non relevés : « donne » (pas de all), « récolte le fer dans le four et mets-le dans le coffre » (pas de raw_iron, 2×) | Le registre ignorait les échecs « précondition » : désormais relevés pour tout ordre. `give all` (tout sauf équipement/nourriture), compétence `furnace_take`, ordres en plusieurs étapes (`splitOrder` : « et/puis » + verbe) exécutés à la suite avec le résultat précédent en contexte |
@@ -39,3 +42,6 @@ Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite s
 
 1. « donne » → dernier objet évoqué ou récolté
 2. Récupérer dans tous les fours proches
+3. Phrases adressées à l'autre bot ignorées (BOT_PEERS posé sur le VPS)
+4. Four : combustible et objet pris dans les coffres, sinon demande
+5. Verbe « prend »

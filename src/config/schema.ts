@@ -12,6 +12,8 @@ export const ConfigSchema = z.object({
   }),
   /** Pseudo du joueur que le bot suit et dont il apprend. */
   followPlayer: z.string().min(1),
+  /** Noms des autres bots du serveur : une phrase qui leur est adressée ne concerne pas ce bot. */
+  peers: z.array(z.string().min(1)).default([]),
   /** Genre grammatical du personnage (sa façon de parler d'elle ou de lui-même). Son nom est `minecraft.username`. */
   gender: z.enum(['feminine', 'masculine']).default('feminine'),
   /**
