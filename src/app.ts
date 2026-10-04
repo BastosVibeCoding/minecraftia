@@ -14,7 +14,7 @@ import type { UtteranceClassifier } from './feedback/classifier.js';
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
-import { companionMovements } from './bot/movements.js';
+import { companionMovements, installDoorOpener } from './bot/movements.js';
 import { PlacedBlocks } from './bot/placedBlocks.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
@@ -252,6 +252,7 @@ export class Companion {
       if (!bot.pvp) bot.loadPlugin(pvpPlugin);
       const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.placed.isProtected(b);
       bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
+      installDoorOpener(bot, () => this.clock.now());
       // collectblock impose ses réglages (creuser partout) : on lui donne les nôtres, protégés
       bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
     } catch (err) {
