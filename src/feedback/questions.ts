@@ -28,7 +28,8 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
 /** Phrase interrogative (point d'interrogation, ou tournure de question en tête). */
 export function isQuestion(text: string): boolean {
   const t = norm(text);
-  return t.endsWith('?') || /(^|[,!.] *)(est[- ]ce que|tu as|t'as|as[- ]tu|combien|il te reste|t'en as|tu en as)\b/.test(t);
+  // n'importe où dans la phrase : « alex t'as combien de bûches » (interpellation devant)
+  return t.endsWith('?') || /\b(est[- ]ce que|tu as|t'as|as[- ]tu|combien|il te reste|t'en as|tu en as)\b/.test(t);
 }
 
 /** Réponse à une question d'inventaire, ou `null` si la question ne porte pas sur l'inventaire. */

@@ -11,11 +11,11 @@ const { goals } = pathfinderPkg;
 
 const fail = (reason: string, extra: Record<string, unknown> = {}): ActionRunOutput => ({ status: 'failure', detail: { reason, ...extra } });
 
-function countItem(bot: Bot, name: string): number {
+export function countItem(bot: Bot, name: string): number {
   return bot.inventory.items().filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
 }
 
-async function goNear(bot: Bot, b: { x: number; y: number; z: number }, range: number, signal: AbortSignal): Promise<void> {
+export async function goNear(bot: Bot, b: { x: number; y: number; z: number }, range: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
   const onAbort = () => bot.pathfinder.setGoal(null);
   signal.addEventListener('abort', onAbort, { once: true });
@@ -35,7 +35,7 @@ function nearest(bot: Bot, names: string[], maxDistance = 16): Block | null {
 }
 
 /** Pose un bloc de l'inventaire à côté du bot (sur le sol), pour le four ou le coffre manquant. */
-async function placeNearby(bot: Bot, itemName: string): Promise<Block | null> {
+export async function placeNearby(bot: Bot, itemName: string): Promise<Block | null> {
   const item = bot.inventory.items().find((i) => i.name === itemName);
   if (!item) return null;
   const me = bot.entity.position.floored();

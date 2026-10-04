@@ -11,6 +11,8 @@ import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
+import { staircase } from './staircase.js';
+import { ensureTool, toolFor } from './tools.js';
 
 const { goals } = pathfinderPkg;
 type Vec3 = Bot['entity']['position'];
@@ -90,6 +92,25 @@ const follow: Skill<z.ZodObject<{ distance: z.ZodDefault<z.ZodNumber>; seconds: 
   },
 };
 
+/**
+ * Noms de blocs demandés → noms Minecraft. Un nom inconnu est pris comme une famille :
+ * « ore » / « minerais » → tous les *_ore, « log » / « bois » → toutes les bûches.
+ */
+export function expandBlockNames(known: string[], wanted: string[]): string[] {
+  const ALIASES: Record<string, string> = { minerai: 'ore', minerais: 'ore', ores: 'ore', bois: 'log', logs: 'log', buche: 'log', buches: 'log' };
+  const out = new Set<string>();
+  for (const raw of wanted) {
+    const w = raw.toLowerCase().replace(/^minecraft:/, '');
+    if (known.includes(w)) {
+      out.add(w);
+      continue;
+    }
+    const family = ALIASES[w] ?? w.replace(/s$/, '');
+    for (const k of known) if (k.endsWith(`_${family}`)) out.add(k);
+  }
+  return [...out];
+}
+
 /** Rayon de recherche des blocs à récolter, et essais ratés d'affilée avant d'abandonner. */
 const COLLECT_RADIUS = 48;
 const MAX_COLLECT_MISSES = 4;
@@ -102,9 +123,19 @@ const collect = {
   timeoutMs: (p: { count: number }) => Math.min(300_000, 10_000 * p.count + 20_000),
   async run(ctx: SkillContext, p: { blocks: string[]; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
-    const ids = p.blocks.map((b) => bot.registry.blocksByName[b]?.id).filter((id): id is number => id !== undefined);
+    const names = expandBlockNames(Object.keys(bot.registry.blocksByName), p.blocks);
+    const ids = names.map((b) => bot.registry.blocksByName[b]?.id).filter((id): id is number => id !== undefined);
     if (ids.length === 0) return fail('blocs inconnus', { blocks: p.blocks });
-    const have = () => p.blocks.reduce((s, b) => s + countItem(bot, b), 0);
+    // ce qui arrive dans l'inventaire : le bloc lui-même ou ce qu'il lâche (minerai de fer → fer brut, pierre → pavé)
+    const counted = new Set(names);
+    for (const id of ids) for (const drop of (bot.registry.blocks?.[id] as { drops?: unknown[] } | undefined)?.drops ?? []) {
+      const itemId = typeof drop === 'number' ? drop : (drop as { drop?: number | { id: number } }).drop;
+      const resolved = typeof itemId === 'number' ? itemId : itemId?.id;
+      const item = resolved !== undefined ? bot.registry.items?.[resolved] : undefined;
+      if (item) counted.add(item.name);
+    }
+    const have = () => [...counted].reduce((s, b) => s + countItem(bot, b), 0);
+    const tool = toolFor(names[0]!);
     const before = have();
     const gained = () => have() - before;
     // un bloc à la fois, le plus proche d'abord : collectblock abandonne toute sa liste dès qu'un trajet
@@ -130,6 +161,8 @@ const collect = {
           }
         }
         if (!target) break;
+        // hache cassée en pleine récolte, pas de pioche pour la pierre : il s'en refait une si possible
+        if (tool) await ensureTool(bot, tool, signal).catch(() => null);
         ctx.touch?.(target.position);
         const g0 = gained();
         try {
@@ -353,7 +386,7 @@ const say = {
 
 /** Bibliothèque : des primitives génériques ; leurs paramètres et leur enchaînement viennent de l'arbre. */
 export const SKILLS: Record<string, Skill> = Object.fromEntries(
-  [follow, collect, build, attack, craft, explore, eat, equip, say, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
+  [follow, collect, build, attack, craft, explore, eat, equip, say, staircase, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
 );
 
 export type SkillName = keyof typeof SKILLS;

@@ -7,6 +7,10 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « miner jusqu'en y=-10 … un while y != 10 » | Compétence `staircase {targetY, direction?}` : escalier vers le bas, arrêt devant lave/eau/vide, regraviers recreusés |
+| 2026-10-05 | joueurs | « s'il casse sa hache, il la refait ? » | `ensureTool` : avant chaque bloc récolté/miné, refabrique hache ou pioche (planches, bâtons, établi posé si besoin) |
+| 2026-10-05 | Léa | « récolte tous les minerais » → blocs inconnus | Familles de blocs (`minerais` → *_ore, `bois` → bûches) ; gains comptés sur ce que le bloc lâche (minerai de fer → fer brut) |
+| 2026-10-05 | Alex | « alex t'as combien de buches » | Question reconnue même sans « ? » et avec l'interpellation devant |
 | 2026-10-05 | Léa | plantage « heap out of memory » (4 Go) sur « creuse en escalier » | Recherche de chemin bornée à 32 blocs (`searchRadius`), délai de calcul laissé à 5 s |
 | 2026-10-05 | Alex | « t'as du bois ou pas ? », « tu as eu tes trente bûches ? » | Réponses aux questions d'inventaire, calculées sur l'inventaire réel (`src/feedback/questions.ts`) |
 | 2026-10-05 | Alex | « je vais faire un sol comme toi » : constructions d'initiative au mauvais endroit | Plus de construction sans ordre (`BOT_BUILD_INITIATIVE=false` par défaut, garde-fou dans `applyGuards`) |
@@ -25,4 +29,8 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : voir l'historique git (2026-10-05, demandé par le joueur : récolte, construction sur demande, limite 32 blocs, questions).
 
-(aucun)
+1. Questions sans « ? »
+2. Compétence escalier
+3. Refabrication des outils
+4. Familles de blocs (minerais, bois)
+5. Gains comptés sur les objets lâchés
