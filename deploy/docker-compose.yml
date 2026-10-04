@@ -13,6 +13,9 @@ services:
       TYPE: "FABRIC"
       VERSION: "1.21"
       ONLINE_MODE: "FALSE"     # le bot n'a pas de compte Mojang
+      # serveur hors-ligne et public : seuls les joueurs de la whitelist entrent (ajout par RCON : whitelist add <pseudo>)
+      ENABLE_WHITELIST: "TRUE"
+      ENFORCE_WHITELIST: "TRUE"
       MEMORY: "10G"
       USE_AIKAR_FLAGS: "TRUE"
       # performances + voix + télémétrie pour le bot
