@@ -39,7 +39,7 @@ const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
   teaching: [/\bregarde\b|\bobserve\b/, /je (te )?montre/, /(?<!pas )comme (ca|ça)\b(?! ?\?)/, /fais comme moi|voila comment|apprends/],
   order: [
     // verbe à l'impératif en tête de phrase ou après « non, » / « plutôt »
-    /(^|[,;.!] *|plutot )(construis|batis|bati|pose|mine|creuse|coupe|recolte|ramasse|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends)/,
+    /(^|[,;.!] *|plutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|ramasse|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |apporte|ramene|aide[- ]moi|cherche)/,
     /^(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais)\b/,
   ],
 };
@@ -58,9 +58,21 @@ function inferDomain(t: string): Domain | undefined {
   return DOMAIN_WORDS.find(([, r]) => r.test(t))?.[0];
 }
 
+/**
+ * Retire l'interpellation du personnage (« Alex, coupe du bois », « hé Alex … », « …, Alex ») :
+ * sans cela, le verbe d'un ordre n'est plus en tête de phrase.
+ */
+export function stripVocative(normalized: string, botName: string): string {
+  // le nom est normalisé (minuscules, sans accents) puis échappé pour servir dans une expression régulière
+  const name = norm(botName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const leading = new RegExp(`^(?:(?:he+|hey|eh|dis|ok|bon|allez)[\\s,!]*)?${name}\\b[\\s,!:.]*`);
+  const trailing = new RegExp(`[\\s,]+${name}[\\s!.?]*$`);
+  return normalized.replace(leading, '').replace(trailing, '').trim();
+}
+
 /** Étage 1 : règles locales, gratuites. `ambiguous` = laisser trancher le LLM. */
-export function classifyByRules(text: string): Classification & { ambiguous: boolean } {
-  const t = norm(text);
+export function classifyByRules(text: string, botName = 'Alex'): Classification & { ambiguous: boolean } {
+  const t = stripVocative(norm(text), botName);
   const hits = (Object.keys(RULES) as (keyof typeof RULES)[]).filter((k) => RULES[k].some((r) => r.test(t)));
   const domain = inferDomain(t);
   const priority: UtteranceLabel[] = ['correction', 'teaching', 'order', 'approval'];
@@ -84,7 +96,7 @@ const LlmClassification = z.object({
   confidence: z.number().min(0).max(1).default(0.7),
 });
 
-const SYSTEM = `Tu classes une phrase dite par un joueur de Minecraft au personnage IA qui l'accompagne.
+const system = (botName: string) => `Tu classes une phrase dite par un joueur de Minecraft au personnage IA qui l'accompagne. Ce personnage s'appelle ${botName} : une phrase qui commence par « ${botName} » s'adresse à lui (« ${botName} coupe du bois » est un ordre).
 Catégories : correction (il désapprouve ce que fait le personnage), approval (il approuve), teaching (il montre comment faire : « regarde »), order (il demande une action), chatter (bavardage).
 Réponds uniquement en JSON : {"label": "...", "also": "<seconde catégorie ou null>", "domain": "build|combat|mine|gather|explore|craft|survive|null", "confidence": 0..1}`;
 
@@ -97,14 +109,15 @@ export class UtteranceClassifier {
     private readonly llm: LlmClient | null,
     private readonly budget: Budget | null,
     private readonly model: string,
+    private readonly botName = 'Alex',
   ) {}
 
   async classify(text: string, context = ''): Promise<Classification> {
-    const rules = classifyByRules(text);
+    const rules = classifyByRules(text, this.botName);
     const { ambiguous, ...base } = rules;
     if (!ambiguous || !this.llm || !this.budget || this.budget.exhausted()) return base;
     try {
-      const res = await this.llm.complete({ purpose: 'classify', model: this.model, system: SYSTEM, user: `${context ? `Contexte : ${context}\n` : ''}Phrase : « ${text} »`, maxTokens: 80 });
+      const res = await this.llm.complete({ purpose: 'classify', model: this.model, system: system(this.botName), user: `${context ? `Contexte : ${context}\n` : ''}Phrase : « ${text} »`, maxTokens: 80 });
       this.budget.record({ purpose: 'classify', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
       const start = res.text.indexOf('{');
       const parsed = LlmClassification.safeParse(JSON.parse(res.text.slice(start, res.text.lastIndexOf('}') + 1)));

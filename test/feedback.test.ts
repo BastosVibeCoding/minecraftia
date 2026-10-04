@@ -34,6 +34,16 @@ describe('classification par règles', () => {
     ['il fait beau aujourd’hui', 'chatter'],
   ])('« %s » → %s', (text, expected) => expect(label(text)).toBe(expected));
 
+  it.each([
+    ['Alex coupe du bois.', 'order'],
+    ['alex coupe du bois', 'order'],
+    ['Hé Alex, construit un mur', 'order'],
+    ['coupe du bois, Alex !', 'order'],
+    ['Alex, non, pas comme ça', 'correction'],
+    ['Alex, regarde', 'teaching'],
+    ['Salut Alex !', 'chatter'],
+  ])('interpellation du personnage : « %s » → %s', (text, expected) => expect(label(text)).toBe(expected));
+
   it('« non, construis plutôt en bois » : correction + ordre, sans ambiguïté', () => {
     const c = classifyByRules('non, construis plutôt en bois');
     expect(c).toMatchObject({ label: 'correction', also: 'order', domain: 'build', ambiguous: false });
