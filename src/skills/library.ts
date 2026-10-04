@@ -283,7 +283,8 @@ const attack = {
     useShield: z.boolean().default(false),
   }),
   timeoutMs: () => 45_000,
-  async run({ bot }: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
+  async run(ctx: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
     const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : p.targets.includes(e.name ?? ''));
     // seulement ce qu'il voit : pas de cible repérée à travers un mur
     const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS && canSee(bot, e));
@@ -302,6 +303,7 @@ const attack = {
       while (!signal.aborted && target.isValid) {
         if (bot.health <= p.retreatHp) {
           bot.pvp.forceStop();
+          ctx.restoreMovements?.();
           return killed.length ? { status: 'success', detail: { killed, retreated: true } } : fail('repli', { health: bot.health, retreated: true });
         }
         await abortableSleep(150, signal);
@@ -309,6 +311,7 @@ const attack = {
       if (!target.isValid) killed.push(target.name ?? 'cible');
     }
     bot.pvp.forceStop();
+    ctx.restoreMovements?.();
     if (killed.length) return { status: 'success', detail: { killed } };
     return fail('interrompu');
   },

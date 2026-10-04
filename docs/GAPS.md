@@ -7,6 +7,8 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | joueurs | les bots cassent les vitres posées | mineflayer-pvp imposait ses réglages (creuser partout) pendant et après chaque combat : pvp reçoit nos réglages protégés sans creuser, réglages remis après l'attaque, garde toutes les 2 s qui rétablit nos réglages si un module les remplace |
+| 2026-10-05 | joueurs | chat : `{ "response": … }` et « Je te suis ! » en boucle | Réponse extraite du JSON (`plainReply`) ; plus de phrase pour un simple suivi, sauf en réponse à un ordre |
 | 2026-10-05 | Léa | « t'as mangé ? » | Questions d'état : faim, vie, « ça va ? » (vie et faim réelles). Seaux, redstone tenus par le joueur : ignorés volontairement |
 | 2026-10-05 | joueurs | les bots voient les monstres à travers les murs | `canSee` (rayon yeux → tête/pieds, arrêté par les blocs opaques ; verre, feuilles, barreaux, clôtures laissent voir ; contact à 1,5 bloc) appliqué aux réflexes, à la fuite, aux cibles d'attaque et au monde décrit au modèle |
 | 2026-10-05 | Léa | « tue les poules » → aucune cible | Attaque : recherche à 32 blocs (au lieu de 16) et enchaînement des cibles jusqu'à 8. Seau de lave tenu par le joueur : ignoré volontairement |
@@ -42,8 +44,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (« donne » → dernier objet, tous les fours, BOT_PEERS, four approvisionné, « prend », ramasser au sol).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (attaque enchaînée, vision sans murs, questions d'état, vitres protégées du combat, JSON dans le chat, suivi silencieux).
 
-1. Attaque : 32 blocs, cibles enchaînées
-2. Pas de vision à travers les murs
-3. Questions d'état (faim, vie, ça va)
+(aucun)

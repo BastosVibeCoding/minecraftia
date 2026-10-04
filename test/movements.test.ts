@@ -82,3 +82,18 @@ describe('ouvreur de portes', () => {
     expect(world({ '1,64,0': { name: 'oak_door', props: { open: false, half: 'lower' } } }, false).opener.step([{ x: 1, y: 64, z: 0 }], 0)).toBeNull();
   });
 });
+
+describe("réglages protégés (cas réel : vitres cassées après un combat)", () => {
+  it("nos réglages sont reconnaissables ; ceux d'un module tiers non", async () => {
+    const { companionMovements, isCompanionMovements } = await import('../src/bot/movements.js');
+    const mcData = (await import('minecraft-data')).default('1.21');
+    const bot = { registry: mcData, version: '1.21', world: { getBlock: () => null }, blockAt: () => null, entities: {} } as never;
+    const ours = companionMovements(bot, { isProtected: () => true });
+    expect(isCompanionMovements(ours)).toBe(true);
+    expect(isCompanionMovements({ canDig: true })).toBe(false);
+    // une vitre posée ne peut pas être cassée pour passer, même quand creuser est permis
+    const dig = companionMovements(bot, { canDig: true, isProtected: (b) => b.name.includes('glass') });
+    const glass = { type: mcData.blocksByName.glass_pane!.id, name: 'glass_pane', position: { x: 0, y: 64, z: 0 } };
+    expect((dig as unknown as { safeToBreak(b: unknown): boolean }).safeToBreak(glass)).toBe(false);
+  });
+});

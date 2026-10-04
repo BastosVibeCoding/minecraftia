@@ -75,6 +75,26 @@ export function stripVocative(normalized: string, botName: string): string {
   return normalized.replace(leading, '').replace(trailing, '').trim();
 }
 
+/**
+ * Texte de réponse à afficher : le modèle emballe parfois sa phrase en JSON (`{ "response": "…" }`)
+ * ou dans un bloc de code (cas réel dans le chat) ; on n'en garde que la phrase.
+ */
+export function plainReply(raw: string): string {
+  let t = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  if (t.startsWith('{')) {
+    try {
+      const v = JSON.parse(t) as unknown;
+      const first = v && typeof v === 'object' ? Object.values(v).find((x) => typeof x === 'string') : undefined;
+      if (typeof first === 'string') t = first;
+    } catch {
+      // JSON abîmé : on garde ce qui est entre les premiers guillemets de valeur
+      const m = /:\s*"([^"]+)"/.exec(t);
+      if (m) t = m[1]!;
+    }
+  }
+  return t.replace(/^["«\s]+|["»\s]+$/g, '').replace(/\s+/g, ' ').trim();
+}
+
 /** Phrase normalisée, sans l'interpellation du personnage (« Alex, donne » → « donne »). */
 export function withoutVocative(text: string, botName: string): string {
   return stripVocative(norm(text), botName);
@@ -142,7 +162,7 @@ export class UtteranceClassifier {
     try {
       const res = await this.llm.complete({ purpose: 'chat', model: this.model, system, user: text, maxTokens: 120 });
       this.budget.record({ purpose: 'chat', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
-      const out = res.text.replace(/\s+/g, ' ').trim().slice(0, 240);
+      const out = plainReply(res.text).slice(0, 240);
       return out || null;
     } catch (err) {
       this.budget.record({ purpose: 'chat', model: this.model, promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, ok: false, error: err instanceof LlmError ? err.message : String(err) });

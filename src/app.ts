@@ -14,7 +14,7 @@ import { isAddressed, type UtteranceClassifier } from './feedback/classifier.js'
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
-import { companionMovements, installDoorOpener } from './bot/movements.js';
+import { companionMovements, installDoorOpener, isCompanionMovements } from './bot/movements.js';
 import { PlacedBlocks } from './bot/placedBlocks.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
@@ -42,6 +42,8 @@ import { plugin as pvpPlugin } from 'mineflayer-pvp';
 const { pathfinder } = pathfinderPkg;
 /** Rayon maximal exploré par le pathfinder autour du bot (blocs). */
 const PATH_SEARCH_RADIUS = 32;
+/** Fréquence de vérification des réglages de déplacement (protection des blocs des joueurs). */
+const MOVEMENTS_GUARD_MS = 2000;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
 const RECENT_EPISODES = 5;
@@ -267,8 +269,19 @@ export class Companion {
       // recherche de chemin bornée : sans limite, un trajet avec droit de creuser vers un bloc enfoui
       // a fait gonfler la mémoire de Léa jusqu'à 4 Go (plantage « heap out of memory »)
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = PATH_SEARCH_RADIUS;
-      // collectblock impose ses réglages (creuser partout) : on lui donne les nôtres, protégés
+      // collectblock et pvp imposent leurs réglages (creuser partout, vitres comprises) : on leur
+      // donne les nôtres, protégés ; pvp n'a pas besoin de creuser pour suivre une cible
       bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
+      (bot.pvp as unknown as { movements: unknown }).movements = companionMovements(bot, { isProtected });
+      // garde : si un module remplace malgré tout nos réglages, on les remet (et on le note)
+      const guard = setInterval(() => {
+        const current = (bot.pathfinder as unknown as { movements?: unknown }).movements;
+        if (current && !isCompanionMovements(current)) {
+          this.logger.warn('réglages de déplacement remplacés par un module : blocs protégés rétablis');
+          bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
+        }
+      }, MOVEMENTS_GUARD_MS);
+      bot.once('end', () => clearInterval(guard));
     } catch (err) {
       this.logger.error({ err }, 'initialisation du pathfinder impossible');
     }

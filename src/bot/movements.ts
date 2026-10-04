@@ -69,7 +69,16 @@ export function companionMovements(bot: Bot, opts: MovementOptions = {}): Instan
     adaptDoor(b);
     return b as unknown as ReturnType<typeof getBlock>;
   };
+  (m as unknown as Record<string, unknown>)[COMPANION] = true;
   return m;
+}
+
+/** Marque des réglages construits ici (protégés) : tout autre réglage vient d'un module tiers. */
+const COMPANION = '__minecraftiaMovements';
+
+/** Ces réglages de déplacement sont-ils les nôtres (blocs des joueurs protégés) ? */
+export function isCompanionMovements(m: unknown): boolean {
+  return Boolean(m && (m as Record<string, unknown>)[COMPANION]);
 }
 
 type Pos = { x: number; y: number; z: number };

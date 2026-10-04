@@ -7,7 +7,7 @@ import { DecisionCache } from '../src/decider/cache.js';
 import type { DecisionRecord } from '../src/decider/decider.js';
 import type { DecisionLoop } from '../src/decider/loop.js';
 import type { LlmClient } from '../src/decider/llm.js';
-import { classifyByRules, isAddressed, UtteranceClassifier } from '../src/feedback/classifier.js';
+import { classifyByRules, isAddressed, plainReply, UtteranceClassifier } from '../src/feedback/classifier.js';
 import { answerInventoryQuestion } from '../src/feedback/questions.js';
 import { FeedbackHandler, type FeedbackDeps } from '../src/feedback/feedback.js';
 import { Observer } from '../src/observer/observer.js';
@@ -288,4 +288,11 @@ describe("conversation (manque réel : « Léa raconte-moi une blague »)", () =
     expect(seen[0]!.system).toContain('Tu es Lea, une compagne');
     expect(await new UtteranceClassifier(null, null, 'fast', 'Lea').reply('salut')).toBeNull();
   });
+});
+
+it("réponse de conversation emballée en JSON par le modèle : seule la phrase est dite (cas réel)", () => {
+  expect(plainReply('{ "response": "J\'essaie de m\'allonger, mais la nuit n\'est pas encore tombée." }')).toBe("J'essaie de m'allonger, mais la nuit n'est pas encore tombée.");
+  expect(plainReply('{ "reponse": "Oups, désolée pour les vitres !" }')).toBe('Oups, désolée pour les vitres !');
+  expect(plainReply('```json\n{"text": "Salut !"}\n```')).toBe('Salut !');
+  expect(plainReply('  Pourquoi les creepers sont tristes ?\n Parce que…  ')).toBe('Pourquoi les creepers sont tristes ? Parce que…');
 });

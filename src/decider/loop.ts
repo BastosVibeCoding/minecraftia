@@ -157,7 +157,8 @@ export class DecisionLoop {
       if (order && (d.skill === 'follow' || record.source === 'fallback')) this.deps.gaps?.unfulfilledOrder(order);
       if (d.needsApproval) {
         if (!(await this.propose(record))) return;
-      } else if (d.say) {
+      } else if (d.say && (d.skill !== 'follow' || order)) {
+        // un simple suivi ne se commente pas (« Je te suis ! » toutes les 30 s encombrait le chat)
         this.say(d.say);
       }
       await this.execute(record, d.skill, d.params, order);
