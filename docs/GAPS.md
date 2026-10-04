@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | « t'as une hache ? », « t'as une pioche ? » (2× chacun) | Questions sur les outils : il dit lesquels (« une pioche en pierre ») |
 | 2026-10-05 | joueurs | pioche adaptée au minerai, demander au joueur si rien | `ensureHarvestTool` : outil requis par le bloc (`harvestTools`), inventaire → fabrication → coffres proches → demande au joueur ; « va miner » / « va récolter » sans cible → « je mine quoi ? », la réponse complète l'ordre. Vitres vérifiées : blocs pleins et protégés |
 | 2026-10-05 | Léa | « miner jusqu'en y=-10 … un while y != 10 » | Compétence `staircase {targetY, direction?}` : escalier vers le bas, arrêt devant lave/eau/vide, regraviers recreusés |
 | 2026-10-05 | joueurs | « s'il casse sa hache, il la refait ? » | `ensureTool` : avant chaque bloc récolté/miné, refabrique hache ou pioche (planches, bâtons, établi posé si besoin) |
@@ -30,4 +31,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 7 éléments (questions, escalier, outils, familles de blocs, objets lâchés, pioche adaptée et demande au joueur, « je mine quoi ? »).
 
-(aucun)
+1. Questions sur les outils

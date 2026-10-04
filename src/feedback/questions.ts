@@ -25,6 +25,29 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
   { words: /\blaine\b/, label: 'laine', match: (i) => i.endsWith('_wool') },
 ];
 
+const TIER_FR: Record<string, string> = { wooden: 'en bois', stone: 'en pierre', iron: 'en fer', golden: 'en or', diamond: 'en diamant', netherite: 'en netherite' };
+/** Outils : on dit lesquels (« une pioche en pierre »), pas seulement combien. */
+const TOOLS: { words: RegExp; kind: string; fr: string }[] = [
+  { words: /\bpioches?\b/, kind: 'pickaxe', fr: 'pioche' },
+  { words: /\bhaches?\b/, kind: 'axe', fr: 'hache' },
+  { words: /\bpelles?\b/, kind: 'shovel', fr: 'pelle' },
+  { words: /\bepees?\b/, kind: 'sword', fr: 'épée' },
+  { words: /\bhoues?\b/, kind: 'hoe', fr: 'houe' },
+];
+
+function answerTool(t: string, inventory: Record<string, number>): string | null {
+  const asked = TOOLS.filter((x) => x.words.test(t));
+  if (asked.length === 0) return null;
+  return asked
+    .map((x) => {
+      const owned = Object.keys(inventory)
+        .filter((i) => i.endsWith(`_${x.kind}`) && !(x.kind === 'axe' && i.endsWith('_pickaxe')))
+        .map((i) => `une ${x.fr} ${TIER_FR[i.slice(0, -x.kind.length - 1)] ?? ''}`.trim());
+      return owned.length ? `Oui, j'ai ${owned.join(' et ')}.` : `Non, je n'ai pas de ${x.fr}.`;
+    })
+    .join(' ');
+}
+
 /** Phrase interrogative (point d'interrogation, ou tournure de question en tête). */
 export function isQuestion(text: string): boolean {
   const t = norm(text);
@@ -36,6 +59,8 @@ export function isQuestion(text: string): boolean {
 export function answerInventoryQuestion(text: string, inventory: Record<string, number>): string | null {
   if (!isQuestion(text)) return null;
   const t = norm(text);
+  const tool = answerTool(t, inventory);
+  if (tool) return tool;
   const asked = FAMILIES.filter((f) => f.words.test(t));
   if (asked.length > 0) {
     return asked

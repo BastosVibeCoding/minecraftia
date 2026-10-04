@@ -99,3 +99,9 @@ it("« alex t'as combien de buches » sans point d'interrogation est une questio
 it("les vitres et le verre sont des blocs de construction protégés", () => {
   for (const n of ['glass', 'glass_pane', 'white_stained_glass_pane', 'tinted_glass']) expect(isBuildingBlock(n), n).toBe(true);
 });
+
+it("« t'as une pioche ? » / « t'as une hache ? » : il dit lesquelles (manques réels)", () => {
+  const inv = { stone_pickaxe: 1, wooden_pickaxe: 1, oak_log: 3 };
+  expect(answerInventoryQuestion('ALEX T’as une pioche ?', inv)).toBe("Oui, j'ai une pioche en pierre et une pioche en bois.");
+  expect(answerInventoryQuestion("alex t'as une hache ?", inv)).toBe("Non, je n'ai pas de hache.");
+});
