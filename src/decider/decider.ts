@@ -44,6 +44,36 @@ export function fallbackDecision(reason: string): Decision {
 }
 
 /**
+ * Règles appliquées par le code, quoi qu'en dise le LLM (partagées avec le banc d'essai des modèles) :
+ * - un ordre explicite du joueur s'exécute sans demander ;
+ * - jamais un mécanisme corrigé, même si le LLM ne le cite pas ;
+ * - la bande d'autonomie du domaine décide : « observe » interdit d'agir, « propose » exige une validation ;
+ * - pas de construction sans le matériau dans l'inventaire ;
+ * - seuls les identifiants de mécanismes réellement proposés sont conservés.
+ */
+export function applyGuards(
+  d: Decision,
+  branches: Branch[],
+  autonomy: Record<Domain, { band: Band; score: number }>,
+  ordered = false,
+  inventory: Record<string, number> = {},
+): Decision {
+  const known = new Set(branches.flatMap((b) => b.mechanisms.map((m) => m.id)));
+  const basedOn = d.basedOn.filter((id) => known.has(id));
+  if (d.skill === 'build' && typeof d.params.material === 'string' && (inventory[d.params.material] ?? 0) < 4) {
+    return fallbackDecision(`pas assez de ${d.params.material} dans l'inventaire pour construire`);
+  }
+  if (ordered || d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
+  const key = actionKey(d.skill, d.params);
+  const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
+  const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);
+  if (avoided && !endorsed) return fallbackDecision(`reproduirait un mécanisme corrigé par le joueur (${key})`);
+  const band = autonomy[d.domain]?.band ?? 'observe';
+  if (band === 'observe') return fallbackDecision(`domaine ${d.domain} encore en observation`);
+  return { ...d, basedOn, needsApproval: band === 'propose' };
+}
+
+/**
  * Décideur : état du monde + branches pertinentes + autonomie → décision JSON validée.
  * Jamais d'appel par tick ; un appel seulement si des branches existent, si le cache ne répond pas
  * et si le budget le permet. Sortie invalide : une nouvelle tentative, puis repli sûr.
@@ -130,7 +160,7 @@ export class Decider {
       }
       const parsed = parseDecision(text);
       if (parsed.ok) {
-        const decision = this.enforce(parsed.decision, branches, autonomy, Boolean(order));
+        const decision = applyGuards(parsed.decision, branches, autonomy, Boolean(order), world.bot.inventory);
         if (decision.skill !== 'none' && decision.skill !== 'follow') cache.set(hash, decision.domain, decision);
         return this.save(trigger, decision, 'llm', model, hash, situationText, branches);
       }
@@ -138,26 +168,6 @@ export class Decider {
       logger.warn({ error, attempt }, 'décision LLM invalide');
     }
     return this.save(trigger, fallbackDecision(`sortie LLM invalide : ${error}`), 'fallback', model, hash, situationText, branches);
-  }
-
-  /**
-   * Règles appliquées par le code, quoi qu'en dise le LLM : la bande d'autonomie du domaine décide
-   * s'il faut une validation (« propose ») ou si l'action est interdite (« observe ») ; seuls les
-   * identifiants de mécanismes réellement proposés sont conservés.
-   */
-  private enforce(d: Decision, branches: Branch[], autonomy: Record<Domain, { band: Band; score: number }>, ordered = false): Decision {
-    const known = new Set(branches.flatMap((b) => b.mechanisms.map((m) => m.id)));
-    const basedOn = d.basedOn.filter((id) => known.has(id));
-    // un ordre explicite du joueur s'exécute sans demander, quelle que soit la bande
-    if (ordered || d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
-    // jamais un mécanisme corrigé, même si le LLM ne le cite pas (sauf ordre explicite, traité plus haut)
-    const key = actionKey(d.skill, d.params);
-    const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
-    const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);
-    if (avoided && !endorsed) return fallbackDecision(`reproduirait un mécanisme corrigé par le joueur (${key})`);
-    const band = autonomy[d.domain]?.band ?? 'observe';
-    if (band === 'observe') return fallbackDecision(`domaine ${d.domain} encore en observation`);
-    return { ...d, basedOn, needsApproval: band === 'propose' };
   }
 
   private save(trigger: string, decision: Decision, source: DecisionRecord['source'], model: string | null, hash: string, situationText: string, branches: Branch[]): DecisionRecord {

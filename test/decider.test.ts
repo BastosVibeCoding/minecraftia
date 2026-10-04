@@ -234,6 +234,17 @@ describe("garde-fou contre un mécanisme corrigé", () => {
   });
 });
 
+describe('garde-fou matériaux', () => {
+  it("ne lance pas une construction sans le matériau dans l'inventaire (cas vu au banc)", async () => {
+    const { decider, tree, stub } = await setup();
+    await tree.ingest(wallEpisode());
+    stub.scripted.push(JSON.stringify({ skill: 'build', params: { shape: 'wall', material: 'stone_bricks' }, domain: 'build', intent: 'mur' }));
+    const r = await decider.decide('a', world({ bot: { ...world().bot, inventory: { dirt: 3 } } }));
+    expect(r.decision.skill).toBe('follow');
+    expect(r.decision.rationale).toContain('inventaire');
+  });
+});
+
 describe('routage des modèles', () => {
   it('petit modèle par défaut, gros après 3 échecs dans la même situation, gros pour composer', () => {
     const r = new ModelRouter(FAST, STRONG);
