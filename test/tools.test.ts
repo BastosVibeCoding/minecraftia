@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
-import { answerInventoryQuestion } from '../src/feedback/questions.js';
+import { answerInventoryQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
 import { askForTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
@@ -131,4 +131,12 @@ describe("poser un objet à un endroit (manque réel : « pose le four à côté
     expect(r.status).toBe('success');
     expect(placed).toEqual(['11,10']);
   });
+});
+
+it("« Léa, t'as mangé ? », « ça va ? », « t'as combien de vie ? » : elle parle de son état (manque réel)", () => {
+  expect(answerStatusQuestion("Léa, t'as mangé ?", { health: 20, food: 20 })).toBe("Non, je n'ai pas faim.");
+  expect(answerStatusQuestion('tu as faim ?', { health: 20, food: 6 })).toBe("Oui, j'ai faim (6/20).");
+  expect(answerStatusQuestion("t'as combien de vie", { health: 13.5, food: 20 })).toBe("J'ai 14/20 de vie.");
+  expect(answerStatusQuestion('ça va Léa ?', { health: 20, food: 19 })).toBe('Ça va bien ! J’ai 20/20 de vie.'.replace('’', "'"));
+  expect(answerStatusQuestion("t'as du bois ?", { health: 20, food: 20 })).toBeNull();
 });

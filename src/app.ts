@@ -155,6 +155,7 @@ export class Companion {
       botName: config.minecraft.username,
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
       lastGained: () => this.session?.loop.lastGained() ?? null,
+      status: () => (this.session ? { health: this.session.bot.health, food: this.session.bot.food } : null),
     });
     this.connection = new BotConnection(
       { ...config.minecraft, ...config.reconnect },

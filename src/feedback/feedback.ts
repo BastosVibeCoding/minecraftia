@@ -11,7 +11,7 @@ import type { Store } from '../store/store.js';
 import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
-import { answerInventoryQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
+import { answerInventoryQuestion, answerStatusQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
 export interface FeedbackDeps {
@@ -37,6 +37,8 @@ export interface FeedbackDeps {
   inventory?: () => Record<string, number> | null;
   /** Dernier objet récolté par le bot (pour « donne » tout court). */
   lastGained?: () => { item: string; at: number } | null;
+  /** Vie et faim du bot, pour « t'as faim ? », « ça va ? ». */
+  status?: () => { health: number; food: number } | null;
 }
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
@@ -93,7 +95,8 @@ export class FeedbackHandler {
       }
     }
     if (mentionsAnItem(text)) this.lastMention = { text, at: d.clock.now() };
-    const answer = inv ? answerInventoryQuestion(text, inv) : null;
+    const st = d.status?.();
+    const answer = (st ? answerStatusQuestion(text, st) : null) ?? (inv ? answerInventoryQuestion(text, inv) : null);
     if (answer) {
       d.say(answer);
       d.logger.info({ channel }, `question du joueur : « ${text} » → ${answer}`);

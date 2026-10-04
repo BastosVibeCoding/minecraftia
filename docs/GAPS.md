@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « t'as mangé ? » | Questions d'état : faim, vie, « ça va ? » (vie et faim réelles). Seaux, redstone tenus par le joueur : ignorés volontairement |
 | 2026-10-05 | joueurs | les bots voient les monstres à travers les murs | `canSee` (rayon yeux → tête/pieds, arrêté par les blocs opaques ; verre, feuilles, barreaux, clôtures laissent voir ; contact à 1,5 bloc) appliqué aux réflexes, à la fuite, aux cibles d'attaque et au monde décrit au modèle |
 | 2026-10-05 | Léa | « tue les poules » → aucune cible | Attaque : recherche à 32 blocs (au lieu de 16) et enchaînement des cibles jusqu'à 8. Seau de lave tenu par le joueur : ignoré volontairement |
 | 2026-10-05 | Léa | « reprends tes affaires au sol » | Compétence `pickup {radius?}` : marche sur chaque objet tombé, du plus proche au plus loin ; verbe « reprends ». « fish of the chicken » : transcription ratée, ignoré |
@@ -45,3 +46,4 @@ Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite s
 
 1. Attaque : 32 blocs, cibles enchaînées
 2. Pas de vision à travers les murs
+3. Questions d'état (faim, vie, ça va)

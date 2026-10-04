@@ -112,3 +112,18 @@ export function mentionsAnItem(text: string): boolean {
 export function isBareGive(text: string): boolean {
   return /^(donne|file|passe|balance)(?:[- ](?:le|la|les|moi|ca|ça|lui|nous))*[ !.?]*$/.test(norm(text));
 }
+
+/** Questions sur l'état du bot (« t'as faim ? », « t'as mangé ? », « ça va ? », « t'as combien de vie ? »). */
+export function answerStatusQuestion(text: string, s: { health: number; food: number }): string | null {
+  if (!isQuestion(text) && !/\b(ca va|ça va)\b/.test(norm(text))) return null;
+  const t = norm(text);
+  const hunger = s.food >= 18 ? "Non, je n'ai pas faim." : s.food >= 10 ? `Un peu faim (${Math.round(s.food)}/20).` : `Oui, j'ai faim (${Math.round(s.food)}/20).`;
+  const life = `J'ai ${Math.round(s.health)}/20 de vie.`;
+  if (/\b(faim|mange|bouffe)\b/.test(t)) return hunger;
+  if (/\b(vie|coeurs?|sante|blesse)\b/.test(t)) return life;
+  if (/\b(ca va|ça va|comment tu vas|tu vas bien)\b/.test(t)) {
+    const ok = s.health >= 14 && s.food >= 14;
+    return ok ? `Ça va bien ! ${life}` : `Bof : ${life} ${hunger}`;
+  }
+  return null;
+}
