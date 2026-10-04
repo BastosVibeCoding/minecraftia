@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « t'as fini ? » (2×) | Question d'avancement : action en cours, sinon résultat de la dernière |
 | 2026-10-05 | Léa | « clique sur le lit », « t'as le sable ? » | Verbe « clique » ; questions : sable, gravier, terre, verre, argile. Seau de lave, dropper : ignorés volontairement |
 | 2026-10-05 | joueurs | les bots cassent les vitres posées | mineflayer-pvp imposait ses réglages (creuser partout) pendant et après chaque combat : pvp reçoit nos réglages protégés sans creuser, réglages remis après l'attaque, garde toutes les 2 s qui rétablit nos réglages si un module les remplace |
 | 2026-10-05 | joueurs | chat : `{ "response": … }` et « Je te suis ! » en boucle | Réponse extraite du JSON (`plainReply`) ; plus de phrase pour un simple suivi, sauf en réponse à un ordre |
@@ -48,3 +49,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (attaque enchaînée, vision sans murs, questions d'état, vitres protégées du combat, JSON dans le chat, suivi silencieux).
 
 1. Verbe « clique », questions sable/gravier/terre/verre/argile
+2. « t'as fini ? »

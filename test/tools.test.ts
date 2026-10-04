@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
 import { classifyByRules } from '../src/feedback/classifier.js';
-import { answerInventoryQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
+import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
 import { askForTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
@@ -146,4 +146,11 @@ it("« Léa t'as le sable ? » et « Léa clique sur le lit » (manques réels)"
   expect(answerInventoryQuestion("Léa t'as le sable ?", { sand: 23 })).toBe("J'ai 23 sable.");
   expect(answerInventoryQuestion("t'as du verre ?", { glass_pane: 4, glass: 2 })).toBe("J'ai 6 verre.");
   expect(classifyByRules('Léa clique sur le lit', 'Lea').label).toBe('order');
+});
+
+it("« Léa t'as fini ? » : action en cours, ou résultat de la dernière (manque réel, 2×)", () => {
+  expect(answerProgressQuestion("Léa t'as fini ?", { current: 'collect', lastOutcome: null })).toBe('Pas encore, je récolte.');
+  expect(answerProgressQuestion('tu as fini', { current: 'follow', lastOutcome: 'collect : réussi +23 sand' })).toBe("Oui, c'est fini : collect : réussi +23 sand.");
+  expect(answerProgressQuestion('tu fais quoi ?', { current: null, lastOutcome: null })).toBe("Je n'ai rien en cours, je te suis.");
+  expect(answerProgressQuestion("t'as du sable ?", { current: null, lastOutcome: null })).toBeNull();
 });

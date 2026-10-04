@@ -132,3 +132,18 @@ export function answerStatusQuestion(text: string, s: { health: number; food: nu
   }
   return null;
 }
+
+const ACTION_FR: Record<string, string> = {
+  collect: 'je récolte', build: 'je construis', attack: 'je combats', craft: 'je fabrique', explore: "j'explore", eat: 'je mange', equip: "je m'équipe",
+  staircase: "je creuse l'escalier", smelt: 'je fais cuire', furnace_take: 'je vide les fours', store: 'je range', retrieve: 'je prends dans le coffre',
+  plant: 'je plante', torch: 'je pose des torches', sleep: 'je dors', give: 'je te donne', place: 'je pose', pickup: 'je ramasse',
+};
+
+/** « t'as fini ? », « tu fais quoi ? » : l'action en cours, ou le résultat de la dernière. */
+export function answerProgressQuestion(text: string, p: { current: string | null; lastOutcome: string | null }): string | null {
+  const t = norm(text);
+  if (!/\b(t'as fini|tu as fini|c'est fini|t'as termine|tu as termine|tu fais quoi|qu'est[- ]ce que tu fais|t'en es ou|tu en es ou|ou t'en es)\b/.test(t)) return null;
+  if (p.current && p.current !== 'follow') return `Pas encore, ${ACTION_FR[p.current] ?? `je fais ${p.current}`}.`;
+  if (p.lastOutcome) return `Oui, c'est fini : ${p.lastOutcome}.`;
+  return "Je n'ai rien en cours, je te suis.";
+}

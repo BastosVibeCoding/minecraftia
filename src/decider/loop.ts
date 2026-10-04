@@ -256,6 +256,11 @@ export class DecisionLoop {
     else ctx.bot.chat(text);
   }
 
+  /** Résultat de la dernière action exécutée (pour « t'as fini ? »). */
+  get lastResult(): string | null {
+    return this.lastOutcome;
+  }
+
   /** Dernier objet gagné par une action (récolte, cuisson…). */
   lastGained(): { item: string; at: number } | null {
     return this.gained;
