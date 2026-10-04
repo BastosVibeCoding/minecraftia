@@ -29,6 +29,11 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
   { words: /\blits?\b/, label: 'lit', match: (i) => i.endsWith('_bed') },
   { words: /\bseaux?\b/, label: 'seau', match: (i) => i.endsWith('bucket') },
   { words: /\bbatons?\b/, label: 'bâtons', match: (i) => i === 'stick' },
+  { words: /\bsables?\b/, label: 'sable', match: (i) => i === 'sand' || i === 'red_sand' },
+  { words: /\bgraviers?\b/, label: 'gravier', match: (i) => i === 'gravel' },
+  { words: /\bterre\b/, label: 'terre', match: (i) => i === 'dirt' || i === 'coarse_dirt' },
+  { words: /\b(verre|vitres?)\b/, label: 'verre', match: (i) => i.includes('glass') },
+  { words: /\bargile\b/, label: 'argile', match: (i) => i === 'clay_ball' || i === 'clay' },
 ];
 
 const TIER_FR: Record<string, string> = { wooden: 'en bois', stone: 'en pierre', iron: 'en fer', golden: 'en or', diamond: 'en diamant', netherite: 'en netherite' };

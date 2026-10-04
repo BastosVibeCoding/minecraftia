@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
+import { classifyByRules } from '../src/feedback/classifier.js';
 import { answerInventoryQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
@@ -139,4 +140,10 @@ it("« Léa, t'as mangé ? », « ça va ? », « t'as combien de vie ? » : ell
   expect(answerStatusQuestion("t'as combien de vie", { health: 13.5, food: 20 })).toBe("J'ai 14/20 de vie.");
   expect(answerStatusQuestion('ça va Léa ?', { health: 20, food: 19 })).toBe('Ça va bien ! J’ai 20/20 de vie.'.replace('’', "'"));
   expect(answerStatusQuestion("t'as du bois ?", { health: 20, food: 20 })).toBeNull();
+});
+
+it("« Léa t'as le sable ? » et « Léa clique sur le lit » (manques réels)", () => {
+  expect(answerInventoryQuestion("Léa t'as le sable ?", { sand: 23 })).toBe("J'ai 23 sable.");
+  expect(answerInventoryQuestion("t'as du verre ?", { glass_pane: 4, glass: 2 })).toBe("J'ai 6 verre.");
+  expect(classifyByRules('Léa clique sur le lit', 'Lea').label).toBe('order');
 });
