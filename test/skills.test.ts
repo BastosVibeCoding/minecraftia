@@ -51,6 +51,34 @@ describe('bibliothèque de compétences', () => {
   });
 });
 
+describe('récolte interrompue par le pathfinder (cas réel)', () => {
+  function fakeBot(gainOnCollect: number) {
+    let logs = 2;
+    return {
+      registry: { blocksByName: { oak_log: { id: 7 } } },
+      findBlocks: () => [{ x: 1, y: 64, z: 1 }],
+      blockAt: (p: unknown) => ({ position: p }),
+      inventory: { items: () => [{ name: 'oak_log', count: logs }] },
+      collectBlock: {
+        collect: async () => {
+          logs += gainOnCollect;
+          throw new Error('Took to long to decide path to goal!');
+        },
+        cancelTask: async () => {},
+      },
+    } as unknown as Bot;
+  }
+  const run = (bot: Bot) => SKILLS.collect!.run({ bot, followPlayer: 'B' }, { blocks: ['oak_log'], count: 8 }, new AbortController().signal);
+
+  it("ce qui est arrivé dans l'inventaire compte, même si le trajet a été abandonné", async () => {
+    expect(await run(fakeBot(6))).toMatchObject({ status: 'success', detail: { gained: 6, partial: 'Took to long to decide path to goal!' } });
+  });
+
+  it("sans rien récolté, c'est un échec avec la vraie raison", async () => {
+    expect(await run(fakeBot(0))).toMatchObject({ status: 'failure', detail: { reason: 'Took to long to decide path to goal!' } });
+  });
+});
+
 describe('résultat d\'une action', () => {
   const base: ActionResult = { action: 'collect', domain: 'gather', status: 'success', startedAt: 0, endedAt: 10 };
   const snap = (inv: Record<string, number>, health = 20, deaths = 0) => ({ health, food: 20, inventory: inv, deaths });

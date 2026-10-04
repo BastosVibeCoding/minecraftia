@@ -100,9 +100,17 @@ const collect = {
     const targets = positions.map((pos) => bot.blockAt(pos)).filter((b): b is NonNullable<typeof b> => b !== null);
     for (const t of targets) ctx.touch?.(t.position);
     const before = p.blocks.reduce((s, b) => s + countItem(bot, b), 0);
-    await cancellable(bot.collectBlock.collect(targets, { ignoreNoPath: true }), signal, () => void bot.collectBlock.cancelTask());
+    // collectblock abandonne parfois en route (« Took to long to decide path to goal ») après avoir déjà
+    // récolté : ce qui compte, c'est ce qui est arrivé dans l'inventaire
+    let interruption: string | undefined;
+    try {
+      await cancellable(bot.collectBlock.collect(targets, { ignoreNoPath: true }), signal, () => void bot.collectBlock.cancelTask());
+    } catch (err) {
+      interruption = err instanceof Error ? err.message : String(err);
+    }
     const gained = p.blocks.reduce((s, b) => s + countItem(bot, b), 0) - before;
-    return gained > 0 ? { status: 'success', detail: { gained } } : fail('rien récolté');
+    if (gained > 0) return { status: 'success', detail: { gained, ...(interruption ? { partial: interruption } : {}) } };
+    return fail(interruption ?? 'rien récolté');
   },
 };
 
