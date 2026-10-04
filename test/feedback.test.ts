@@ -104,7 +104,7 @@ describe('effets des retours', () => {
     const ep: Episode = { player: 'Bastien', domain: 'build', kind: 'wall', summary: 'mur', situation: { text: 'construire un mur' }, mechanism: { skill: 'build', shape: 'wall', material: 'stone_bricks' }, params: {}, source: 'observed', startedAt: 0, endedAt: 1 };
     const ing = await tree.ingest(ep);
     let last: DecisionRecord | null = {
-      id: 1, source: 'llm', model: 'fast', situationHash: 'h', situationText: 'x', branches: [],
+      id: 1, source: 'llm', model: 'fast', situationHash: 'h', situationText: 'x', branches: [], trigger: 'épisode du joueur',
       decision: { skill: 'build', params: {}, domain: 'build', intent: 'construire un mur', basedOn: [ing.mechanismId], needsApproval: false, rationale: '' },
     };
     const handler = new FeedbackHandler({
@@ -128,6 +128,17 @@ describe('effets des retours', () => {
     expect(said).toContain('D\'accord, j\'arrête.');
     const u = store.db.prepare('SELECT label, channel FROM utterances').get() as { label: string; channel: string };
     expect(u).toEqual({ label: 'correction', channel: 'chat' });
+  });
+
+  it("reproche d'une initiative : le domaine passe « sur demande seulement » ; reproche d'un ordre : non", async () => {
+    const a = await setup();
+    await a.handler.handle('Bastien', "c'est nul ce que tu as fait", 'voice');
+    expect(a.autonomy.get('build').onRequestOnly).toBe(true);
+
+    const b = await setup();
+    b.setLast({ id: 2, source: 'llm', model: 'fast', situationHash: 'h', situationText: 'x', branches: [], trigger: 'ordre du joueur', decision: { skill: 'build', params: {}, domain: 'build', intent: 'mur', basedOn: [b.ing.mechanismId], needsApproval: false, rationale: '' } });
+    await b.handler.handle('Bastien', "c'est nul ce que tu as fait", 'voice');
+    expect(b.autonomy.get('build').onRequestOnly).toBeUndefined();
   });
 
   it('correction avec alternative : la consigne devient un ordre', async () => {
@@ -190,4 +201,20 @@ describe("ordres oraux réels (2026-10-04) mal compris", () => {
 
 it("« non, plutôt coupe du bois » : correction accompagnée d'un ordre", () => {
   expect(classifyByRules('non, plutot coupe du bois', 'Alex')).toMatchObject({ label: 'correction', also: 'order' });
+});
+
+describe("reproches réels d'Alex (2026-10-05)", () => {
+  it.each([
+    "Alex, c'est nul ce que tu as fait, il ne faut pas faire ça, si je ne te demande pas à construire, construis pas.",
+    "Alex, non, fais pas ça, je t'ai pas amené de construire.",
+  ])("« %s » est une correction, pas un ordre de construire", (text) => {
+    const c = classifyByRules(text, 'Alex');
+    expect(c.label).toBe('correction');
+    expect(c.also).toBeUndefined();
+  });
+
+  it("« construis pas » n'est pas un ordre, « construis un mur » si", () => {
+    expect(classifyByRules('construis pas', 'Alex').label).not.toBe('order');
+    expect(classifyByRules('construis un mur', 'Alex').label).toBe('order');
+  });
 });

@@ -21,6 +21,8 @@ export interface DecisionRecord {
   situationHash: string;
   situationText: string;
   branches: Branch[];
+  /** Ce qui a déclenché la décision (« ordre du joueur », « épisode du joueur », « initiative »…). */
+  trigger: string;
 }
 
 export interface DeciderDeps {
@@ -89,13 +91,13 @@ export class Decider {
   /** Dernière décision enregistrée (pour `!pourquoi` après un redémarrage). */
   private restoreLast(): DecisionRecord | null {
     const row = this.deps.tree.store.db
-      .prepare('SELECT id, situation_hash, model, decision_json FROM decisions ORDER BY id DESC LIMIT 1')
-      .get() as { id: number; situation_hash: string; model: string | null; decision_json: string } | undefined;
+      .prepare('SELECT id, trigger, situation_hash, model, decision_json FROM decisions ORDER BY id DESC LIMIT 1')
+      .get() as { id: number; trigger: string; situation_hash: string; model: string | null; decision_json: string } | undefined;
     if (!row) return null;
     try {
       const saved = JSON.parse(row.decision_json) as Decision & { source?: DecisionRecord['source']; situation?: string };
       const { source, situation, ...decision } = saved;
-      return { id: row.id, decision, source: source ?? 'llm', model: row.model, situationHash: row.situation_hash, situationText: situation ?? '', branches: [] };
+      return { id: row.id, decision, source: source ?? 'llm', model: row.model, situationHash: row.situation_hash, situationText: situation ?? '', branches: [], trigger: row.trigger };
     } catch {
       return null;
     }
@@ -178,7 +180,7 @@ export class Decider {
     const r = this.deps.tree.store.db
       .prepare('INSERT INTO decisions(trigger, situation_hash, model, cached, node_ids_json, decision_json, rationale, autonomy_json, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(trigger, hash, model, source === 'cache' ? 1 : 0, JSON.stringify(d.basedOn), JSON.stringify({ ...d, source, situation: situationText }), d.rationale, JSON.stringify(this.deps.autonomy()), this.deps.clock.now());
-    this.last = { id: Number(r.lastInsertRowid), decision: d, source, model, situationHash: hash, situationText, branches };
+    this.last = { id: Number(r.lastInsertRowid), decision: d, source, model, situationHash: hash, situationText, branches, trigger };
     return this.last;
   }
 }

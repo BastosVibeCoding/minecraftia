@@ -101,6 +101,8 @@ export class FeedbackHandler {
     if (recent) for (const id of recent.decision.basedOn) d.tree.correct(id, { utteranceId, decisionId: recent.id });
     if (domain) {
       d.autonomy.apply(domain, 'correction', utteranceId);
+      // reproche d'une initiative (pas d'un ordre) : dans ce domaine, le bot n'agira plus que sur demande
+      if (recent && recent.trigger !== 'ordre du joueur' && recent.decision.domain === domain) d.autonomy.restrictToRequests(domain);
       d.cache.invalidateDomain(domain);
     }
     d.say('D\'accord, j\'arrête.');

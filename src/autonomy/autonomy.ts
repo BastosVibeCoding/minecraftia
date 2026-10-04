@@ -1,5 +1,6 @@
 import { DOMAINS, type Domain } from '../core/types.js';
 import type { Band } from '../decider/prompt.js';
+import { getMeta, setMeta } from '../store/db.js';
 import type { EpisodeSource, Store } from '../store/store.js';
 
 /** Seuils entre bandes : observer → imiter → proposer → agir seul. */
@@ -28,7 +29,12 @@ export type AutonomyEvent = keyof typeof CHANGES;
 export interface DomainAutonomy {
   score: number;
   band: Band;
+  /** Reproche reçu pour une initiative : le bot n'agit plus dans ce domaine que sur demande. */
+  onRequestOnly?: boolean;
 }
+
+/** Durée de la règle « sur demande seulement » après un reproche (renouvelée à chaque reproche). */
+export const ON_REQUEST_MS = 2 * 3600_000;
 
 const HYSTERESIS = 0.03;
 
@@ -66,8 +72,23 @@ export class Autonomy {
     }
   }
 
+  /**
+   * Bande effective : « observer » tant que la règle « sur demande seulement » court (le décideur
+   * ne prend alors aucune initiative dans ce domaine ; les ordres du joueur passent toujours).
+   */
   get(domain: Domain): DomainAutonomy {
-    return { ...this.state.get(domain)! };
+    const cur = this.state.get(domain)!;
+    return this.onRequestOnly(domain) ? { ...cur, band: 'observe', onRequestOnly: true } : { ...cur };
+  }
+
+  /** Le joueur a reproché une initiative dans ce domaine : plus d'initiative pendant `ON_REQUEST_MS`. */
+  restrictToRequests(domain: Domain): void {
+    setMeta(this.store.db, `sur-demande:${domain}`, String(this.store.now() + ON_REQUEST_MS));
+  }
+
+  onRequestOnly(domain: Domain): boolean {
+    const until = getMeta(this.store.db, `sur-demande:${domain}`);
+    return until !== undefined && Number(until) > this.store.now();
   }
 
   all(): Record<Domain, DomainAutonomy> {

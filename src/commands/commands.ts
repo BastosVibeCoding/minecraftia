@@ -71,7 +71,7 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
 
     case '!autonomie': {
       const all = d.autonomy.all();
-      return DOMAINS.map((x) => `${DOMAIN_FR[x]} ${Math.round(all[x].score * 100)}% (${BAND_FR[all[x].band]})`).join(' · ');
+      return DOMAINS.map((x) => `${DOMAIN_FR[x]} ${Math.round(all[x].score * 100)}% (${all[x].onRequestOnly ? 'sur demande' : BAND_FR[all[x].band]})`).join(' · ');
     }
 
     case '!pourquoi': {

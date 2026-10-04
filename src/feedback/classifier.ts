@@ -31,7 +31,8 @@ const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
     /pas comme (ca|ça)/,
     /\barrete\b|\bstop\b|\bhalte\b/,
     /c'est pas (ca|bien|comme)|ce n'est pas (ca|bien)/,
-    /n'importe quoi|\bmauvais\b|\brate\b/,
+    /n'importe quoi|\bmauvais\b|\brate\b|\bnul\b/,
+    /\b(il )?(ne )?faut pas\b|pas besoin de|ne (le )?fais plus|fais plus (ca|ça)/,
     /(ne )?fais pas (ca|ça)|ne fais pas/,
   ],
   approval: [
@@ -42,7 +43,7 @@ const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
   teaching: [/\bregarde\b|\bobserve\b/, /je (te )?montre/, /(?<!pas )comme (ca|ça)\b(?! ?\?)/, /fais comme moi|voila comment|apprends/],
   order: [
     // verbe à l'impératif en tête de phrase ou après « non, » / « plutôt »
-    new RegExp(`(^${FILLER}|[,;.!] *|\\bplutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|recupere|ramasse|prends|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |fait |apporte|rapporte|ramene|aide[- ]moi|cherche|plante|seme|cuis|range|dors|allume)`),
+    new RegExp(`(^${FILLER}|[,;.!] *|\\bplutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|recupere|ramasse|prends|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |fait |apporte|rapporte|ramene|aide[- ]moi|cherche|plante|seme|cuis|range|dors|allume)(?! ?(pas|plus)\\b)`),
     new RegExp(`^${FILLER}(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais|tu vas|il faut que tu|j'ai besoin)\\b`),
     /(s'il te plait|s'te plait|\bstp\b)/,
   ],

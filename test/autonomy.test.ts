@@ -1,6 +1,6 @@
 import type { Bot } from 'mineflayer';
 import { describe, expect, it } from 'vitest';
-import { Autonomy, bandWithHysteresis, graded, OBSERVATION } from '../src/autonomy/autonomy.js';
+import { Autonomy, bandWithHysteresis, graded, OBSERVATION, ON_REQUEST_MS } from '../src/autonomy/autonomy.js';
 import { ProposalBroker } from '../src/autonomy/proposals.js';
 import { ManualClock } from '../src/core/clock.js';
 import { Budget } from '../src/decider/budget.js';
@@ -183,5 +183,21 @@ describe('autonomie dans la boucle', () => {
     loop.request('épisode du joueur');
     await flush();
     expect(stub.calls).toHaveLength(0);
+  });
+});
+
+describe("« sur demande seulement » (cas réel : Alex construisait sans qu'on le lui demande)", () => {
+  it("après un reproche : bande « observe » le temps de la règle, puis retour à la normale", async () => {
+    const clock = new ManualClock(0);
+    const s = await Store.open(':memory:', new HashingEmbedder(), clock);
+    const a = new Autonomy(s);
+    for (let i = 0; i < 8; i++) a.observe('build', 'taught');
+    expect(a.get('build').band).toBe('imitate');
+    a.restrictToRequests('build');
+    expect(a.get('build')).toMatchObject({ band: 'observe', onRequestOnly: true });
+    expect(new Autonomy(s).get('build').onRequestOnly).toBe(true); // persiste
+    expect(a.get('craft').onRequestOnly).toBeUndefined();
+    clock.advance(ON_REQUEST_MS + 1);
+    expect(a.get('build')).toMatchObject({ band: 'imitate' });
   });
 });
