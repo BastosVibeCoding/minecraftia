@@ -75,7 +75,8 @@ export class ReflexEngine {
       return;
     }
     if (!snap) return;
-    const decision = evaluateReflexes(snap, this.thresholds);
+    // état du contrôleur, pas une valeur apprise : un combat en cours change le seuil de fuite
+    const decision = evaluateReflexes({ ...snap, fighting: this.actions.current?.name === 'attack' }, this.thresholds);
     if (!decision) return;
     if (this.active && this.active.decision.priority >= decision.priority) return;
     const last = this.lastEnd.get(decision.kind);

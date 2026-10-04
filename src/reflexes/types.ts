@@ -12,6 +12,8 @@ export interface SurvivalSnapshot {
   onFire: boolean;
   inWater: boolean;
   headInWater: boolean;
+  /** Le bot est en train de combattre (compétence « attack » en cours) : il ne fuit pas le nombre. */
+  fighting?: boolean;
   /** Hauteur de vide sous les pieds (0 au sol, Infinity si rien de solide en dessous dans la portée). */
   heightAboveGround: number;
   hostiles: { name: string; distance: number; position: Vec3Like }[];

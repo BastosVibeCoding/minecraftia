@@ -122,3 +122,33 @@ describe("ordres de rappel (manques réels de Léa)", () => {
     expect(stub.calls.length).toBe(0);
   });
 });
+
+describe("ordre coupé par un réflexe (cas réel : « défends-moi » puis fuite)", () => {
+  it("reprend l'ordre une fois le danger passé, une seule fois", async () => {
+    const { stub, loop } = await setup();
+    const attack = JSON.stringify({ skill: 'attack', params: { targets: ['zombie'] }, domain: 'combat', intent: 'défendre', basedOn: [], rationale: 'ordre' });
+    stub.scripted.push(attack, attack);
+    const deps = (loop as unknown as { deps: { actions: import('../src/skills/actionController.js').ActionController; skillContext: { bot: Record<string, unknown> } } }).deps;
+    const actions = deps.actions;
+    // un zombie qui reste en vie : l'attaque dure jusqu'à ce qu'on la coupe
+    const zombie = { name: 'zombie', isValid: true, position: { distanceTo: () => 3 } };
+    Object.assign(deps.skillContext.bot, {
+      entity: { position: {} },
+      health: 20,
+      nearestEntity: (f: (e: unknown) => boolean) => (f(zombie) ? zombie : null),
+      pvp: { attack: async () => {}, stop: async () => {}, forceStop: () => {}, attackRange: 3 },
+    });
+    loop.order('défends-moi');
+    await flush();
+    actions.abort('réflexe : creeper à 2.0 blocs');
+    await flush();
+    loop.onIdle();
+    await flush();
+    expect(stub.calls.length).toBe(2);
+    actions.abort('fin du test');
+    await flush();
+    loop.onIdle();
+    await flush();
+    expect(stub.calls.length).toBe(2);
+  });
+});

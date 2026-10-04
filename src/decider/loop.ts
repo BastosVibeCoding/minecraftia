@@ -35,6 +35,9 @@ export interface LoopDeps {
   gaps?: GapRecorder;
 }
 
+/** Délai pendant lequel un ordre coupé par un réflexe est repris automatiquement. */
+const RESUME_ORDER_MS = 30_000;
+
 const normOrder = (t: string) =>
   t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -66,6 +69,8 @@ export class DecisionLoop {
   private stopped = false;
   /** Dernier rappel du joueur : une décision lancée avant est abandonnée. */
   private recalledAt = -Infinity;
+  /** Ordre coupé par un réflexe de survie : repris une fois le danger passé. */
+  private interruptedOrder: { text: string; until: number } | null = null;
 
   constructor(private readonly deps: LoopDeps) {}
 
@@ -96,6 +101,7 @@ export class DecisionLoop {
 
   /** Ordre explicite du joueur : immédiat, prioritaire sur l'action en cours. */
   order(text: string): void {
+    this.interruptedOrder = null;
     this.deps.actions.abort('ordre du joueur');
     if (isRecallOrder(text)) {
       this.pending = null;
@@ -111,6 +117,13 @@ export class DecisionLoop {
   /** Appelé quand le contrôleur est libre : décision si l'inactivité dure, sinon suivi sans LLM. */
   onIdle(): void {
     if (this.stopped || this.inFlight || this.deps.actions.isBusy || this.deps.actions.blockReason) return;
+    const resume = this.interruptedOrder;
+    this.interruptedOrder = null;
+    if (resume && this.deps.clock.now() <= resume.until) {
+      this.deps.logger.info({ order: resume.text }, "reprise de l'ordre après le réflexe");
+      this.order(resume.text);
+      return;
+    }
     // sous la bande « propose », pas d'initiative : le bot imite quand le joueur agit (épisodes)
     const interval = this.deps.autonomy ? graded.initiativeIntervalMs(this.deps.autonomy.max()) : (this.deps.idleDecideMs ?? 20_000);
     if (interval !== null && this.deps.clock.now() - this.lastDecisionAt >= interval) this.request('initiative');
@@ -163,6 +176,10 @@ export class DecisionLoop {
     }
     const before = this.deps.snapshot();
     const result = await this.deps.actions.run(action);
+    // un réflexe (creeper, vie basse) a coupé un ordre : on le reprendra quand le danger sera passé
+    if (order && result.status === 'preempted' && result.reason?.startsWith('réflexe')) {
+      this.interruptedOrder = { text: order, until: this.deps.clock.now() + RESUME_ORDER_MS };
+    }
     const outcome = evaluateOutcome(result, before, this.deps.snapshot());
     if (!record) return;
 

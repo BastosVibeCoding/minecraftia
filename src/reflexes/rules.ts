@@ -1,5 +1,8 @@
 import type { ReflexDecision, ReflexThresholds, SurvivalSnapshot } from './types.js';
 
+/** En plein combat, il faut ce multiple de `maxHostiles` pour fuir (3 → 6 monstres). */
+export const FIGHTING_HOSTILES_FACTOR = 2;
+
 /**
  * Règles de survie : fonction pure, sans LLM, sans accès à l'arbre ni à l'autonomie.
  * Renvoie le réflexe le plus urgent, ou null si tout va bien.
@@ -20,7 +23,9 @@ export function evaluateReflexes(s: SurvivalSnapshot, t: ReflexThresholds): Refl
   const near = s.hostiles.filter((h) => h.distance <= t.threatRadius);
   const creeper = s.hostiles.find((h) => h.name === 'creeper' && h.distance <= t.creeperRadius);
   if (creeper) return { kind: 'flee', priority: 60, reason: `creeper à ${creeper.distance.toFixed(1)} blocs` };
-  if (near.length >= t.maxHostiles) return { kind: 'flee', priority: 60, reason: `${near.length} hostiles proches` };
+  // en combat (ordre « défends-moi », « attaque »), le nombre seul ne fait plus fuir, sauf encerclement
+  const tooMany = s.fighting ? t.maxHostiles * FIGHTING_HOSTILES_FACTOR : t.maxHostiles;
+  if (near.length >= tooMany) return { kind: 'flee', priority: 60, reason: `${near.length} hostiles proches` };
 
   if (s.health <= t.lowHealth) {
     const close = near.some((h) => h.distance <= 6);

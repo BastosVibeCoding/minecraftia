@@ -163,3 +163,35 @@ describe('normalisation de l\'oxygène', () => {
     expect(normalizeOxygen(7, false)).toBe(7);
   });
 });
+
+describe("combat sur ordre : la survie ne le sabote plus (cas réel : « défends-moi » annulé par la fuite)", () => {
+  const ev = (o: Partial<SurvivalSnapshot>) => evaluateReflexes(safeSnapshot(o), THRESHOLDS);
+  const z = (d: number) => ({ name: 'zombie', distance: d, position: { x: d, y: 64, z: 0 } });
+
+  it("3 zombies pendant un combat : il reste ; encerclé (6) : il fuit", () => {
+    expect(ev({ fighting: true, hostiles: [z(2), z(3), z(4)] })).toBeNull();
+    expect(ev({ fighting: true, hostiles: [z(2), z(3), z(4), z(5), z(6), z(7)] })?.kind).toBe('flee');
+  });
+
+  it("les vraies urgences restent prioritaires en combat : vie basse au contact, creeper", () => {
+    expect(ev({ fighting: true, health: 4, hostiles: [z(2)] })?.kind).toBe('flee');
+    expect(ev({ fighting: true, hostiles: [{ name: 'creeper', distance: 2, position: { x: 2, y: 64, z: 0 } }] })?.kind).toBe('flee');
+  });
+
+  it("le moteur considère l'attaque en cours comme un combat", async () => {
+    const clock = new ManualClock(0);
+    const actions = new ActionController(clock, () => {});
+    let snap = safeSnapshot({ hostiles: [z(2), z(3), z(4)] });
+    let tick: () => void = () => {};
+    const host: ReflexHost = { snapshot: () => snap, onTick: (cb) => ((tick = cb), () => {}) };
+    const executor: ReflexExecutor = { execute: (_d, s) => untilAborted(s), stop: () => {} };
+    const engine = new ReflexEngine(host, actions, executor, THRESHOLDS, clock, silentLogger);
+    engine.start();
+    void actions.run({ name: 'attack', domain: 'combat', timeoutMs: 60_000, run: (s) => untilAborted(s) });
+    tick();
+    expect(engine.activeReflex).toBeNull();
+    expect(actions.current?.name).toBe('attack');
+    snap = { ...snap };
+    engine.stop();
+  });
+});
