@@ -16,11 +16,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `b2ec736` (2026-10-04, sur `!deploy`).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `0eb6138` (2026-10-05, 6 éléments, bots + voix).
 
-1. `!pourquoi` et journaux : nom du modèle qui a réellement répondu (chaîne)
-2. Coffre/four plus signalés comme manques
-3. Blocs posés par les joueurs jamais cassés (déplacement et récolte)
-4. Ordres oraux mieux reconnus
-5. Registre des manques : incompris et échecs
-6. Transcription : vocabulaire et faisceau
+(aucun)
