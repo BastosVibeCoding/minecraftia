@@ -4,6 +4,7 @@ import { evaluateOutcome, judged } from '../src/outcome/outcome.js';
 import { blueprint } from '../src/skills/blueprint.js';
 import { SkillParamsError, SKILLS, toAction } from '../src/skills/library.js';
 import type { ActionResult } from '../src/skills/actionController.js';
+import { matchingItems } from '../src/skills/extra.js';
 
 describe('plans de construction', () => {
   it('mur 7×4 : 28 blocs, posés couche par couche de bas en haut', () => {
@@ -47,6 +48,7 @@ describe('bibliothèque de compétences', () => {
         plant: { seed: 'wheat_seeds' },
         smelt: { item: 'raw_iron' },
         retrieve: { item: 'coal' },
+        give: { item: 'log' },
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
@@ -110,5 +112,36 @@ describe('résultat d\'une action', () => {
   it('une précondition manquante ou une préemption ne juge pas la branche', () => {
     expect(judged(evaluateOutcome({ ...base, status: 'failure', detail: { precondition: true } }, snap({}), snap({})))).toBe(false);
     expect(judged(evaluateOutcome({ ...base, status: 'preempted' }, snap({}), snap({})))).toBe(false);
+  });
+});
+
+describe("donner des objets (manque réel : « Alex, donne ton bois »)", () => {
+  const inv = [{ name: 'oak_log', count: 5, type: 1 }, { name: 'birch_log', count: 3, type: 2 }, { name: 'oak_planks', count: 8, type: 3 }];
+
+  it("trouve un objet par nom exact ou par famille", () => {
+    expect(matchingItems(inv, 'oak_log').map((i) => i.name)).toEqual(['oak_log']);
+    expect(matchingItems(inv, 'log').map((i) => i.name)).toEqual(['oak_log', 'birch_log']);
+    expect(matchingItems(inv, 'oak').map((i) => i.name)).toEqual(['oak_log', 'oak_planks']);
+    expect(matchingItems(inv, 'diamond')).toEqual([]);
+  });
+
+  it("lance au joueur la quantité demandée, puis s'arrête", async () => {
+    const tossed: [number, number][] = [];
+    const pos = { offset: () => pos, x: 0, y: 64, z: 0 };
+    const bot = {
+      inventory: { items: () => inv },
+      players: { B: { entity: { position: pos } } },
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      lookAt: async () => {},
+      toss: async (type: number, _m: null, n: number) => void tossed.push([type, n]),
+    } as unknown as Bot;
+    const r = await SKILLS.give!.run({ bot, followPlayer: 'B' }, { item: 'log', count: 6 }, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'success', detail: { given: 6 } });
+    expect(tossed).toEqual([[1, 5], [2, 1]]);
+  });
+
+  it("sans l'objet : précondition manquante, pas un échec de la branche", async () => {
+    const bot = { inventory: { items: () => [] }, players: {} } as unknown as Bot;
+    expect(await SKILLS.give!.run({ bot, followPlayer: 'B' }, { item: 'log' }, new AbortController().signal)).toMatchObject({ status: 'failure', detail: { precondition: true } });
   });
 });

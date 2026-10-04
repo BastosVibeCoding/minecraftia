@@ -50,7 +50,7 @@ const ACTION = /\b(construi\w*|bati\w*|pose\w*|min\w*|creus\w*|coup\w*|recolt\w*
 export function isRecallOrder(text: string): boolean {
   const t = normOrder(text);
   if (!RECALL.test(t)) return false;
-  return !ACTION.test(t.replace(/\b(arrete|stop|stoppe) (de |d')?\w+/g, ' '));
+  return !ACTION.test(t.replace(/\b(arrete|stop|stoppe) (de |du |d')?\w+/g, ' '));
 }
 
 /**

@@ -269,4 +269,43 @@ export const sleep = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep];
+/**
+ * Objets de l'inventaire qui correspondent à une demande : nom exact (« oak_log ») ou famille
+ * (« log » → tous les *_log, « planks » → toutes les planches).
+ */
+export function matchingItems<T extends { name: string }>(items: T[], wanted: string): T[] {
+  const w = wanted.toLowerCase().replace(/^minecraft:/, '');
+  const exact = items.filter((i) => i.name === w);
+  return exact.length ? exact : items.filter((i) => i.name.endsWith(`_${w}`) || i.name.startsWith(`${w}_`));
+}
+
+/** Donner : rejoint le joueur suivi et lui lance les objets demandés. */
+export const give = {
+  name: 'give',
+  domain: 'gather' as Domain,
+  description: 'give {item: string (nom Minecraft ou famille, ex. "oak_log", "log", "planks"), count?: 1-256} — donner des objets au joueur (tous si count absent)',
+  params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(256).optional() }),
+  timeoutMs: () => 40_000,
+  async run(ctx: SkillContext, p: { item: string; count?: number | undefined }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const stacks = matchingItems(bot.inventory.items(), p.item);
+    if (stacks.length === 0) return fail(`pas de ${p.item} dans l'inventaire`, { precondition: true });
+    const target = bot.players[ctx.followPlayer]?.entity;
+    if (!target) return fail('joueur hors de vue');
+    await goNear(bot, target.position, 2, signal);
+    if (signal.aborted) return fail('interrompu');
+    await bot.lookAt(target.position.offset(0, 1.6, 0), true);
+    let left = p.count ?? Infinity;
+    let given = 0;
+    for (const s of stacks) {
+      if (left <= 0 || signal.aborted) break;
+      const n = Math.min(left, s.count);
+      await bot.toss(s.type, null, n);
+      given += n;
+      left -= n;
+    }
+    return given > 0 ? { status: 'success', detail: { given, item: p.item } } : fail('rien donné');
+  },
+};
+
+export const EXTRA_SKILLS = [plant, smelt, store, retrieve, torch, sleep, give];

@@ -107,6 +107,10 @@ describe("ordres de rappel (manques réels de Léa)", () => {
     expect(isRecallOrder("Viens, arrête-toi et viens ici.")).toBe(true);
     expect(isRecallOrder("Léa arrête et suis-moi.")).toBe(true);
     expect(isRecallOrder("tu peux venir ici ?")).toBe(true);
+    expect(isRecallOrder("Vas-y, on arrête du creuset, viens la surface.")).toBe(true);
+    expect(isRecallOrder("Suis-moi, Yulia.")).toBe(true);
+    expect(isRecallOrder("Léa reviens à la surface pour me suivre")).toBe(true);
+    expect(isRecallOrder("Alex, donne ton bois.")).toBe(false);
     expect(isRecallOrder("viens m'aider à couper du bois")).toBe(false);
     expect(isRecallOrder("construis un mur")).toBe(false);
   });
