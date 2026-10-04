@@ -40,6 +40,8 @@ import { plugin as collectBlockPlugin } from 'mineflayer-collectblock';
 import { plugin as pvpPlugin } from 'mineflayer-pvp';
 
 const { pathfinder } = pathfinderPkg;
+/** Rayon maximal exploré par le pathfinder autour du bot (blocs). */
+const PATH_SEARCH_RADIUS = 32;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
 const RECENT_EPISODES = 5;
@@ -151,6 +153,7 @@ export class Companion {
       say: (text) => void this.speaker.speak(text),
       gaps: this.gaps,
       botName: config.minecraft.username,
+      inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
     });
     this.connection = new BotConnection(
       { ...config.minecraft, ...config.reconnect },
@@ -253,8 +256,9 @@ export class Companion {
       const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.placed.isProtected(b);
       bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
       installDoorOpener(bot, () => this.clock.now());
-      // 5 s par défaut : trop court autour des arbres et des constructions protégées
-      bot.pathfinder.thinkTimeout = 10_000;
+      // recherche de chemin bornée : sans limite, un trajet avec droit de creuser vers un bloc enfoui
+      // a fait gonfler la mémoire de Léa jusqu'à 4 Go (plantage « heap out of memory »)
+      (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = PATH_SEARCH_RADIUS;
       // collectblock impose ses réglages (creuser partout) : on lui donne les nôtres, protégés
       bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
     } catch (err) {

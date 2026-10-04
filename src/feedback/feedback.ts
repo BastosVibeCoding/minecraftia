@@ -11,6 +11,7 @@ import type { Store } from '../store/store.js';
 import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { isAddressed, type Classification, type UtteranceClassifier } from './classifier.js';
+import { answerInventoryQuestion } from './questions.js';
 
 export interface FeedbackDeps {
   classifier: UtteranceClassifier;
@@ -31,6 +32,8 @@ export interface FeedbackDeps {
   /** Phrases adressées au bot mais non comprises → manques. */
   gaps?: GapRecorder;
   botName?: string;
+  /** Inventaire actuel du bot, pour répondre aux questions (« t'as du bois ? »). */
+  inventory?: () => Record<string, number> | null;
 }
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
@@ -46,6 +49,14 @@ export class FeedbackHandler {
 
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
+    // question sur l'inventaire : réponse directe, ni ordre ni retour sur la dernière action
+    const inv = d.inventory?.();
+    const answer = inv ? answerInventoryQuestion(text, inv) : null;
+    if (answer) {
+      d.say(answer);
+      d.logger.info({ channel }, `question du joueur : « ${text} » → ${answer}`);
+      return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
+    }
     const recent = this.recentDecision();
     const context = recent ? `le bot vient de faire : ${recent.decision.intent}` : '';
     const c = await d.classifier.classify(text, context);

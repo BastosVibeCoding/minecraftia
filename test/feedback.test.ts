@@ -8,6 +8,7 @@ import type { DecisionRecord } from '../src/decider/decider.js';
 import type { DecisionLoop } from '../src/decider/loop.js';
 import type { LlmClient } from '../src/decider/llm.js';
 import { classifyByRules, isAddressed, UtteranceClassifier } from '../src/feedback/classifier.js';
+import { answerInventoryQuestion } from '../src/feedback/questions.js';
 import { FeedbackHandler } from '../src/feedback/feedback.js';
 import { Observer } from '../src/observer/observer.js';
 import type { Episode } from '../src/observer/types.js';
@@ -221,4 +222,21 @@ describe("reproches réels d'Alex (2026-10-05)", () => {
 
 it("« Alex, trouve de la laine » est un ordre (manque réel du 2026-10-05)", () => {
   expect(classifyByRules('Alex, trouve de la laine.', 'Alex')).toMatchObject({ label: 'order', ambiguous: false });
+});
+
+describe("questions sur l'inventaire (manques réels : « Alex, t'as du bois ou pas ? »)", () => {
+  const inv = { oak_log: 12, birch_log: 3, cobblestone: 20, iron_ingot: 2 };
+  it.each([
+    ["Alex, t'as du bois ou pas ?", "J'ai 15 bûches."],
+    ['tu as eu tes trente bûches ?', "J'ai 15 bûches."],
+    ['combien de fer tu as', "J'ai 2 fer."],
+    ['est-ce que tu as des diamants ?', "Je n'ai pas de diamants."],
+  ])("« %s » → %s", (q, a) => {
+    expect(answerInventoryQuestion(q, inv)).toBe(a);
+  });
+
+  it("un ordre n'est pas une question", () => {
+    expect(answerInventoryQuestion('donne-moi tes bûches', inv)).toBeNull();
+    expect(answerInventoryQuestion('ça va ?', inv)).toBeNull();
+  });
 });
