@@ -425,4 +425,32 @@ export const place = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place];
+/** Ramasser les objets tombés au sol autour du bot (après une mort, une explosion, un coffre cassé…). */
+export const pickup = {
+  name: 'pickup',
+  domain: 'gather' as Domain,
+  description: 'pickup {radius?: 4-24} — ramasser les objets tombés au sol autour de moi (« reprends tes affaires »)',
+  params: z.object({ radius: z.number().min(4).max(24).default(16) }),
+  timeoutMs: () => 60_000,
+  async run(ctx: SkillContext, p: { radius: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const before = bot.inventory.items().reduce((s, i) => s + i.count, 0);
+    const dropped = () =>
+      Object.values(bot.entities)
+        .filter((e) => e.name === 'item' && e.position.distanceTo(bot.entity.position) <= p.radius)
+        .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position));
+    if (dropped().length === 0) return fail('aucun objet au sol à portée', { precondition: true });
+    const tried = new Set<number>();
+    for (let n = 0; n < 32 && !signal.aborted; n++) {
+      const next = dropped().find((e) => !tried.has(e.id));
+      if (!next) break;
+      tried.add(next.id);
+      // marcher sur l'objet suffit à le ramasser
+      await goNear(bot, next.position, 0.5, signal);
+    }
+    const gained = bot.inventory.items().reduce((s, i) => s + i.count, 0) - before;
+    return gained > 0 ? { status: 'success', detail: { gained } } : fail("objets hors d'atteinte");
+  },
+};
+
+export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup];

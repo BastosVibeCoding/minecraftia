@@ -53,6 +53,7 @@ describe('bibliothèque de compétences', () => {
         staircase: { targetY: -10 },
         place: { item: 'furnace' },
         furnace_take: {},
+        pickup: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
@@ -247,4 +248,35 @@ it("« Léa, donne ton fer » dit par le joueur d'Alex s'adresse à Léa, pas à
   const forAlex = (t: string) => isAddressed(t, 'Alex') || !isAddressed(t, 'Lea');
   expect(forAlex('Alex, donne ton fer à Léa')).toBe(true);
   expect(forAlex('lea donne ton fer')).toBe(false);
+});
+
+it("« reprends tes affaires au sol » : va sur chaque objet tombé, du plus proche au plus loin (manque réel)", async () => {
+  const at = (x: number) => ({ x, y: 64, z: 0, distanceTo: (o: { x: number }) => Math.abs(o.x - x) });
+  const me = at(0);
+  const inv: { name: string; count: number }[] = [];
+  const visited: number[] = [];
+  const entities: Record<number, { id: number; name: string; position: ReturnType<typeof at> }> = {
+    1: { id: 1, name: 'item', position: at(6) },
+    2: { id: 2, name: 'item', position: at(2) },
+    3: { id: 3, name: 'zombie', position: at(3) },
+  };
+  const bot = {
+    entity: { position: me },
+    entities,
+    inventory: { items: () => inv },
+    pathfinder: {
+      goto: async (g: { x: number }) => {
+        visited.push(g.x);
+        const e = Object.values(entities).find((x) => x.name === 'item' && x.position.x === g.x);
+        if (e) {
+          delete entities[e.id];
+          inv.push({ name: 'cobblestone', count: 8 });
+        }
+      },
+      setGoal: () => {},
+    },
+  } as unknown as Bot;
+  const r = await SKILLS.pickup!.run({ bot, followPlayer: 'B' }, { radius: 16 }, new AbortController().signal);
+  expect(visited).toEqual([2, 6]);
+  expect(r).toMatchObject({ status: 'success', detail: { gained: 16 } });
 });

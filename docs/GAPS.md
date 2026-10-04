@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « reprends tes affaires au sol » | Compétence `pickup {radius?}` : marche sur chaque objet tombé, du plus proche au plus loin ; verbe « reprends ». « fish of the chicken » : transcription ratée, ignoré |
 | 2026-10-05 | Alex | « Léa, donne ton fer » exécuté par Alex | `BOT_PEERS` : phrase adressée à l'autre bot ignorée (sauf si le bot est aussi appelé par son nom) |
 | 2026-10-05 | Léa | « va mettre le fer au four » → pas de combustible ; « Léa prend le charbon » incompris | Four : combustible et objet à cuire pris dans les coffres proches, sinon demande au joueur ; verbe « prend » |
 | 2026-10-05 | Alex | « attaque Léa » | Ignoré volontairement : les bots n'attaquent ni les joueurs ni l'autre bot |
@@ -38,10 +39,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 8 éléments (combat sur ordre, poser, questions four/établi, conversation, donne tout, récupérer au four, ordres en étapes, échecs d'ordres relevés).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (« donne » → dernier objet, tous les fours, BOT_PEERS, four approvisionné, « prend », ramasser au sol).
 
-1. « donne » → dernier objet évoqué ou récolté
-2. Récupérer dans tous les fours proches
-3. Phrases adressées à l'autre bot ignorées (BOT_PEERS posé sur le VPS)
-4. Four : combustible et objet pris dans les coffres, sinon demande
-5. Verbe « prend »
+(aucun)
