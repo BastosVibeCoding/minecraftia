@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "migrate": "tsx scripts/migrate-json.ts"
   },
   "repository": {
     "type": "git",
@@ -24,6 +25,7 @@
   },
   "homepage": "https://github.com/BastosVibeCoding/minecraftia#readme",
   "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.5",
     "mineflayer": "^4.39.0",

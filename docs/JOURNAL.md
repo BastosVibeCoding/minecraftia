@@ -44,3 +44,28 @@ Essais réels sur le serveur du VPS (dangers provoqués par RCON) :
 - Rejoindre la rive après la noyade : le pilotage direct bute parfois contre un obstacle ; le bot survit
   mais peut recouler. Une baisse de vie inexpliquée pendant ces essais (noyés probables, non vérifié).
 - Réflexe de chute (seau d'eau) non essayé en réel.
+
+## 2026-10-04 — Phase 2 : stockage
+
+**Fait**
+- Schéma SQLite (migration v1 embarquée, `user_version`), WAL, clés étrangères.
+- `VectorIndex` : `SqliteVecIndex` (vec0, distance cosinus) et `MemoryVectorIndex` (repli), tous deux
+  persistés dans `node_embeddings` ; la table virtuelle se reconstruit si elle diverge.
+- `Embedder` : modèle local multilingue `paraphrase-multilingual-MiniLM-L12-v2` (q8, 384 dims,
+  130 Mo dans `data/models`) et `HashingEmbedder` déterministe (tests, repli hors-ligne).
+  Changement d'embedder détecté via `meta` → réindexation automatique.
+- `Store` : accès aux épisodes, nœuds, preuves, autonomie, import hérité (aucune règle d'apprentissage).
+- Migration JSON (`npm run migrate`) : copie brute intégrale de chaque fichier + mappage du format
+  `minecraftia-export` v1 ; idempotente par hachage du contenu.
+
+**Testé** — 52 tests verts. sqlite-vec et le repli mémoire renvoient les mêmes voisins et les mêmes
+similarités ; aller-retour sans perte (contenu brut identique octet pour octet) ; idempotence ;
+JSON invalide ou inconnu conservé. Exécution réelle du script de migration avec le vrai modèle :
+6 nœuds, 4 vecteurs dans sqlite-vec, second passage ignoré.
+
+**Appris**
+- Mesure réelle du modèle : chargement 7 s, 34 ms pour 3 phrases ; « mur en pierre » ~ « muraille »
+  = 0,92, « mur » ~ « combattre un zombie » = 0,14.
+
+**Incertain**
+- Pas de JSON hérité réel à migrer (départ de zéro) : le format reconnu est celui que nous définissons.

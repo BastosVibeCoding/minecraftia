@@ -1,0 +1,12 @@
+{
+  "format": "minecraftia-export",
+  "version": 1,
+  "episodes": [
+    { "player": "JuicyBerries1993", "domain": "build", "kind": "wall", "summary": "mur 7x4 en pierre taillée, symétrique", "params": { "width": 7, "height": 4, "material": "stone_bricks", "symmetric": true }, "startedAt": 1759500000000, "endedAt": 1759500060000 }
+  ],
+  "nodes": [
+    { "domain": "build", "situation": "construire un mur autour de la base", "mechanism": { "skill": "build", "shape": "wall", "material": "stone_bricks", "order": "bottom_up" }, "weight": 4, "uses": 2 },
+    { "domain": "combat", "situation": "un zombie approche la nuit", "mechanism": { "skill": "attack", "engageDistance": 3, "retreatHp": 8 }, "weight": 1 }
+  ],
+  "autonomy": { "build": 0.3 }
+}
