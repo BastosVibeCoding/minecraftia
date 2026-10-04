@@ -18,7 +18,7 @@ export interface Gap {
 const UNSUPPORTED_TOOLS = /^(fishing_rod|bow|crossbow|trident|bucket|water_bucket|lava_bucket|milk_bucket|flint_and_steel|shears|brush|spyglass|bone_meal|lead|name_tag|saddle|elytra|firework_rocket|ender_pearl|potion|splash_potion)$/;
 
 /** Blocs posés par le joueur que la compétence de construction ne sait pas poser correctement. */
-const UNSUPPORTED_BLOCKS = /(redstone|repeater|comparator|piston|observer|hopper|dropper|dispenser|lever|_button|pressure_plate|rail|_door|trapdoor|_bed$|fence_gate|_sign$|lantern|banner|carpet|^chest$|^barrel$|^furnace$|anvil|enchanting_table|brewing_stand|cauldron|^ladder$|scaffolding)/;
+const UNSUPPORTED_BLOCKS = /(redstone|repeater|comparator|piston|observer|hopper|dropper|dispenser|lever|_button|pressure_plate|rail|_door|trapdoor|_bed$|fence_gate|_sign$|lantern|banner|carpet|anvil|enchanting_table|brewing_stand|cauldron|^ladder$|scaffolding)/;
 
 const norm = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 

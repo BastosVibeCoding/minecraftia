@@ -145,12 +145,15 @@ export class Decider {
     const ctx: DecisionContext = { trigger, world, autonomy, branches, lastOutcome, ...(order ? { order } : {}) };
     const { model } = router.pick('decide', hash);
     let error: string | undefined;
+    // modèle qui a réellement répondu (une chaîne de fournisseurs peut remplacer le modèle demandé)
+    let answeredBy = model;
     for (let attempt = 0; attempt < 2; attempt++) {
       let text: string;
       try {
         const res = await this.deps.llm.complete({ purpose: 'decide', model, system: systemPrompt(this.deps.persona), user: userPrompt(ctx, error), maxTokens: this.deps.maxTokens ?? 400 });
         budget.record({ purpose: 'decide', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
         text = res.text;
+        answeredBy = res.model;
       } catch (err) {
         const e = err instanceof LlmError ? err : new LlmError(String(err));
         budget.record({ purpose: 'decide', model, promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, ok: false, error: e.message });
@@ -162,12 +165,12 @@ export class Decider {
       if (parsed.ok) {
         const decision = applyGuards(parsed.decision, branches, autonomy, Boolean(order), world.bot.inventory);
         if (decision.skill !== 'none' && decision.skill !== 'follow') cache.set(hash, decision.domain, decision);
-        return this.save(trigger, decision, 'llm', model, hash, situationText, branches);
+        return this.save(trigger, decision, 'llm', answeredBy, hash, situationText, branches);
       }
       error = parsed.error;
       logger.warn({ error, attempt }, 'décision LLM invalide');
     }
-    return this.save(trigger, fallbackDecision(`sortie LLM invalide : ${error}`), 'fallback', model, hash, situationText, branches);
+    return this.save(trigger, fallbackDecision(`sortie LLM invalide : ${error}`), 'fallback', answeredBy, hash, situationText, branches);
   }
 
   private save(trigger: string, decision: Decision, source: DecisionRecord['source'], model: string | null, hash: string, situationText: string, branches: Branch[]): DecisionRecord {

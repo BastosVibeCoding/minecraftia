@@ -19,6 +19,9 @@ describe('compétences manquantes', () => {
     g.observe({ t: 0, type: 'equip', player: 'B', slot: 'hand', item: 'iron_sword' });
     g.observe({ t: 0, type: 'block_placed', player: 'B', pos: { x: 0, y: 64, z: 0 }, block: 'redstone_wire' });
     g.observe({ t: 0, type: 'block_placed', player: 'B', pos: { x: 1, y: 64, z: 0 }, block: 'stone_bricks' });
+    // coffre et four : couverts par store/retrieve/smelt
+    g.observe({ t: 0, type: 'block_placed', player: 'B', pos: { x: 2, y: 64, z: 0 }, block: 'chest' });
+    g.observe({ t: 0, type: 'block_placed', player: 'B', pos: { x: 3, y: 64, z: 0 }, block: 'furnace' });
     expect(g.top().map((x) => x.key).sort()).toEqual(['outil:fishing_rod', 'pose:redstone_wire']);
   });
 });
