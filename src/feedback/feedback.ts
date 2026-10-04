@@ -10,8 +10,8 @@ import type { ActionController } from '../skills/actionController.js';
 import type { Store } from '../store/store.js';
 import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
-import { isAddressed, type Classification, type UtteranceClassifier } from './classifier.js';
-import { answerInventoryQuestion } from './questions.js';
+import { isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
+import { answerInventoryQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
 export interface FeedbackDeps {
@@ -35,6 +35,8 @@ export interface FeedbackDeps {
   botName?: string;
   /** Inventaire actuel du bot, pour répondre aux questions (« t'as du bois ? »). */
   inventory?: () => Record<string, number> | null;
+  /** Dernier objet récolté par le bot (pour « donne » tout court). */
+  lastGained?: () => { item: string; at: number } | null;
 }
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
@@ -53,8 +55,19 @@ export class FeedbackHandler {
   /** Ordre vague en attente de précision (« va miner » → « je mine quoi ? »). */
   private pendingOrder: { text: string; until: number } | null = null;
   private lastChatAt = -Infinity;
+  /** Dernière phrase qui parlait d'un objet (« t'as combien de fer ? »). */
+  private lastMention: { text: string; at: number } | null = null;
 
   constructor(private readonly deps: FeedbackDeps) {}
+
+  /** Objet visé par un « donne » sans précision : évoqué ou récolté en dernier, s'il est dans l'inventaire. */
+  private lastItem(inv: Record<string, number>): string | null {
+    const mention = this.lastMention ? { item: mentionedItems(this.lastMention.text, inv)[0], at: this.lastMention.at } : null;
+    const gained = this.deps.lastGained?.() ?? null;
+    const candidates = [mention, gained && (inv[gained.item] ?? 0) > 0 ? gained : null].filter((c): c is { item: string; at: number } => Boolean(c?.item));
+    candidates.sort((a, b) => b.at - a.at);
+    return candidates[0]?.item ?? null;
+  }
 
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
@@ -69,6 +82,17 @@ export class FeedbackHandler {
     }
     // question sur l'inventaire : réponse directe, ni ordre ni retour sur la dernière action
     const inv = d.inventory?.();
+    // « donne » tout court : le dernier objet évoqué (question, ordre) ou récolté, le plus récent des deux
+    if (inv && isBareGive(d.botName ? withoutVocative(text, d.botName) : text)) {
+      const item = this.lastItem(inv);
+      if (item) {
+        const order = `donne-moi tes ${item}`;
+        d.logger.info({ channel }, `« ${text} » → ${order}`);
+        d.loop()?.order(order);
+        return { label: 'order', confidence: 0.9, classifier: 'rules' };
+      }
+    }
+    if (mentionsAnItem(text)) this.lastMention = { text, at: d.clock.now() };
     const answer = inv ? answerInventoryQuestion(text, inv) : null;
     if (answer) {
       d.say(answer);

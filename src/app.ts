@@ -154,6 +154,7 @@ export class Companion {
       gaps: this.gaps,
       botName: config.minecraft.username,
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
+      lastGained: () => this.session?.loop.lastGained() ?? null,
     });
     this.connection = new BotConnection(
       { ...config.minecraft, ...config.reconnect },

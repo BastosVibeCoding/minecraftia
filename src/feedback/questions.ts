@@ -86,3 +86,29 @@ export function answerInventoryQuestion(text: string, inventory: Record<string, 
   }
   return null;
 }
+
+/**
+ * Objets de l'inventaire dont parle une phrase (« t'as combien de fer » → raw_iron, iron_ingot),
+ * du plus nombreux au moins nombreux. Sert à « donne » tout court : le dernier objet évoqué.
+ */
+export function mentionedItems(text: string, inventory: Record<string, number>): string[] {
+  const t = norm(text);
+  const families = FAMILIES.filter((f) => f.words.test(t)).map((f) => f.match);
+  const tools = TOOLS.filter((x) => x.words.test(t)).map((x) => (i: string) => i.endsWith(`_${x.kind}`) && !(x.kind === 'axe' && i.endsWith('_pickaxe')));
+  const matchers = [...families, ...tools];
+  return Object.entries(inventory)
+    .filter(([i]) => matchers.some((m) => m(i)))
+    .sort((a, b) => b[1] - a[1])
+    .map(([i]) => i);
+}
+
+/** Mots qui désignent un objet, même absent de l'inventaire (pour retenir de quoi on parle). */
+export function mentionsAnItem(text: string): boolean {
+  const t = norm(text);
+  return FAMILIES.some((f) => f.words.test(t)) || TOOLS.some((x) => x.words.test(t));
+}
+
+/** « donne », « donne-le », « donne-moi ça », « file-les-moi » : don sans objet précisé. */
+export function isBareGive(text: string): boolean {
+  return /^(donne|file|passe|balance)(?:[- ](?:le|la|les|moi|ca|ça|lui|nous))*[ !.?]*$/.test(norm(text));
+}

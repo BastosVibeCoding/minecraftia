@@ -9,7 +9,7 @@ import type { DecisionLoop } from '../src/decider/loop.js';
 import type { LlmClient } from '../src/decider/llm.js';
 import { classifyByRules, isAddressed, UtteranceClassifier } from '../src/feedback/classifier.js';
 import { answerInventoryQuestion } from '../src/feedback/questions.js';
-import { FeedbackHandler } from '../src/feedback/feedback.js';
+import { FeedbackHandler, type FeedbackDeps } from '../src/feedback/feedback.js';
 import { Observer } from '../src/observer/observer.js';
 import type { Episode } from '../src/observer/types.js';
 import { ActionController } from '../src/skills/actionController.js';
@@ -149,6 +149,26 @@ describe('effets des retours', () => {
     expect(said.at(-1)).toMatch(/^Je mine quoi/);
     await handler.handle('Bastien', 'du fer', 'voice');
     expect(loopCalls).toEqual(['order:va miner : du fer']);
+  });
+
+  it("« donne » tout court : le dernier objet évoqué ou récolté, le plus récent des deux (demande du joueur)", async () => {
+    const a = await setup();
+    let inv: Record<string, number> = { raw_iron: 6, oak_log: 3, cobblestone: 12 };
+    let gained: { item: string; at: number } | null = null;
+    const h = new FeedbackHandler({ ...(a.handler as unknown as { deps: FeedbackDeps }).deps, botName: 'Alex', inventory: () => inv, lastGained: () => gained });
+    await h.handle('Bastien', "alex t'as combien de fer", 'chat');
+    a.clock.advance(1000);
+    await h.handle('Bastien', 'Alex, donne', 'chat');
+    expect(a.loopCalls.at(-1)).toBe('order:donne-moi tes raw_iron');
+    // il récolte ensuite des bûches : « donne-les » vise les bûches
+    a.clock.advance(1000);
+    gained = { item: 'oak_log', at: a.clock.now() };
+    inv = { ...inv, oak_log: 8 };
+    await h.handle('Bastien', 'donne-les-moi', 'chat');
+    expect(a.loopCalls.at(-1)).toBe('order:donne-moi tes oak_log');
+    // « donne tout » reste « tout »
+    await h.handle('Bastien', 'donne tout', 'chat');
+    expect(a.loopCalls.at(-1)).toBe('order:donne tout');
   });
 
   it('correction avec alternative : la consigne devient un ordre', async () => {

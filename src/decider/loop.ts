@@ -72,6 +72,8 @@ export class DecisionLoop {
   private recalledAt = -Infinity;
   /** Ordre coupé par un réflexe de survie : repris une fois le danger passé. */
   private interruptedOrder: { text: string; until: number } | null = null;
+  /** Dernier objet gagné par une action (le plus gros gain), pour « donne » tout court. */
+  private gained: { item: string; at: number } | null = null;
   /** Étapes restantes d'un ordre en plusieurs temps (« … et mets-le dans le coffre »). */
   private nextSteps: { steps: string[]; original: string } | null = null;
 
@@ -197,6 +199,8 @@ export class DecisionLoop {
       .prepare('INSERT INTO outcomes(decision_id, status, details_json, at) VALUES (?, ?, ?, ?)')
       .run(record.id, outcome.status, JSON.stringify({ ...outcome, reason: result.reason, detail: result.detail }), this.deps.clock.now());
     this.lastOutcome = outcome.summary;
+    const best = Object.entries(outcome.inventoryDelta).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1])[0];
+    if (best) this.gained = { item: best[0], at: this.deps.clock.now() };
     // un ordre exécuté mais raté : souvent une compétence à compléter (la raison réelle est gardée)
     // y compris « il manque quelque chose » : pour un ordre du joueur, c'est un manque à combler
     if (order && outcome.status === 'failure') this.deps.gaps?.failedOrder(order, action.name, result.reason ?? outcome.summary);
@@ -249,6 +253,11 @@ export class DecisionLoop {
     const ctx = this.deps.skillContext;
     if (ctx.speak) ctx.speak(text);
     else ctx.bot.chat(text);
+  }
+
+  /** Dernier objet gagné par une action (récolte, cuisson…). */
+  lastGained(): { item: string; at: number } | null {
+    return this.gained;
   }
 
   /** Instant de la dernière décision (pour rattacher un retour du joueur à cette décision). */

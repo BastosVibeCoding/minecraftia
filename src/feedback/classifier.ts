@@ -75,6 +75,11 @@ export function stripVocative(normalized: string, botName: string): string {
   return normalized.replace(leading, '').replace(trailing, '').trim();
 }
 
+/** Phrase normalisée, sans l'interpellation du personnage (« Alex, donne » → « donne »). */
+export function withoutVocative(text: string, botName: string): string {
+  return stripVocative(norm(text), botName);
+}
+
 /** La phrase interpelle le personnage par son nom (« Alex, … », « …, Léa »). */
 export function isAddressed(text: string, botName: string): boolean {
   const t = norm(text);
