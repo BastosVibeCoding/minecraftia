@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « raconte-moi une blague » | Conversation : phrase adressée au bot (ni ordre ni question d'inventaire) → réponse courte du modèle gratuit, dans le personnage, au plus toutes les 15 s. « récolter 10 de charbon » : minerai inaccessible (No path), abandon après 4 essais, normal |
 | 2026-10-05 | Léa | « pose le four à côté de la table de craft » (3×), « t'as un four ? » | Compétence `place {item, near?}` (sur ordre seulement) ; questions : four, établi, coffre, lit, seau, bâtons |
 | 2026-10-05 | joueurs | « défends-moi » / « attaque » annulé par la survie | En combat (attack en cours), la fuite pour le nombre demande 6 monstres au lieu de 3 ; vie basse au contact et creeper restent prioritaires ; un ordre coupé par un réflexe est repris dans les 30 s |
 | 2026-10-05 | Alex | « t'as une hache ? », « t'as une pioche ? » (2× chacun) | Questions sur les outils : il dit lesquels (« une pioche en pierre ») |
@@ -36,3 +37,4 @@ Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite s
 1. Combat sur ordre : seuil de fuite relevé, reprise de l'ordre après un réflexe
 2. Compétence « poser » (four à côté de l'établi)
 3. Questions : four, établi, coffre…
+4. Conversation (réponse courte quand on parle au bot)

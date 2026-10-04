@@ -39,6 +39,8 @@ export interface FeedbackDeps {
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
 const FEEDBACK_WINDOW_MS = 120_000;
+/** Intervalle minimal entre deux réponses de conversation (pas de bavardage en rafale). */
+const CHAT_INTERVAL_MS = 15_000;
 /** Délai pour répondre à « je mine quoi ? » ; ensuite la question est oubliée. */
 const CLARIFY_WINDOW_MS = 60_000;
 
@@ -50,6 +52,7 @@ const CLARIFY_WINDOW_MS = 60_000;
 export class FeedbackHandler {
   /** Ordre vague en attente de précision (« va miner » → « je mine quoi ? »). */
   private pendingOrder: { text: string; until: number } | null = null;
+  private lastChatAt = -Infinity;
 
   constructor(private readonly deps: FeedbackDeps) {}
 
@@ -114,7 +117,15 @@ export class FeedbackHandler {
         break;
       }
       case 'chatter':
-        if (d.gaps && d.botName && isAddressed(text, d.botName)) d.gaps.misunderstood(text);
+        if (d.botName && isAddressed(text, d.botName)) {
+          d.gaps?.misunderstood(text);
+          // on lui parle : il répond, sans agir (au plus une fois toutes les 15 s)
+          if (d.clock.now() - this.lastChatAt >= CHAT_INTERVAL_MS) {
+            this.lastChatAt = d.clock.now();
+            const answer = await d.classifier.reply(text);
+            if (answer) d.say(answer);
+          }
+        }
         break;
     }
     return c;

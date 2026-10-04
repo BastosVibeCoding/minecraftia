@@ -123,7 +123,27 @@ export class UtteranceClassifier {
     private readonly budget: Budget | null,
     private readonly model: string,
     private readonly botName = 'Alex',
+    private readonly gender: 'feminine' | 'masculine' = 'feminine',
   ) {}
+
+  /**
+   * Réponse de conversation (« raconte-moi une blague ») : une ou deux phrases, dans le personnage.
+   * `null` sans modèle, budget épuisé ou erreur : le bot se tait plutôt que d'inventer.
+   */
+  async reply(text: string): Promise<string | null> {
+    if (!this.llm || !this.budget || this.budget.exhausted()) return null;
+    const who = this.gender === 'feminine' ? 'une compagne' : 'un compagnon';
+    const system = `Tu es ${this.botName}, ${who} de jeu dans Minecraft, qui parle français. Réponds au joueur en une ou deux phrases courtes, naturelles et amicales (pas de liste, pas d'emoji, pas de « / » en début de phrase). Tu ne peux pas promettre d'actions : si on te demande d'agir, dis simplement que tu essaies.`;
+    try {
+      const res = await this.llm.complete({ purpose: 'chat', model: this.model, system, user: text, maxTokens: 120 });
+      this.budget.record({ purpose: 'chat', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
+      const out = res.text.replace(/\s+/g, ' ').trim().slice(0, 240);
+      return out || null;
+    } catch (err) {
+      this.budget.record({ purpose: 'chat', model: this.model, promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, ok: false, error: err instanceof LlmError ? err.message : String(err) });
+      return null;
+    }
+  }
 
   async classify(text: string, context = ''): Promise<Classification> {
     const rules = classifyByRules(text, this.botName);

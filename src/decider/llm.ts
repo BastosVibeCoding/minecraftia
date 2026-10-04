@@ -1,4 +1,4 @@
-export type LlmPurpose = 'decide' | 'classify' | 'compose';
+export type LlmPurpose = 'decide' | 'classify' | 'compose' | 'chat';
 
 export interface LlmRequest {
   purpose: LlmPurpose;

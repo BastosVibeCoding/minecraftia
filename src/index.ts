@@ -76,7 +76,7 @@ async function main(): Promise<void> {
 
   const companion = new Companion(config, logger, systemClock, mineflayer.createBot, {
     tree, playClock, decider, cache, router, autonomy, proposals,
-    classifier: new UtteranceClassifier(llm, budget, config.openrouter.modelFast, config.minecraft.username),
+    classifier: new UtteranceClassifier(llm, budget, config.openrouter.modelFast, config.minecraft.username, config.gender),
     budget,
   });
   companion.start();

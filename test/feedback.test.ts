@@ -249,3 +249,23 @@ describe("questions sur l'inventaire (manques réels : « Alex, t'as du bois ou 
     expect(answerInventoryQuestion('ça va ?', inv)).toBeNull();
   });
 });
+
+describe("conversation (manque réel : « Léa raconte-moi une blague »)", () => {
+  it("répond en une phrase dans le personnage ; se tait sans modèle", async () => {
+    const clock = new ManualClock(0);
+    const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+    const budget = new Budget(store.db, clock, 1);
+    const seen: { system: string; purpose: string }[] = [];
+    const llm = {
+      complete: async (req: { system: string; purpose: string }) => {
+        seen.push(req);
+        return { text: '  Pourquoi les creepers sont tristes ?\n Parce que tout le monde les fuit !  ', model: 'gemini:x', promptTokens: 10, completionTokens: 10, costUsd: 0, latencyMs: 1 };
+      },
+    };
+    const c = new UtteranceClassifier(llm as never, budget, 'fast', 'Lea', 'feminine');
+    expect(await c.reply('raconte-moi une blague')).toBe('Pourquoi les creepers sont tristes ? Parce que tout le monde les fuit !');
+    expect(seen[0]).toMatchObject({ purpose: 'chat' });
+    expect(seen[0]!.system).toContain('Tu es Lea, une compagne');
+    expect(await new UtteranceClassifier(null, null, 'fast', 'Lea').reply('salut')).toBeNull();
+  });
+});
