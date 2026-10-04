@@ -218,3 +218,7 @@ describe("reproches réels d'Alex (2026-10-05)", () => {
     expect(classifyByRules('construis un mur', 'Alex').label).toBe('order');
   });
 });
+
+it("« Alex, trouve de la laine » est un ordre (manque réel du 2026-10-05)", () => {
+  expect(classifyByRules('Alex, trouve de la laine.', 'Alex')).toMatchObject({ label: 'order', ambiguous: false });
+});
