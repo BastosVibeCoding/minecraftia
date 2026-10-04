@@ -280,3 +280,20 @@ it("« reprends tes affaires au sol » : va sur chaque objet tombé, du plus pro
   expect(visited).toEqual([2, 6]);
   expect(r).toMatchObject({ status: 'success', detail: { gained: 16 } });
 });
+
+it("« tue les poules » : enchaîne les cibles à portée, puis s'arrête (manque réel)", async () => {
+  const chickens = [1, 2].map((id) => ({ id, name: 'chicken', isValid: true, position: { distanceTo: () => 20 } }));
+  const bot = {
+    entity: { position: {} },
+    health: 20,
+    inventory: { items: () => [] },
+    nearestEntity: (f: (e: unknown) => boolean) => chickens.find((c) => c.isValid && f(c)) ?? null,
+    pvp: {
+      attack: async (t: { isValid: boolean }) => void setTimeout(() => (t.isValid = false), 10),
+      forceStop: () => {},
+      attackRange: 3,
+    },
+  } as unknown as Bot;
+  const r = await SKILLS.attack!.run({ bot, followPlayer: 'B' }, { targets: ['chicken'], engageDistance: 3, retreatHp: 6, useShield: false }, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'success', detail: { killed: ['chicken', 'chicken'] } });
+});

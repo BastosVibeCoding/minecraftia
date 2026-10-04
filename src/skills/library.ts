@@ -267,6 +267,10 @@ const build = {
   },
 };
 
+/** Portée de recherche des cibles, et nombre maximal de cibles abattues par ordre. */
+const ATTACK_RADIUS = 32;
+const MAX_KILLS = 8;
+
 const attack = {
   name: 'attack',
   domain: 'combat' as Domain,
@@ -280,26 +284,30 @@ const attack = {
   timeoutMs: () => 45_000,
   async run({ bot }: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
     const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : p.targets.includes(e.name ?? ''));
-    const target = bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < 16);
-    if (!target) return fail('aucune cible', { targets: p.targets, precondition: true });
+    const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS);
+    if (!nextTarget()) return fail('aucune cible', { targets: p.targets, precondition: true });
     const weapon = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ?? bot.inventory.items().find((i) => i.name.endsWith('_axe'));
     if (weapon) await bot.equip(weapon, 'hand');
     const shield = p.useShield ? bot.inventory.items().find((i) => i.name === 'shield') : undefined;
     if (shield) await bot.equip(shield, 'off-hand');
     bot.pvp.attackRange = p.engageDistance;
-    void bot.pvp.attack(target);
-    while (!signal.aborted) {
-      if (!target.isValid) {
-        await bot.pvp.stop();
-        return { status: 'success', detail: { killed: target.name } };
+    // « tue les poules » : on enchaîne tant qu'il reste des cibles à portée (pvp va jusqu'à elles)
+    const killed: string[] = [];
+    while (!signal.aborted && killed.length < MAX_KILLS) {
+      const target = nextTarget();
+      if (!target) break;
+      void bot.pvp.attack(target);
+      while (!signal.aborted && target.isValid) {
+        if (bot.health <= p.retreatHp) {
+          bot.pvp.forceStop();
+          return killed.length ? { status: 'success', detail: { killed, retreated: true } } : fail('repli', { health: bot.health, retreated: true });
+        }
+        await abortableSleep(150, signal);
       }
-      if (bot.health <= p.retreatHp) {
-        bot.pvp.forceStop();
-        return fail('repli', { health: bot.health, retreated: true });
-      }
-      await abortableSleep(150, signal);
+      if (!target.isValid) killed.push(target.name ?? 'cible');
     }
     bot.pvp.forceStop();
+    if (killed.length) return { status: 'success', detail: { killed } };
     return fail('interrompu');
   },
 };
