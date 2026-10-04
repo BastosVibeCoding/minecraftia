@@ -3,7 +3,7 @@ import { ManualClock } from '../src/core/clock.js';
 import { DOMAINS, type Domain } from '../src/core/types.js';
 import { Budget } from '../src/decider/budget.js';
 import { DecisionCache } from '../src/decider/cache.js';
-import { Decider } from '../src/decider/decider.js';
+import { applyGuards, Decider } from '../src/decider/decider.js';
 import { LlmError, OpenRouterClient, type LlmClient } from '../src/decider/llm.js';
 import type { Band } from '../src/decider/prompt.js';
 import { ModelRouter } from '../src/decider/router.js';
@@ -328,5 +328,18 @@ describe('client OpenRouter', () => {
     expect(err).toBeInstanceOf(LlmError);
     expect((err as LlmError).retryable).toBe(true);
     expect((err as LlmError).message).not.toContain(key);
+  });
+});
+
+describe("construction d'initiative (demande du joueur, 2026-10-05)", () => {
+  const imitate = Object.fromEntries(DOMAINS.map((d) => [d, { band: 'act' as Band, score: 0.9 }])) as Record<Domain, { band: Band; score: number }>;
+  const floor = { skill: 'build', params: { shape: 'floor', material: 'oak_planks' }, domain: 'build' as Domain, intent: 'faire un sol comme toi', basedOn: [], needsApproval: false, say: 'Je vais faire un sol comme toi', rationale: '' };
+
+  it("désactivée : même en autonomie maximale, pas de construction sans ordre", () => {
+    expect(applyGuards(floor, [], imitate, false, { oak_planks: 64 }, false).skill).toBe('follow');
+  });
+
+  it("sur ordre, elle construit toujours", () => {
+    expect(applyGuards(floor, [], imitate, true, { oak_planks: 64 }, false).skill).toBe('build');
   });
 });

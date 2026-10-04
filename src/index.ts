@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   const autonomy = new Autonomy(store);
   const proposals = new ProposalBroker(systemClock);
   const persona = { name: config.minecraft.username, gender: config.gender };
-  const decider = new Decider({ tree, llm, budget, cache, router, strategy, persona, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
+  const decider = new Decider({ tree, llm, budget, cache, router, strategy, persona, buildInitiative: config.buildInitiative, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
 
   const companion = new Companion(config, logger, systemClock, mineflayer.createBot, {
     tree, playClock, decider, cache, router, autonomy, proposals,

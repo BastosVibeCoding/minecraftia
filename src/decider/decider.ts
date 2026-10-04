@@ -39,6 +39,8 @@ export interface DeciderDeps {
   maxTokens?: number;
   /** Nom et genre du personnage (par défaut : Alex, au féminin). */
   persona?: Persona;
+  /** Autoriser les constructions d'initiative (sinon seulement sur ordre). Par défaut : oui. */
+  buildInitiative?: boolean;
 }
 
 export function fallbackDecision(reason: string): Decision {
@@ -59,6 +61,7 @@ export function applyGuards(
   autonomy: Record<Domain, { band: Band; score: number }>,
   ordered = false,
   inventory: Record<string, number> = {},
+  buildInitiative = true,
 ): Decision {
   const known = new Set(branches.flatMap((b) => b.mechanisms.map((m) => m.id)));
   const basedOn = d.basedOn.filter((id) => known.has(id));
@@ -66,6 +69,9 @@ export function applyGuards(
     return fallbackDecision(`pas assez de ${d.params.material} dans l'inventaire pour construire`);
   }
   if (ordered || d.skill === 'none' || d.skill === 'follow' || d.skill === 'say') return { ...d, basedOn, needsApproval: false };
+  // construire, c'est placer des blocs là où le joueur les veut : un bot ne peut pas le deviner ;
+  // sans `buildInitiative`, jamais de construction d'initiative, quelle que soit l'autonomie
+  if (d.skill === 'build' && !buildInitiative) return fallbackDecision('construction : seulement sur demande du joueur');
   const key = actionKey(d.skill, d.params);
   const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
   const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);
@@ -165,7 +171,7 @@ export class Decider {
       }
       const parsed = parseDecision(text);
       if (parsed.ok) {
-        const decision = applyGuards(parsed.decision, branches, autonomy, Boolean(order), world.bot.inventory);
+        const decision = applyGuards(parsed.decision, branches, autonomy, Boolean(order), world.bot.inventory, this.deps.buildInitiative ?? true);
         if (decision.skill !== 'none' && decision.skill !== 'follow') cache.set(hash, decision.domain, decision);
         return this.save(trigger, decision, 'llm', answeredBy, hash, situationText, branches);
       }

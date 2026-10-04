@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | « je vais faire un sol comme toi » : constructions d'initiative au mauvais endroit | Plus de construction sans ordre (`BOT_BUILD_INITIATIVE=false` par défaut, garde-fou dans `applyGuards`) |
 | 2026-10-05 | Alex | « ramène-moi 30 bûches » → 3 bûches | Récolte bloc par bloc (collectblock abandonnait toute sa liste au premier trajet trop long), rayon 48, délai 10 s/bloc (max 5 min), délai plein pour les ordres, `thinkTimeout` 10 s |
 | 2026-10-05 | Alex | « Alex, trouve de la laine » incompris | Verbes « trouve », « chope », « ramène-moi » ajoutés aux ordres. « trop de l'alien » : transcription ratée, ignoré |
 | 2026-10-05 | Alex | « c'est nul… si je ne te demande pas à construire, construis pas » (compris comme un ordre de construire) | Reproches : « nul », « il ne faut pas », impératif négatif (« construis pas ») ; reproche d'une initiative → domaine « sur demande seulement » 2 h (`Autonomy.restrictToRequests`, visible dans `!autonomie`) |
@@ -23,3 +24,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `c501f04` + correctif ouvreur de portes (2026-10-05, sur `!deploy`).
 
 1. Récolte bloc par bloc jusqu'au nombre demandé
+2. Plus de construction d'initiative

@@ -32,6 +32,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
     followPlayer: env.FOLLOW_PLAYER,
     strategy: env.STRATEGY,
     gender: env.BOT_GENDER,
+    buildInitiative: env.BOT_BUILD_INITIATIVE === undefined ? undefined : env.BOT_BUILD_INITIATIVE === 'true',
     llmChain: env.LLM_CHAIN,
     openrouter: {
       apiKey: env.OPENROUTER_API_KEY,

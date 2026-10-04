@@ -14,6 +14,11 @@ export const ConfigSchema = z.object({
   followPlayer: z.string().min(1),
   /** Genre grammatical du personnage (sa façon de parler d'elle ou de lui-même). Son nom est `minecraft.username`. */
   gender: z.enum(['feminine', 'masculine']).default('feminine'),
+  /**
+   * Construire de sa propre initiative. Non par défaut : un bot ne peut pas deviner où le joueur veut
+   * ses blocs ; il construit seulement sur demande.
+   */
+  buildInitiative: z.boolean().default(false),
   /** mirror : le bot devient comme le joueur. complement : point d'extension, non implémenté. */
   strategy: z.enum(['mirror', 'complement']).default('mirror'),
   /**
