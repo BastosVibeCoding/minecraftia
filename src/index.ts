@@ -16,7 +16,8 @@ import { UtteranceClassifier } from './feedback/classifier.js';
 import { Budget } from './decider/budget.js';
 import { DecisionCache } from './decider/cache.js';
 import { Decider } from './decider/decider.js';
-import { OpenRouterClient } from './decider/llm.js';
+import { OpenRouterClient, type LlmClient } from './decider/llm.js';
+import { buildChain } from './decider/chain.js';
 import { ModelRouter } from './decider/router.js';
 import { createStrategy, StrategyNotImplementedError, type RoleStrategy } from './strategy/strategy.js';
 
@@ -59,8 +60,15 @@ async function main(): Promise<void> {
   const budget = new Budget(store.db, systemClock, config.openrouter.dailyBudgetUsd);
   const cache = new DecisionCache(store.db, systemClock);
   const router = new ModelRouter(config.openrouter.modelFast, config.openrouter.modelStrong);
-  const llm = config.openrouter.apiKey ? new OpenRouterClient({ apiKey: config.openrouter.apiKey, baseUrl: config.openrouter.baseUrl }) : null;
-  if (!llm) logger.warn('OPENROUTER_API_KEY absente : le bot suit et survit, sans décideur LLM');
+  let llm: LlmClient | null = null;
+  if (config.llmChain) {
+    const chain = buildChain(config.llmChain, process.env, logger.child({ module: 'fournisseurs' }));
+    if (chain) logger.info({ chain: chain.entries.map((e) => e.name) }, 'chaîne de fournisseurs LLM');
+    llm = chain;
+  } else if (config.openrouter.apiKey) {
+    llm = new OpenRouterClient({ apiKey: config.openrouter.apiKey, baseUrl: config.openrouter.baseUrl });
+  }
+  if (!llm) logger.warn('aucun fournisseur LLM configuré : le bot suit et survit, sans décideur LLM');
   const autonomy = new Autonomy(store);
   const proposals = new ProposalBroker(systemClock);
   const persona = { name: config.minecraft.username, gender: config.gender };

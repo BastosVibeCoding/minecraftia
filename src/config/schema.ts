@@ -16,6 +16,11 @@ export const ConfigSchema = z.object({
   gender: z.enum(['feminine', 'masculine']).default('feminine'),
   /** mirror : le bot devient comme le joueur. complement : point d'extension, non implémenté. */
   strategy: z.enum(['mirror', 'complement']).default('mirror'),
+  /**
+   * Chaîne de fournisseurs « fournisseur:modèle » séparés par des virgules (gemini, groq, openrouter,
+   * ollama). Vide : OpenRouter seul avec `openrouter.modelFast` / `modelStrong`.
+   */
+  llmChain: z.string().optional(),
   openrouter: z.object({
     apiKey: z.string().optional(),
     baseUrl: z.string().url().default('https://openrouter.ai/api/v1'),

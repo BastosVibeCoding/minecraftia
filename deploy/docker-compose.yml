@@ -40,6 +40,9 @@ services:
       MC_HOST: "minecraft"
       MC_PORT: "25565"
       DATA_DIR: "/app/data"
+      OLLAMA_URL: "http://host.docker.internal:11434/v1"   # Ollama tourne sur l'hôte (dernier secours)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /opt/minecraftia/data:/app/data
     depends_on:

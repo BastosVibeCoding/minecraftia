@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "migrate": "tsx scripts/migrate-json.ts",
     "test:voice": "cd voice && python -m pytest -q tests",
-    "sim:hour": "tsx scripts/sim-hour.ts"
+    "sim:hour": "tsx scripts/sim-hour.ts",
+    "llm:check": "tsx scripts/chain-check.ts"
   },
   "repository": {
     "type": "git",
