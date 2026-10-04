@@ -162,24 +162,40 @@ export const isEquipment = (name: string) => /_(sword|axe|pickaxe|shovel|hoe|hel
 export const furnaceTake = {
   name: 'furnace_take',
   domain: 'craft' as Domain,
-  description: 'furnace_take {} — récupérer ce qui a cuit (lingots, nourriture…) dans le four le plus proche',
+  description: 'furnace_take {} — récupérer ce qui a cuit (lingots, nourriture…) dans tous les fours proches',
   params: z.object({}),
-  timeoutMs: () => 30_000,
+  timeoutMs: () => 60_000,
   async run(ctx: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
-    const furnace = nearest(bot, ['furnace', 'blast_furnace', 'smoker'], 24);
-    if (!furnace) return fail('aucun four à portée', { precondition: true });
-    await goNear(bot, furnace.position, 2, signal);
-    if (signal.aborted) return fail('interrompu');
-    const window = await bot.openFurnace(furnace);
-    try {
-      const out = window.outputItem();
-      if (!out || out.count === 0) return fail('le four est vide', { precondition: true });
-      const got = await window.takeOutput();
-      return { status: 'success', detail: { taken: got?.count ?? out.count, item: out.name } };
-    } finally {
-      window.close();
+    const ids = ['furnace', 'blast_furnace', 'smoker'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+    // « récupère le fer dans les trois fours » : tous les fours à portée, du plus proche au plus loin
+    const furnaces = bot.findBlocks({ matching: ids, maxDistance: 24, count: 8 });
+    if (furnaces.length === 0) return fail('aucun four à portée', { precondition: true });
+    const taken: Record<string, number> = {};
+    for (const pos of furnaces) {
+      if (signal.aborted) break;
+      const furnace = bot.blockAt(pos);
+      if (!furnace) continue;
+      await goNear(bot, pos, 2, signal);
+      if (signal.aborted) break;
+      try {
+        const window = await bot.openFurnace(furnace);
+        try {
+          const out = window.outputItem();
+          if (out && out.count > 0) {
+            const got = await window.takeOutput();
+            taken[out.name] = (taken[out.name] ?? 0) + (got?.count ?? out.count);
+          }
+        } finally {
+          window.close();
+        }
+      } catch {
+        // four inaccessible : on passe au suivant
+      }
     }
+    const total = Object.values(taken).reduce((s, n) => s + n, 0);
+    if (total === 0) return fail(furnaces.length > 1 ? `les ${furnaces.length} fours sont vides` : 'le four est vide', { precondition: true });
+    return { status: 'success', detail: { taken, furnaces: furnaces.length } };
   },
 };
 

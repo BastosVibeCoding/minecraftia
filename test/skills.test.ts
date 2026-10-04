@@ -185,3 +185,20 @@ it("« donne » tout court (item « all ») : tout sauf l'équipement et la nour
   expect(r).toMatchObject({ status: 'success', detail: { given: 18 } });
   expect(tossed).toEqual(['1x6', '4x12']);
 });
+
+it("« récupère le fer dans les trois fours » : passe par tous les fours, pas seulement le plus proche (manque réel)", async () => {
+  const outputs: Record<number, { name: string; count: number } | null> = { 1: null, 2: { name: 'iron_ingot', count: 4 }, 3: { name: 'iron_ingot', count: 2 } };
+  const bot = {
+    registry: { blocksByName: { furnace: { id: 9 } } },
+    findBlocks: () => [{ x: 1, y: 64, z: 0 }, { x: 2, y: 64, z: 0 }, { x: 3, y: 64, z: 0 }],
+    blockAt: (p: { x: number }) => ({ name: 'furnace', position: p }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    openFurnace: async (b: { position: { x: number } }) => ({
+      outputItem: () => outputs[b.position.x],
+      takeOutput: async () => outputs[b.position.x],
+      close: () => {},
+    }),
+  } as unknown as Bot;
+  const r = await SKILLS.furnace_take!.run({ bot, followPlayer: 'B' }, {}, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'success', detail: { taken: { iron_ingot: 6 }, furnaces: 3 } });
+});
