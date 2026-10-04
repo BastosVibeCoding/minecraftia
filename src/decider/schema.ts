@@ -19,6 +19,34 @@ export const DecisionSchema = z.object({
 
 export type Decision = z.infer<typeof DecisionSchema>;
 
+/** Paramètres entiers des compétences (dimensions, quantités). */
+const INTEGER_PARAMS = new Set(['width', 'height', 'depth', 'count']);
+
+/**
+ * Écarts de forme sans conséquence, fréquents chez les modèles (constatés au banc d'essai) :
+ * champ facultatif à `null` au lieu d'être omis. On les retire plutôt que de rejeter la décision.
+ */
+function tolerate(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) if (v !== null) out[k] = v;
+  return out;
+}
+
+/**
+ * Dimensions recopiées des moyennes apprises (« 7,29 ») ou écrites en texte (« 7 ») : arrondies en entiers.
+ * Les bornes de chaque compétence restent appliquées ensuite par son schéma.
+ */
+function normalizeParams(params: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v === null) continue;
+    const n = typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v)) ? Number(v) : v;
+    out[k] = INTEGER_PARAMS.has(k) && typeof n === 'number' ? Math.round(n) : n;
+  }
+  return out;
+}
+
 /** Extrait et valide la décision d'un texte de LLM ; renvoie une erreur lisible pour la nouvelle tentative. */
 export function parseDecision(text: string): { ok: true; decision: Decision } | { ok: false; error: string } {
   const start = text.indexOf('{');
@@ -30,11 +58,11 @@ export function parseDecision(text: string): { ok: true; decision: Decision } | 
   } catch (err) {
     return { ok: false, error: `JSON invalide : ${(err as Error).message}` };
   }
-  const parsed = DecisionSchema.safeParse(raw);
+  const parsed = DecisionSchema.safeParse(tolerate(raw));
   if (!parsed.success) return { ok: false, error: z.prettifyError(parsed.error) };
   const d = parsed.data;
   if (d.skill !== 'none') {
-    const params = SKILLS[d.skill]!.params.safeParse(d.params);
+    const params = SKILLS[d.skill]!.params.safeParse(normalizeParams(d.params));
     if (!params.success) return { ok: false, error: `paramètres de ${d.skill} : ${z.prettifyError(params.error)}` };
     d.params = params.data as Record<string, unknown>;
   }

@@ -269,6 +269,14 @@ describe('validation des décisions', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('tolère les écarts constatés au banc : dimensions décimales ou en texte, champ facultatif à null', () => {
+    const r = parseDecision('{"skill":"build","params":{"shape":"wall","material":"stone_bricks","width":7.29,"height":"3","depth":1},"domain":"build","intent":"mur","say":null,"rationale":null}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.decision.params).toMatchObject({ width: 7, height: 3, depth: 1 });
+    // les bornes restent appliquées après arrondi
+    expect(parseDecision('{"skill":"build","params":{"shape":"wall","material":"stone","width":99.6},"domain":"build","intent":"x"}').ok).toBe(false);
+  });
+
   it('accepte du texte autour du JSON', () => {
     const r = parseDecision('Voici : {"skill":"follow","params":{},"domain":"explore","intent":"suivre"} fin');
     expect(r.ok).toBe(true);

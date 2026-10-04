@@ -38,6 +38,8 @@ interface OpenRouterOptions {
   baseUrl: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  /** Options propres à OpenRouter (coût réel dans la réponse) ; à désactiver pour Groq, Gemini, Ollama. */
+  openRouterExtras?: boolean;
 }
 
 interface ChatCompletion {
@@ -70,14 +72,14 @@ export class OpenRouterClient implements LlmClient {
         headers: {
           Authorization: `Bearer ${this.opts.apiKey}`,
           'Content-Type': 'application/json',
-          'X-Title': 'Minecraftia',
+          ...(this.opts.openRouterExtras === false ? {} : { 'X-Title': 'Minecraftia' }),
         },
         body: JSON.stringify({
           model: req.model,
           max_tokens: req.maxTokens,
           temperature: 0.2,
           response_format: { type: 'json_object' },
-          usage: { include: true },
+          ...(this.opts.openRouterExtras === false ? {} : { usage: { include: true } }),
           messages: [
             { role: 'system', content: req.system },
             { role: 'user', content: req.user },
