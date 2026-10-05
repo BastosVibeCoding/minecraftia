@@ -20,6 +20,11 @@ import { ResourceMemory } from './bot/resources.js';
 import { guessHome, HomeStore } from './bot/home.js';
 import { ChestRoles } from './bot/chestRoles.js';
 import { playerEntity } from './bot/mineflayerTypes.js';
+import { toAction, type SkillContext } from './skills/library.js';
+import mcProtocol from 'minecraft-protocol';
+import { presenceAction } from './bot/presence.js';
+
+const mcPing = mcProtocol.ping;
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -51,6 +56,8 @@ const MOVEMENTS_GUARD_MS = 2000;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
 const RECENT_EPISODES = 5;
+/** Présence du joueur suivi : fréquence de vérification, délai avant de rentrer, déconnexion garantie. */
+const PRESENCE_TICK_MS = 20_000;
 /** Fréquence des vérifications liées à la maison (proposition, routine du soir). */
 const HOME_TICK_MS = 30_000;
 const OWN_BLOCK_MS = 15_000;
@@ -99,6 +106,13 @@ export class Companion {
   readonly home: HomeStore;
   readonly chestRoles: ChestRoles;
   private homeTimer: NodeJS.Timeout | null = null;
+  private presenceTimer: NodeJS.Timeout | null = null;
+  /** Déconnecté volontairement en attendant le retour du joueur suivi. */
+  private parked = false;
+  /** Début de l'absence du joueur suivi (null : présent). */
+  private absentSince: number | null = null;
+  /** Routine de départ (maison, rangement) en cours. */
+  private leaving = false;
   /** Une proposition de maison devinée attend sa réponse. */
   private homeAsked = false;
   /** La routine du soir (rentrer, dormir) a déjà été lancée cette nuit. */
@@ -213,7 +227,90 @@ export class Companion {
       this.deps.playClock.setActive(Boolean(this.session?.bot.players[this.config.followPlayer]));
     }, OBSERVER_TICK_MS);
     this.homeTimer = setInterval(() => this.homeTick(), HOME_TICK_MS);
-    this.connection.start();
+    this.presenceTimer = setInterval(() => void this.presenceTick().catch((err: unknown) => this.logger.error({ err }, 'suivi de présence en erreur')), PRESENCE_TICK_MS);
+    // au démarrage, on ne se connecte que si son propre joueur est là ; sinon on l'attend
+    void this.followedPlayerOnline().then((online) => {
+      if (online) this.connection.start();
+      else {
+        this.parked = true;
+        this.logger.info(`${this.config.followPlayer} n'est pas connecté : j'attends son arrivée`);
+      }
+    });
+  }
+
+  /** Contexte des compétences pour ce bot (le même pour la boucle et la routine de départ). */
+  private skillContextFor(bot: Bot): SkillContext {
+    return {
+      bot,
+      followPlayer: this.config.followPlayer,
+      touch: (pos) => this.touchBlock(pos),
+      isProtected: (b) => this.isProtected(b),
+      resources: this.resources,
+      chestRoles: this.chestRoles,
+      home: () => this.home.get(),
+      restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })),
+      speak: (text) => void this.speaker.speak(text),
+    };
+  }
+
+  /**
+   * Joueur suivi absent : au bout d'une minute, rentrer à la maison et ranger ; puis se déconnecter.
+   * Déconnexion garantie au bout de cinq minutes d'absence, même si le retour échoue (demande du
+   * joueur). Déconnecté, le bot interroge la liste des joueurs du serveur et revient avec son joueur.
+   */
+  private async presenceTick(): Promise<void> {
+    const now = this.clock.now();
+    if (this.parked) {
+      if (await this.followedPlayerOnline()) {
+        this.logger.info(`${this.config.followPlayer} est revenu : reconnexion`);
+        this.parked = false;
+        this.absentSince = null;
+        this.connection.start();
+      }
+      return;
+    }
+    const s = this.session;
+    if (!s) return;
+    if (s.bot.players[this.config.followPlayer]) {
+      this.absentSince = null;
+      this.leaving = false;
+      return;
+    }
+    this.absentSince ??= now;
+    const action = presenceAction(false, this.absentSince, now, this.leaving);
+    if (action === 'se déconnecter') return this.park('cinq minutes sans joueur');
+    if (action !== 'rentrer') return;
+    this.leaving = true;
+    this.logger.info(`${this.config.followPlayer} est parti : retour à la maison, rangement, puis déconnexion`);
+    s.loop.stop();
+    s.actions.abort('joueur déconnecté');
+    const ctx = this.skillContextFor(s.bot);
+    for (const step of this.home.get() ? ['go_home', 'store'] : []) {
+      if (this.session !== s || this.parked) return;
+      await s.actions.run(toAction(ctx, step, {})).catch(() => undefined);
+    }
+    if (this.session === s && !this.parked) this.park('maison et rangement faits');
+  }
+
+  /** Se déconnecter jusqu'au retour du joueur suivi. */
+  private park(reason: string): void {
+    if (this.parked) return;
+    this.parked = true;
+    this.leaving = false;
+    this.logger.info({ reason }, 'déconnexion en attendant le retour du joueur');
+    this.endSession();
+    this.connection.stop();
+  }
+
+  /** Le joueur suivi apparaît-il dans la liste des joueurs du serveur (ping de la liste des serveurs) ? */
+  private async followedPlayerOnline(): Promise<boolean> {
+    try {
+      const status = (await mcPing({ host: this.config.minecraft.host, port: this.config.minecraft.port, version: this.config.minecraft.version })) as { players?: { sample?: { name: string }[] } };
+      return (status.players?.sample ?? []).some((p) => p.name === this.config.followPlayer);
+    } catch (err) {
+      this.logger.debug({ err }, 'ping du serveur impossible');
+      return false;
+    }
   }
 
   /** Bloc à ne jamais casser : posé par un joueur, bloc de construction, ou dans la zone de la maison. */
@@ -269,6 +366,7 @@ export class Companion {
     this.connection.stop();
     if (this.observerTimer) clearInterval(this.observerTimer);
     if (this.homeTimer) clearInterval(this.homeTimer);
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.deps.playClock.setActive(false);
     this.observer.flush();
     this.telemetry.stop();
@@ -430,7 +528,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.isProtected(b), resources: this.resources, chestRoles: this.chestRoles, home: () => this.home.get(), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
+      skillContext: this.skillContextFor(bot),
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,
