@@ -102,5 +102,14 @@ export function guessHome(blocks: (Pos & { block: string })[]): { home: Pos; rea
 /** « ici c'est la maison », « c'est ici chez nous », « voici notre maison » : désignation par le joueur. */
 export function isHomeDesignation(text: string): boolean {
   const t = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  return /\b(ici|la|voici|voila)\b.*\b(maison|chez (nous|moi|toi)|base)\b|\b(maison|base)\b.*\b(est |c'est )?ici\b/.test(t) && !/\?/.test(t) && !/\b(rentre|retourne|va|vas|reviens|range)\b/.test(t);
+  // seulement une vraie désignation, avec « ici » ou « voici » (cas réel : le simple mot « maison »
+  // dans « on va à la maison » déplaçait la maison)
+  const PLACE = "(la |notre |ma |ta |votre )?(maison|base)|chez (nous|moi|toi)";
+  const designation = new RegExp(
+    `\\bici\\b,? (c'est|ce sera|sera)? ?(${PLACE})\\b` + // « ici c'est la maison »
+      `|\\bc'est ici (${PLACE})\\b` + // « c'est ici chez nous »
+      `|\\b(${PLACE}),? (c'est|est|sera) ici\\b` + // « la maison est ici »
+      `|\\b(voici|voila) (${PLACE})\\b`, // « voici notre maison »
+  );
+  return designation.test(t) && !/\?/.test(t) && !/\b(pas|plus|jamais)\b/.test(t);
 }
