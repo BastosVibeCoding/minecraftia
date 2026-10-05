@@ -176,3 +176,13 @@ describe("ordres en plusieurs étapes (manque réel : « récolte le fer dans le
     expect(stub.calls[1]!.user).toContain('étape précédente');
   });
 });
+
+describe("ordre raté : le bot explique pourquoi (cas réel : « Alex, dors » en plein jour, sans un mot)", () => {
+  it("dit la raison de l'échec", async () => {
+    const { stub, loop, said } = await setup();
+    stub.scripted.push(JSON.stringify({ skill: 'give', params: { item: 'sand' }, domain: 'gather', intent: 'donner', basedOn: [], rationale: 'ordre' }));
+    loop.order('donne ton sable');
+    await flush();
+    expect(said.at(-1)).toBe("Je n'y arrive pas : pas de sand dans l'inventaire.");
+  });
+});

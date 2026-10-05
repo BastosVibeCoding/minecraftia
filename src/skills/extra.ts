@@ -248,6 +248,9 @@ export const furnaceTake = {
   },
 };
 
+/** Distance de recherche du coffre pour ranger ou reprendre (16 blocs ne suffisaient pas, cas réel). */
+const CHEST_RADIUS = 32;
+
 /** Ranger dans le coffre le plus proche (tout, ou les objets demandés), en gardant outils, armes et nourriture. */
 export const store = {
   name: 'store',
@@ -256,7 +259,7 @@ export const store = {
   params: z.object({ items: z.array(z.string().min(1)).max(10).optional() }),
   timeoutMs: () => 40_000,
   async run({ bot }: SkillContext, p: { items?: string[] }, signal: AbortSignal): Promise<ActionRunOutput> {
-    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], 16);
+    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], CHEST_RADIUS);
     if (!chest) return fail('aucun coffre à portée', { precondition: true });
     await goNear(bot, chest.position, 2, signal);
     const keep = (name: string) => isEquipment(name) || bot.registry.foodsByName[name] !== undefined;
@@ -290,7 +293,7 @@ export const retrieve = {
   async run({ bot }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const type = bot.registry.itemsByName[p.item];
     if (!type) return fail('objet inconnu', { precondition: true });
-    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], 16);
+    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], CHEST_RADIUS);
     if (!chest) return fail('aucun coffre à portée', { precondition: true });
     await goNear(bot, chest.position, 2, signal);
     const before = countItem(bot, p.item);

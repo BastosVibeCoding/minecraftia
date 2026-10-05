@@ -173,13 +173,17 @@ export class DecisionLoop {
   }
 
   private async execute(record: DecisionRecord | null, skill: string, params: Record<string, unknown>, order?: string): Promise<void> {
+    // on note si la compétence a parlé (« il me faut du combustible… ») pour ne pas répéter l'échec
+    let spoke = false;
+    const base = this.deps.skillContext;
+    const ctx = { ...base, speak: (t: string) => ((spoke = true), base.speak ? base.speak(t) : base.bot.chat(t)) };
     let action;
     try {
-      action = toAction(this.deps.skillContext, skill, params);
+      action = toAction(ctx, skill, params);
     } catch (err) {
       if (!(err instanceof SkillParamsError)) throw err;
       this.deps.logger.warn({ err: err.message }, 'action refusée, repli sur le suivi');
-      action = toAction(this.deps.skillContext, 'follow', { seconds: 5 });
+      action = toAction(ctx, 'follow', { seconds: 5 });
     }
     // le suivi dure par construction : son délai ne se réduit pas (il expirerait avant la fin)
     // un ordre du joueur garde son délai plein : la prudence graduée ne vaut que pour les initiatives
@@ -205,6 +209,9 @@ export class DecisionLoop {
     // un ordre exécuté mais raté : souvent une compétence à compléter (la raison réelle est gardée)
     // y compris « il manque quelque chose » : pour un ordre du joueur, c'est un manque à combler
     if (order && outcome.status === 'failure') this.deps.gaps?.failedOrder(order, action.name, result.reason ?? outcome.summary);
+    // un ordre raté s'explique au joueur (« il fait jour », « aucun coffre à portée »), sauf si la
+    // compétence l'a déjà dit elle-même
+    if (order && outcome.status === 'failure' && !spoke && action.name !== 'follow') this.say(`Je n'y arrive pas : ${String((result.detail as { reason?: unknown } | undefined)?.reason ?? result.reason ?? 'ça a échoué')}.`);
     // étape suivante d'un ordre en plusieurs temps, avec le résultat de celle-ci en contexte
     if (order && this.nextSteps) {
       const plan = this.nextSteps;

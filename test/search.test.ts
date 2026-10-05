@@ -85,3 +85,21 @@ describe("recherche quand rien n'est en vue", () => {
     expect(said[0]).toBe("Je n'ai pas trouvé de sable dans le coin, tu peux me montrer où ?");
   });
 });
+
+it("« tue les vaches » sans vache en vue : part chercher, puis le dit s'il n'en trouve pas", async () => {
+  const said: string[] = [];
+  let pos = vec(0, 64, 0);
+  const bot = {
+    entity: { get position() { return pos; } },
+    world: { raycast: () => null },
+    players: {},
+    health: 20,
+    inventory: { items: () => [] },
+    nearestEntity: () => null,
+    pathfinder: { goto: async (g: { x: number; z: number }) => void (pos = vec(g.x, 64, g.z)), setGoal: () => {} },
+    pvp: { attack: async () => {}, forceStop: () => {}, attackRange: 3 },
+  } as unknown as Bot;
+  const r = await SKILLS.attack!.run({ bot, followPlayer: 'B', speak: (t) => void said.push(t) }, { targets: ['cow'], engageDistance: 3, retreatHp: 6, useShield: false }, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'failure', detail: { reason: 'aucune cible' } });
+  expect(said).toEqual(['Je ne trouve pas de vache dans le coin.']);
+});

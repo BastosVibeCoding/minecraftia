@@ -7,6 +7,9 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « tue les vaches / les cochons » → aucune cible | L'attaque part chercher la cible (étapes de 30 blocs), sinon « Je ne trouve pas de vache dans le coin. » ; délai 2 min |
+| 2026-10-05 | Alex | « mets les bûches dans le coffre » → aucun coffre à portée | Coffre cherché à 32 blocs (au lieu de 16) |
+| 2026-10-05 | Alex | « dors » → il fait jour, sans le dire | Tout ordre raté est expliqué au joueur (« Je n'y arrive pas : … »), sauf si la compétence l'a déjà dit. « tape un villageois » : ignoré volontairement |
 | 2026-10-05 | Alex | hache en fer fabriquée (3 lingots) pour couper du bois | Choix du joueur : le fer est permis, mais un outil tout fait dans les coffres proches est pris avant de fabriquer (ordre : inventaire → coffre → fabrication → matériaux des coffres → demande) |
 | 2026-10-05 | Léa | « fais cuire le sable » → destination full (3×) | Four vidé avant usage : sortie récupérée, entrée étrangère retirée, combustible déjà en place conservé |
 | 2026-10-05 | Léa | « tape les mobs » | Verbe « tape » |
@@ -56,3 +59,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (recherche, mémoire des gisements, « pas trouvé », pas de fer pour un outil facultatif, four vidé, « tape »).
 
 1. Outil : coffre avant fabrication, fer permis
+2. Attaque : recherche de la cible
+3. Coffre à 32 blocs
+4. Ordre raté expliqué au joueur

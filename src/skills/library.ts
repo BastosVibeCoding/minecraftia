@@ -305,6 +305,10 @@ const build = {
   },
 };
 
+const MOB_FR: Record<string, string> = { cow: 'vache', pig: 'cochon', sheep: 'mouton', chicken: 'poule', rabbit: 'lapin', zombie: 'zombie', skeleton: 'squelette', spider: 'araignée', creeper: 'creeper', hostile: 'monstre' };
+/** Nom à dire pour une cible (« vache », « monstre »…). */
+export const mobNameFr = (targets: string[]) => MOB_FR[targets[0] ?? ''] ?? (targets[0] ?? 'cible').replace(/_/g, ' ');
+
 /** Portée de recherche des cibles, et nombre maximal de cibles abattues par ordre. */
 const ATTACK_RADIUS = 32;
 const MAX_KILLS = 8;
@@ -319,13 +323,17 @@ const attack = {
     retreatHp: z.number().min(0).max(20).default(6),
     useShield: z.boolean().default(false),
   }),
-  timeoutMs: () => 45_000,
+  timeoutMs: () => 120_000, // recherche de la cible comprise
   async run(ctx: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
     const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : p.targets.includes(e.name ?? ''));
     // seulement ce qu'il voit : pas de cible repérée à travers un mur
     const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS && canSee(bot, e));
-    if (!nextTarget()) return fail('aucune cible', { targets: p.targets, precondition: true });
+    // aucune cible en vue (« tue les vaches ») : on part la chercher, comme pour une récolte
+    if (!nextTarget() && !(await searchFor({ bot, found: () => nextTarget() !== null, names: p.targets, memory: undefined, followPlayer: ctx.followPlayer }, signal))) {
+      ctx.speak?.(`Je ne trouve pas de ${mobNameFr(p.targets)} dans le coin.`);
+      return fail('aucune cible', { targets: p.targets, precondition: true });
+    }
     const weapon = bot.inventory.items().find((i) => i.name.endsWith('_sword')) ?? bot.inventory.items().find((i) => i.name.endsWith('_axe'));
     if (weapon) await bot.equip(weapon, 'hand');
     const shield = p.useShield ? bot.inventory.items().find((i) => i.name === 'shield') : undefined;
