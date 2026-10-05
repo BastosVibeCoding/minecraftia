@@ -42,8 +42,8 @@ export interface FeedbackDeps {
   status?: () => { health: number; food: number } | null;
   /** Désigne la maison là où est le joueur ; renvoie la phrase de confirmation. */
   setHomeHere?: () => string;
-  /** Texte du panneau le plus proche, pour « c'est écrit quoi sur la pancarte ? ». */
-  nearestSign?: () => string | null;
+  /** Textes des panneaux proches, du plus proche au plus loin (« c'est écrit quoi sur la pancarte ? »). */
+  nearbySigns?: () => string[];
   /** Action en cours et résultat de la dernière, pour « t'as fini ? ». */
   progress?: () => { current: string | null; lastOutcome: string | null };
 }
@@ -134,10 +134,13 @@ export class FeedbackHandler {
     }
     if (mentionsAnItem(text)) this.lastMention = { text, at: d.clock.now() };
     const st = d.status?.();
-    // « c'est écrit quoi sur la pancarte ? » : elle lit le panneau le plus proche
-    if (d.nearestSign && isQuestion(text) && /\b(pancartes?|panneaux?|ecrit)\b/.test(withoutVocative(text, d.botName ?? ''))) {
-      const sign = d.nearestSign();
-      const reply = sign ? `Le panneau dit : « ${sign} ».` : 'Je ne vois pas de panneau près de moi.';
+    // « c'est écrit quoi sur la pancarte ? », « tu lis quoi sur le panneau », « combien de pancartes ? »
+    const core = withoutVocative(text, d.botName ?? '');
+    if (d.nearbySigns && /\b(pancartes?|panneaux?)\b/.test(core) && (isQuestion(text) || /\b(quoi|lis|ecrit|dit|combien|vois)\b/.test(core))) {
+      const signs = d.nearbySigns();
+      let reply: string;
+      if (/\bcombien\b/.test(core)) reply = signs.length ? `Je vois ${signs.length} panneau${signs.length > 1 ? 'x' : ''} : ${signs.map((s) => `« ${s} »`).join(', ')}.` : 'Je ne vois aucun panneau près de moi.';
+      else reply = signs[0] ? `Le panneau dit : « ${signs[0]} ».` : 'Je ne vois pas de panneau près de moi.';
       d.say(reply);
       return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
     }

@@ -7,6 +7,10 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | tri : 278 objets retirés, aucun déposé, gardés sur lui | Pause de 400 ms entre deux coffres, erreurs d'ouverture et de dépôt enregistrées dans le résultat, objets non déposés remis dans leur coffre d'origine |
+| 2026-10-05 | Alex, Léa | reprise annoncée ratée alors que l'objet était arrivé ; « prends toute la nourriture » ; « donne-moi tes glass » planté | Retrait compté sur l'inventaire réel ; familles dans retrieve (food, ores, wood, seeds) ; give saute un objet introuvable |
+| 2026-10-05 | Alex, Léa | « t'as combien de cuivre », « tu lis quoi sur le panneau », « combien de pancartes », « t'as trouvé des trucs ? » | Questions cuivre, panneaux (lecture et compte, sans « ? »), avancement |
+| 2026-10-05 | Léa | « casse les escaliers en bois (wooden_stairs) » → blocs inconnus ; « va explorer » → No path | Familles par dernier mot (stairs) ; casser sur ordre un type de bloc de construction nommé (seulement lui) ; exploration retentée dans 3 directions |
 | 2026-10-05 | joueurs | « le tri ne marche pas très bien » | Rôles des coffres mémorisés d'un tri à l'autre (ils changeaient à chaque tri) ; retrait vérifié dans l'inventaire (un retrait raté faisait déposer la pioche du bot) ; résumé dit à la fin ; familles « verre » et « construction » ; questions : graines, betteraves, « c'est écrit quoi sur la pancarte ? » ; test anti-caractères de contrôle |
 | 2026-10-05 | joueurs | « les bots peuvent trier les coffres ? » | Compétence `sort_chests` : rôle de chaque coffre = panneau posé dessus (bois, minerais, nourriture, divers…), sinon famille dominante, vide = divers ; objets déplacés vers le coffre de leur famille, sinon le divers ; coffres doubles comptés une fois ; verbe « trie » |
 | 2026-10-05 | Léa | trois coffres à la maison, elle ouvre le mauvais | Rangement : tour des coffres (8 max), chaque objet avec le même objet, sinon sa famille, sinon le coffre le plus libre, coffre plein → suivant ; reprendre cherche dans tous les coffres ; bug du compte après dépôt corrigé |
@@ -60,6 +64,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `db07f91` (2026-10-05, sur `!deploy`).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 9 éléments (tri : erreurs et retour au coffre, retraits comptés, familles, give, questions, panneaux, escaliers, exploration).
 
 (aucun)

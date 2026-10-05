@@ -353,7 +353,7 @@ it("« Léa c'est écrit quoi sur la pancarte ? » : elle lit le panneau le plus
     classifier: new UtteranceClassifier(null, null, 'fast', 'Lea'), tree: new BehaviorTree(store, { playTime: () => 0 }), autonomy: new Autonomy(store),
     cache: new DecisionCache(store.db, clock), proposals: new ProposalBroker(clock), observer: new Observer('B', () => {}), store, clock, logger: silentLogger,
     loop: () => null, actions: () => null, lastDecision: () => null, lastDecisionAt: () => 0, say: (t) => said.push(t), botName: 'Lea',
-    nearestSign: () => 'Minerais',
+    nearbySigns: () => ['Minerais', 'Bois'],
   });
   await h.handle('B', "Léa c'est écrit quoi sur la pancarte ?", 'chat');
   expect(said).toEqual(['Le panneau dit : « Minerais ».']);

@@ -13,6 +13,8 @@ import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
 import { staircase } from './staircase.js';
+import { companionMovements } from '../bot/movements.js';
+import { isBuildingBlock } from '../bot/placedBlocks.js';
 import { sortChests } from './sortChests.js';
 import type { ResourceMemory } from '../bot/resources.js';
 import type { ChestRoles } from '../bot/chestRoles.js';
@@ -117,7 +119,13 @@ export function expandBlockNames(known: string[], wanted: string[]): string[] {
       continue;
     }
     const family = ALIASES[w] ?? w.replace(/s$/, '');
+    const before = out.size;
     for (const k of known) if (k.endsWith(`_${family}`)) out.add(k);
+    // « wooden_stairs » : rien ne finit ainsi, on retente avec le dernier mot (« stairs »)
+    if (out.size === before && w.includes('_')) {
+      const last = w.split('_').pop()!;
+      for (const k of known) if (k.endsWith(`_${last}`)) out.add(k);
+    }
   }
   return [...out];
 }
@@ -187,7 +195,7 @@ const collect = {
         if (!b) continue;
         seen = true;
         // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
-        if (ctx.isProtected?.(b)) continue;
+        if (ctx.isProtected?.(b) && !(demolish && names.includes(b.name))) continue;
         onlyPlaced = false;
         if (skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) continue;
         // un bloc dans l'eau est plus dur à récolter et on peut s'y noyer (cas réel : sable) :
@@ -200,6 +208,14 @@ const collect = {
       }
       return wetFallback;
     };
+    // casser des blocs de construction nommés (« casse les escaliers en bois ») : le joueur le demande
+    // explicitement, donc ce type-là seulement n'est plus protégé ; tout le reste le reste
+    const demolish = names.length > 0 && names.every(isBuildingBlock);
+    const collectorMovements = bot.collectBlock?.movements;
+    if (demolish && ctx.isProtected && bot.collectBlock) {
+      const base = ctx.isProtected;
+      bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected: (b) => !names.includes(b.name) && base(b) });
+    }
     try {
       while (!signal.aborted && gained() < p.count && misses < MAX_COLLECT_MISSES) {
         const target = pickTarget();
@@ -236,6 +252,7 @@ const collect = {
         }
       }
     } finally {
+      if (demolish && bot.collectBlock) bot.collectBlock.movements = collectorMovements!;
       ctx.restoreMovements?.();
     }
     const total = gained();
@@ -407,13 +424,22 @@ const explore = {
   params: z.object({ radius: z.number().min(8).max(64).default(24) }),
   timeoutMs: () => 90_000,
   async run({ bot, home }: SkillContext, p: { radius: number }, signal: AbortSignal): Promise<ActionRunOutput> {
-    const angle = Math.random() * Math.PI * 2;
-    const me = bot.entity.position;
-    // rester dans le coin de la maison : la destination est ramenée à HOME_RANGE blocs d'elle
-    const target = clampToHome({ x: me.x + Math.cos(angle) * p.radius, z: me.z + Math.sin(angle) * p.radius }, home?.() ?? null);
-    const goal = new goals.GoalNearXZ(target.x, target.z, 3);
-    await cancellable(bot.pathfinder.goto(goal), signal, () => bot.pathfinder.setGoal(null));
-    return { status: 'success', detail: { distance: Math.round(bot.entity.position.distanceTo(me)) } };
+    const me = bot.entity.position.clone();
+    // « No path to the goal » (cas réel) : on essaie jusqu'à trois directions avant d'abandonner
+    let lastError: string | undefined;
+    for (let attempt = 0; attempt < 3 && !signal.aborted; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      // rester dans le coin de la maison : la destination est ramenée à HOME_RANGE blocs d'elle
+      const target = clampToHome({ x: me.x + Math.cos(angle) * p.radius, z: me.z + Math.sin(angle) * p.radius }, home?.() ?? null);
+      try {
+        await cancellable(bot.pathfinder.goto(new goals.GoalNearXZ(target.x, target.z, 3)), signal, () => bot.pathfinder.setGoal(null));
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+      const distance = Math.round(bot.entity.position.distanceTo(me));
+      if (distance >= p.radius / 2) return { status: 'success', detail: { distance } };
+    }
+    return fail(lastError ?? 'aucun chemin pour explorer');
   },
 };
 

@@ -133,3 +133,41 @@ describe("tri : corrections après l'essai en jeu", () => {
     expect(inv[0]!.count).toBe(1);
   });
 });
+
+it("dépôt impossible : l'erreur est notée et les objets retournent dans leur coffre (cas réel : 71 steaks gardés sur lui)", async () => {
+  type It = { name: string; count: number; type: number };
+  const chests: Record<number, It[]> = { 1: [{ name: 'oak_log', count: 40, type: 1 }, { name: 'cooked_beef', count: 10, type: 5 }], 2: [{ name: 'bread', count: 3, type: 6 }] };
+  const inv: It[] = [];
+  const bot = {
+    entity: { position: vec(0, 64, 0) },
+    registry: { blocksByName: { chest: { id: 54 } }, foodsByName: { cooked_beef: {}, bread: {} }, itemsByName: { oak_log: { id: 1 }, cooked_beef: { id: 5 }, bread: { id: 6 } } },
+    findBlocks: () => [vec(1, 64, 0), vec(2, 64, 0)],
+    blockAt: (p: { x: number; y: number; z: number }) => (p.y === 64 && p.x >= 1 && p.x <= 2 ? { name: 'chest', position: vec(p.x, p.y, p.z), getProperties: () => ({ type: 'single' }) } : { name: 'air', position: p }),
+    inventory: { items: () => inv.filter((i) => i.count > 0), emptySlotCount: () => 30 },
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    openContainer: async (b: { position: { x: number } }) => {
+      const x = b.position.x;
+      const c = chests[x]!;
+      return {
+        inventoryStart: 27,
+        containerItems: () => c.filter((i) => i.count > 0),
+        withdraw: async (type: number, _m: null, n: number) => {
+          const it = c.find((i) => i.type === type)!;
+          it.count -= n;
+          inv.push({ ...it, count: n });
+        },
+        deposit: async (type: number, _m: null, n: number) => {
+          if (x === 2) throw new Error('destination full');
+          const k = inv.findIndex((i) => i.type === type);
+          inv.splice(k, 1);
+          c.push({ name: type === 5 ? 'cooked_beef' : 'oak_log', count: n, type });
+        },
+        close: () => {},
+      };
+    },
+  } as unknown as Bot;
+  const r = await SKILLS.sort_chests!.run({ bot, followPlayer: 'B' }, {}, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'failure', detail: { reason: 'dépôt de cooked_beef dans le coffre 2 : destination full' } });
+  expect(inv).toEqual([]); // rien gardé sur lui
+  expect(chests[1]!.filter((i) => i.name === 'cooked_beef').reduce((s, i) => s + i.count, 0)).toBe(10);
+});

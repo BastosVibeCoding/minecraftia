@@ -176,12 +176,13 @@ export class Companion {
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
       lastGained: () => this.session?.loop.lastGained() ?? null,
       status: () => (this.session ? { health: this.session.bot.health, food: this.session.bot.food } : null),
-      nearestSign: () => {
+      nearbySigns: () => {
         const bot = this.session?.bot;
-        if (!bot) return null;
-        const sign = bot.findBlock({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 8 }) as (ReturnType<Bot['blockAt']> & { getSignText?: () => string[] }) | null;
-        const text = sign?.getSignText?.().map((t) => (t ?? '').trim()).filter(Boolean).join(' / ');
-        return text || null;
+        if (!bot) return [];
+        return bot
+          .findBlocks({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 12, count: 12 })
+          .map((p) => (bot.blockAt(p) as (ReturnType<Bot['blockAt']> & { getSignText?: () => string[] }) | null)?.getSignText?.().map((t) => (t ?? '').trim()).filter(Boolean).join(' / ') ?? '')
+          .filter(Boolean);
       },
       progress: () => ({ current: this.session?.actions.current?.name ?? null, lastOutcome: this.session?.loop.lastResult ?? null }),
     });

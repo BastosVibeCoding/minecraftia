@@ -77,8 +77,10 @@ export async function withdrawFromChests(bot: Bot, wanted: (name: string) => boo
         for (const it of window.containerItems().filter((i) => wanted(i.name))) {
           if (got >= max) break;
           const n = Math.min(it.count, max - got);
-          await window.withdraw(it.type, null, n);
-          got += n;
+          // ce qui arrive vraiment dans l'inventaire (un retrait peut lever une erreur et réussir quand même)
+          const before = bot.inventory.items().filter((i) => i.name === it.name).reduce((s, i) => s + i.count, 0);
+          await window.withdraw(it.type, null, n).catch(() => null);
+          got += bot.inventory.items().filter((i) => i.name === it.name).reduce((s, i) => s + i.count, 0) - before;
         }
       } finally {
         window.close();
@@ -379,18 +381,30 @@ export const store = {
   },
 };
 
+/** Noms de famille acceptés à la place d'un objet (« food », « nourriture », « minerais »…). */
+const ITEM_FAMILY_WORDS: Record<string, string> = {
+  food: 'nourriture', nourriture: 'nourriture', bouffe: 'nourriture',
+  ores: 'minerais', ore: 'minerais', minerais: 'minerais', minerai: 'minerais',
+  wood: 'bois', bois: 'bois', logs: 'bois',
+  seeds: 'cultures', graines: 'cultures', cultures: 'cultures',
+};
+
 /** Prendre des objets dans les coffres proches (tous, pas seulement le plus proche). */
 export const retrieve = {
   name: 'retrieve',
   domain: 'survive' as Domain,
-  description: "retrieve {item: nom d'objet ou famille (ex. \"coal\", \"log\"), count: 1-64} — prendre un objet dans les coffres proches",
+  description: "retrieve {item: nom d'objet ou famille (ex. \"coal\", \"log\", \"food\", \"ores\"), count: 1-64} — prendre un objet (ou toute une famille) dans les coffres proches",
   params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(64).default(16) }),
   timeoutMs: () => 90_000,
   async run({ bot, home }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const h = home?.();
     const me = bot.entity.position;
     if (h && Math.hypot(h.x - me.x, h.y - me.y, h.z - me.z) > 12) await travelHome(bot, h, signal);
-    const wanted = (name: string) => name === p.item || matchingItems([{ name }], p.item).length > 0;
+    // « prends toute la nourriture » : une famille entière (nourriture, minerais, bois…) plutôt qu'un objet
+    const fam = ITEM_FAMILY_WORDS[p.item.toLowerCase()];
+    const foods = bot.registry.foodsByName ?? {};
+    const wanted = (name: string) =>
+      fam ? (fam === 'nourriture' ? foods[name] !== undefined : familyOf(name) === fam) : name === p.item || matchingItems([{ name }], p.item).length > 0;
     const got = await withdrawFromChests(bot, wanted, p.count, signal);
     return got > 0 ? { status: 'success', detail: { got } } : fail(`pas de ${p.item} dans les coffres`, { precondition: true });
   },
@@ -488,7 +502,9 @@ export const give = {
     for (const s of stacks) {
       if (left <= 0 || signal.aborted) break;
       const n = Math.min(left, s.count);
-      await bot.toss(s.type, null, n);
+      // l'inventaire a pu changer depuis (cas réel : « Can't find glass in slots ») : on passe au suivant
+      const ok = await bot.toss(s.type, null, n).then(() => true, () => false);
+      if (!ok) continue;
       given += n;
       left -= n;
     }

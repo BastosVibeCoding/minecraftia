@@ -1,5 +1,6 @@
 import type { Bot } from 'mineflayer';
 import { z } from 'zod';
+import { abortableSleep } from '../core/abort.js';
 import type { Domain } from '../core/types.js';
 import type { ActionRunOutput } from './actionController.js';
 import { familyOf, goNear, isEquipment, travelHome, type ChestSurvey } from './extra.js';
@@ -81,6 +82,8 @@ export function planMoves(chests: ChestSurvey[], roles: string[], family: (name:
 }
 
 const CHESTS = ['chest', 'barrel', 'trapped_chest'];
+/** Pause entre la fermeture d'un coffre et l'ouverture du suivant. */
+const WINDOW_GAP_MS = 400;
 
 const countOf = (bot: Bot, name: string) => bot.inventory.items().filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
 
@@ -120,11 +123,17 @@ export const sortChests = {
     const foods = bot.registry.foodsByName ?? {};
     const family = (name: string) => sortFamily(name, foods[name] !== undefined);
 
+    const errors: string[] = [];
     const open = async (i: number) => {
       const block = bot.blockAt(positions[i]!);
       if (!block) return null;
       await goNear(bot, positions[i]!, 2, signal);
-      return bot.openContainer(block).catch(() => null);
+      // laisser au serveur le temps de fermer la fenêtre précédente avant d'en ouvrir une autre
+      await abortableSleep(WINDOW_GAP_MS, signal).catch(() => undefined);
+      return bot.openContainer(block).catch((err: unknown) => {
+        errors.push(`ouverture du coffre ${i + 1} : ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      });
     };
     // 1. tour des coffres : contenu, place libre, panneau
     const surveys: ChestSurvey[] = [];
@@ -176,24 +185,49 @@ export const sortChests = {
       } finally {
         w.close();
       }
+      const notDeposited: { item: string; count: number }[] = [];
       for (const to of [...new Set(carried.map((c) => c.to))]) {
+        const batch = carried.filter((x) => x.to === to);
         const dest = await open(to);
-        if (!dest) continue;
+        if (!dest) {
+          notDeposited.push(...batch);
+          continue;
+        }
         try {
-          for (const c of carried.filter((x) => x.to === to)) {
+          for (const c of batch) {
             const type = bot.registry.itemsByName[c.item]?.id;
             if (type === undefined) continue;
-            const ok = await dest.deposit(type, null, c.count).then(() => true, () => false);
+            const ok = await dest.deposit(type, null, c.count).then(
+              () => true,
+              (err: unknown) => (errors.push(`dépôt de ${c.item} dans le coffre ${to + 1} : ${err instanceof Error ? err.message : String(err)}`), false),
+            );
             if (ok) moved += c.count;
-            else stuck.push(c);
+            else notDeposited.push(c);
           }
         } finally {
           dest.close();
         }
       }
+      // pas pu déposer : on remet dans le coffre d'origine plutôt que de tout garder sur soi
+      if (notDeposited.length) {
+        const back = await open(from);
+        if (back) {
+          try {
+            for (const c of notDeposited) {
+              const type = bot.registry.itemsByName[c.item]?.id;
+              const ok = type !== undefined && (await back.deposit(type, null, c.count).then(() => true, () => false));
+              if (!ok) stuck.push(c);
+            }
+          } finally {
+            back.close();
+          }
+        } else stuck.push(...notDeposited);
+      }
     }
     ctx.speak?.(`Tri fini : ${moved} objets déplacés (${summary}).`);
     if (stuck.length) ctx.speak?.(`Un coffre est plein, j'ai gardé sur moi : ${stuck.map((i) => `${i.count} ${i.item.replace(/_/g, ' ')}`).join(', ')}.`);
-    return moved > 0 ? { status: 'success', detail: { moved, roles } } : { status: 'failure', detail: { reason: 'rien n\'a pu être déplacé (coffres pleins ?)' } };
+    return moved > 0
+      ? { status: 'success', detail: { moved, roles, ...(errors.length ? { errors } : {}) } }
+      : { status: 'failure', detail: { reason: errors[0] ?? "rien n'a pu être déplacé", roles, errors } };
   },
 };

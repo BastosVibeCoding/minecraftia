@@ -1,3 +1,4 @@
+import type { Bot } from 'mineflayer';
 import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
@@ -184,4 +185,30 @@ it("outil tout fait dans le coffre : pris avant de fabriquer avec son fer (choix
   expect(await ensureHarvestTool(bot as never, 'oak_log', new AbortController().signal)).toEqual({ ok: true });
   expect(inv.some((i) => i.name === 'iron_axe')).toBe(true);
   expect(crafted).toEqual([]);
+});
+
+describe("manques de la partie du 5 octobre (soir)", () => {
+  it("« wooden_stairs » → tous les escaliers ; « t'as combien de cuivre » ; « t'as trouvé des trucs ? »", () => {
+    expect(expandBlockNames(['oak_stairs', 'spruce_stairs', 'oak_log'], ['wooden_stairs']).sort()).toEqual(['oak_stairs', 'spruce_stairs']);
+    expect(answerInventoryQuestion("alex t'as combien de cuivre", { raw_copper: 5 })).toBe("J'ai 5 cuivre.");
+    expect(answerProgressQuestion("Léa t'as trouvé des trucs ?", { current: null, lastOutcome: 'collect : réussi +4 iron_ore' })).toBe("Oui, c'est fini : collect : réussi +4 iron_ore.");
+  });
+
+  it("« casse les escaliers en bois » : les escaliers protégés deviennent cassables, le reste non", async () => {
+    const targets: string[] = [];
+    const collect = { movements: 'nos réglages', collect: async (t: { name: string }) => void targets.push(t.name), cancelTask: async () => {} };
+    const mcData = (await import('minecraft-data')).default('1.21');
+    const bot = {
+      registry: mcData,
+      findBlocks: () => [vec(1, 64, 0)],
+      blockAt: (p: { y: number }) => (p.y === 64 ? { name: 'oak_stairs', position: p } : { name: 'air', position: p }),
+      inventory: { items: () => [] },
+      collectBlock: collect,
+      world: { getBlock: () => null },
+      entities: {},
+    } as unknown as Bot;
+    await SKILLS.collect!.run({ bot, followPlayer: 'B', isProtected: () => true }, { blocks: ['wooden_stairs'], count: 1 }, new AbortController().signal).catch(() => null);
+    expect(targets).toEqual(['oak_stairs']);
+    expect(collect.movements).toBe('nos réglages'); // réglages remis après
+  });
 });

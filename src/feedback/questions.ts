@@ -16,6 +16,7 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
   { words: /\b(bois|buches?|troncs?)\b/, label: 'bûches', match: (i) => /_(log|stem)$/.test(i) },
   { words: /\bplanches?\b/, label: 'planches', match: (i) => i.endsWith('_planks') },
   { words: /\b(pierres?|cailloux|cobble\w*|roches?)\b/, label: 'pierres', match: (i) => /^(cobblestone|stone|cobbled_deepslate|deepslate|andesite|diorite|granite)$/.test(i) },
+  { words: /\bcuivre\b/, label: 'cuivre', match: (i) => /^(raw_copper|copper_ingot|copper_ore|deepslate_copper_ore)$/.test(i) },
   { words: /\bfer\b/, label: 'fer', match: (i) => /^(raw_iron|iron_ingot|iron_ore|deepslate_iron_ore)$/.test(i) },
   { words: /\bcharbon\b/, label: 'charbon', match: (i) => /^(coal|charcoal|coal_ore|deepslate_coal_ore)$/.test(i) },
   { words: /\bdiamants?\b/, label: 'diamants', match: (i) => /^(diamond|diamond_ore|deepslate_diamond_ore)$/.test(i) },
@@ -144,7 +145,7 @@ const ACTION_FR: Record<string, string> = {
 /** « t'as fini ? », « tu fais quoi ? » : l'action en cours, ou le résultat de la dernière. */
 export function answerProgressQuestion(text: string, p: { current: string | null; lastOutcome: string | null }): string | null {
   const t = norm(text);
-  if (!/\b(t'as fini|tu as fini|c'est fini|t'as termine|tu as termine|tu fais quoi|qu'est[- ]ce que tu fais|t'en es ou|tu en es ou|ou t'en es)\b/.test(t)) return null;
+  if (!/\b(t'as fini|tu as fini|c'est fini|t'as termine|tu as termine|tu fais quoi|qu'est[- ]ce que tu fais|t'en es ou|tu en es ou|ou t'en es|t'as trouve|tu as trouve)\b/.test(t)) return null;
   if (p.current && p.current !== 'follow') return `Pas encore, ${ACTION_FR[p.current] ?? `je fais ${p.current}`}.`;
   if (p.lastOutcome) return `Oui, c'est fini : ${p.lastOutcome}.`;
   return "Je n'ai rien en cours, je te suis.";
