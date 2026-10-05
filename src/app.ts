@@ -184,6 +184,13 @@ export class Companion {
           .map((p) => (bot.blockAt(p) as (ReturnType<Bot['blockAt']> & { getSignText?: () => string[] }) | null)?.getSignText?.().map((t) => (t ?? '').trim()).filter(Boolean).join(' / ') ?? '')
           .filter(Boolean);
       },
+      where: () => {
+        const bot = this.session?.bot;
+        if (!bot?.entity) return null;
+        const me = bot.entity.position;
+        const player = playerEntity(bot, this.config.followPlayer)?.position;
+        return { x: me.x, y: me.y, z: me.z, toPlayer: player ? me.distanceTo(player) : null, toHome: this.home.distance(me) };
+      },
       progress: () => ({ current: this.session?.actions.current?.name ?? null, lastOutcome: this.session?.loop.lastResult ?? null }),
     });
     this.connection = new BotConnection(

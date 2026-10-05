@@ -7,6 +7,8 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Léa | « fabrique des vitres » (3×), « donne-moi une table de craft » → ingrédients manquants | craft : recette la plus proche de l'inventaire, ingrédients pris dans les coffres, planches et bâtons faits au besoin, établi fabriqué et posé si nécessaire, sinon le bot dit ce qui manque |
+| 2026-10-05 | Léa | « t'es où ? » | Position, distance au joueur et à la maison. « range l'item que je vais te donner », « il y a d'autres coffres » : intentions futures ou remarques, ignorées |
 | 2026-10-05 | Alex | tri : 278 objets retirés, aucun déposé, gardés sur lui | Pause de 400 ms entre deux coffres, erreurs d'ouverture et de dépôt enregistrées dans le résultat, objets non déposés remis dans leur coffre d'origine |
 | 2026-10-05 | Alex, Léa | reprise annoncée ratée alors que l'objet était arrivé ; « prends toute la nourriture » ; « donne-moi tes glass » planté | Retrait compté sur l'inventaire réel ; familles dans retrieve (food, ores, wood, seeds) ; give saute un objet introuvable |
 | 2026-10-05 | Alex, Léa | « t'as combien de cuivre », « tu lis quoi sur le panneau », « combien de pancartes », « t'as trouvé des trucs ? » | Questions cuivre, panneaux (lecture et compte, sans « ? »), avancement |
@@ -66,4 +68,5 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 9 éléments (tri : erreurs et retour au coffre, retraits comptés, familles, give, questions, panneaux, escaliers, exploration).
 
-(aucun)
+1. Fabrication avec ingrédients des coffres
+2. « t'es où ? »

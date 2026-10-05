@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
 import { classifyByRules } from '../src/feedback/classifier.js';
-import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
+import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, answerWhereQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
 import { askForTool, ensureHarvestTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
@@ -211,4 +211,59 @@ describe("manques de la partie du 5 octobre (soir)", () => {
     expect(targets).toEqual(['oak_stairs']);
     expect(collect.movements).toBe('nos réglages'); // réglages remis après
   });
+});
+
+describe("fabriquer avec des ingrédients pris dans les coffres (manques réels : « fabrique des vitres »)", () => {
+  function craftBot(chest: { name: string; count: number; type: number }[]) {
+    const inv: { name: string; count: number; type: number }[] = [];
+    const said: string[] = [];
+    const items: Record<number, { name: string }> = { 20: { name: 'glass' }, 21: { name: 'glass_pane' } };
+    const paneRecipe = { requiresTable: true, delta: [{ id: 20, count: -6 }, { id: 21, count: 16 }], result: { count: 16 } };
+    const has = (n: string, c: number) => inv.filter((i) => i.name === n).reduce((s, i) => s + i.count, 0) >= c;
+    const bot = {
+      registry: { itemsByName: { glass_pane: { id: 21 }, glass: { id: 20 }, crafting_table: { id: 30 } }, blocksByName: { crafting_table: { id: 31 }, chest: { id: 54 } }, items },
+      inventory: { items: () => inv.filter((i) => i.count > 0) },
+      findBlock: () => ({ name: 'crafting_table', position: vec(2, 64, 0) }),
+      findBlocks: () => (chest.length ? [vec(3, 64, 0)] : []),
+      blockAt: (p: unknown) => ({ name: 'chest', position: p }),
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      openContainer: async () => ({
+        containerItems: () => chest.filter((i) => i.count > 0),
+        withdraw: async (type: number, _m: null, n: number) => {
+          const it = chest.find((i) => i.type === type)!;
+          it.count -= n;
+          inv.push({ ...it, count: n });
+        },
+        close: () => {},
+      }),
+      recipesFor: () => (has('glass', 6) ? [paneRecipe] : []),
+      recipesAll: () => [paneRecipe],
+      craft: async () => {
+        inv.find((i) => i.name === 'glass')!.count -= 6;
+        inv.push({ name: 'glass_pane', count: 16, type: 21 });
+      },
+    } as unknown as Bot;
+    return { bot, inv, said };
+  }
+
+  it("prend le verre dans le coffre puis fabrique les vitres", async () => {
+    const chest = [{ name: 'glass', count: 8, type: 20 }];
+    const { bot } = craftBot(chest);
+    const r = await SKILLS.craft!.run({ bot, followPlayer: 'B' }, { item: 'glass_pane', count: 1 }, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'success', detail: { made: 16 } });
+    expect(chest[0]!.count).toBe(2); // il n'a pris que les 6 blocs nécessaires
+  });
+
+  it("pas de verre nulle part : il dit ce qui manque", async () => {
+    const said: string[] = [];
+    const { bot } = craftBot([]);
+    const r = await SKILLS.craft!.run({ bot, followPlayer: 'B', speak: (t) => void said.push(t) }, { item: 'glass_pane', count: 1 }, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'failure', detail: { precondition: true } });
+    expect(said[0]).toBe("Pour fabriquer glass pane, il me manque 6 glass, ni sur moi ni dans les coffres. Tu peux m'en donner ?");
+  });
+});
+
+it("« Léa, t'es où ? » : position, distance au joueur et à la maison", () => {
+  expect(answerWhereQuestion("Léa t'es où ?", { x: -283.4, y: 64, z: 91.6, toPlayer: 37.2, toHome: 120 })).toBe('Je suis en -283 64 92, à 37 blocs de toi, à 120 blocs de la maison.');
+  expect(answerWhereQuestion('tu es où', { x: 0, y: 64, z: 0, toPlayer: 2, toHome: 3 })).toBe('Je suis en 0 64 0, juste à côté de toi, à la maison.');
 });

@@ -11,7 +11,7 @@ import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import { canSee } from '../bot/sight.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
-import { EXTRA_SKILLS } from './extra.js';
+import { EXTRA_SKILLS, placeNearby, withdrawFromChests } from './extra.js';
 import { staircase } from './staircase.js';
 import { companionMovements } from '../bot/movements.js';
 import { isBuildingBlock } from '../bot/placedBlocks.js';
@@ -397,25 +397,83 @@ const attack = {
   },
 };
 
+/** Nom français d'un objet pour le dire au joueur (à défaut, le nom Minecraft lisible). */
+const itemFr = (name: string) => name.replace(/_/g, ' ');
+
 const craft = {
   name: 'craft',
   domain: 'craft' as Domain,
-  description: 'craft {item: nom d\'objet, count: 1-16} — fabriquer (avec un établi proche si nécessaire)',
+  description: "craft {item: nom d'objet, count: 1-16} — fabriquer (ingrédients pris dans les coffres proches si besoin, planches et bâtons faits au besoin, établi posé si nécessaire)",
   params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(16).default(1) }),
-  timeoutMs: () => 30_000,
-  async run({ bot }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+  timeoutMs: () => 90_000,
+  async run(ctx: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
     const item = bot.registry.itemsByName[p.item];
     if (!item) return fail('objet inconnu', { item: p.item, precondition: true });
-    const tableBlock = bot.findBlock({ matching: bot.registry.blocksByName.crafting_table!.id, maxDistance: 6 }) ?? undefined;
-    const recipe = bot.recipesFor(item.id, null, 1, tableBlock ?? null)[0];
-    if (!recipe) return fail('ingrédients ou établi manquants', { item: p.item, precondition: true });
-    if (recipe.requiresTable && tableBlock) await goNear(bot, tableBlock.position, 2, signal);
+    const tableId = bot.registry.blocksByName.crafting_table!.id;
+    const findTable = () => bot.findBlock({ matching: tableId, maxDistance: 16 }) ?? null;
+    let table = findTable();
+    let recipe = bot.recipesFor(item.id, null, 1, table)[0];
+    if (!recipe) {
+      // pas faisable avec l'inventaire : on prépare la recette la plus proche de ce qu'on a
+      // (cas réels : « fabrique des vitres » avec le verre dans un coffre, « une table de craft »)
+      const all = bot.recipesAll(item.id, null, true);
+      if (all.length === 0) return fail(`pas de recette pour ${itemFr(p.item)}`, { precondition: true });
+      const needs = (r: (typeof all)[number]) => r.delta.filter((d) => d.count < 0).map((d) => ({ name: bot.registry.items[d.id]!.name, count: -d.count * p.count }));
+      const missingOf = (r: (typeof all)[number]) => needs(r).reduce((s, n) => s + Math.max(0, n.count - countItem(bot, n.name)), 0);
+      const chosen = [...all].sort((a, b) => missingOf(a) - missingOf(b))[0]!;
+      for (const need of needs(chosen)) {
+        let missing = need.count - countItem(bot, need.name);
+        if (missing <= 0) continue;
+        missing -= await withdrawFromChests(bot, (n) => n === need.name, missing, signal);
+        // planches et bâtons se fabriquent sur place à partir du bois
+        if (missing > 0 && (need.name.endsWith('_planks') || need.name === 'stick')) await craftBasic(bot, need.name, missing, signal);
+      }
+      if (chosen.requiresTable && !table) table = await ensureCraftingTable(bot, signal);
+      recipe = bot.recipesFor(item.id, null, 1, table)[0];
+      if (!recipe) {
+        const lacking = needs(chosen).filter((n) => countItem(bot, n.name) < n.count).map((n) => `${n.count - countItem(bot, n.name)} ${itemFr(n.name)}`);
+        const reason = chosen.requiresTable && !table ? 'un établi' : lacking.join(', ');
+        ctx.speak?.(`Pour fabriquer ${itemFr(p.item)}, il me manque ${reason}, ni sur moi ni dans les coffres. Tu peux m'en donner ?`);
+        return fail(`il manque ${reason}`, { item: p.item, precondition: true });
+      }
+    }
+    if (recipe.requiresTable && table) await goNear(bot, table.position, 2, signal);
     const before = countItem(bot, p.item);
-    await cancellable(bot.craft(recipe, p.count, tableBlock), signal, () => undefined);
+    // autant de fois que demandé, sinon autant que possible
+    const ok = await cancellable(bot.craft(recipe, p.count, table ?? undefined).then(() => true, () => false), signal, () => undefined);
+    if (!ok) await cancellable(bot.craft(recipe, 1, table ?? undefined).catch(() => undefined), signal, () => undefined);
     const made = countItem(bot, p.item) - before;
     return made > 0 ? { status: 'success', detail: { made } } : fail('fabrication sans résultat');
   },
 };
+
+/** Planches (à partir de n'importe quelle bûche) ou bâtons (à partir de planches), sans établi. */
+async function craftBasic(bot: Bot, name: string, count: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  if (name === 'stick' && bot.inventory.items().filter((i) => i.name.endsWith('_planks')).reduce((s, i) => s + i.count, 0) < 2) await craftBasic(bot, 'oak_planks', 2, signal);
+  const wanted = name.endsWith('_planks')
+    ? (bot.inventory.items().find((i) => /_(log|stem)$/.test(i.name))?.name.replace(/_(log|stem)$/, '_planks') ?? name)
+    : name;
+  const id = bot.registry.itemsByName[wanted]?.id;
+  if (id === undefined) return;
+  const r = bot.recipesFor(id, null, 1, null)[0];
+  if (!r) return;
+  const perCraft = r.result.count || 1;
+  await bot.craft(r, Math.ceil(count / perCraft), undefined).catch(() => undefined);
+}
+
+/** Un établi à portée : celui du coin, sinon celui de l'inventaire (ou fabriqué) posé à côté. */
+async function ensureCraftingTable(bot: Bot, signal: AbortSignal): Promise<ReturnType<Bot['findBlock']>> {
+  const existing = bot.findBlock({ matching: bot.registry.blocksByName.crafting_table!.id, maxDistance: 16 });
+  if (existing) return existing;
+  if (countItem(bot, 'crafting_table') === 0) {
+    if (bot.inventory.items().filter((i) => i.name.endsWith('_planks')).reduce((s, i) => s + i.count, 0) < 4) await craftBasic(bot, 'oak_planks', 4, signal);
+    const r = bot.recipesFor(bot.registry.itemsByName.crafting_table!.id, null, 1, null)[0];
+    if (r) await bot.craft(r, 1, undefined).catch(() => undefined);
+  }
+  return countItem(bot, 'crafting_table') > 0 ? placeNearby(bot, 'crafting_table') : null;
+}
 
 const explore = {
   name: 'explore',

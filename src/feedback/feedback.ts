@@ -12,7 +12,7 @@ import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { classifyByRules, isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
 import { isHomeDesignation } from '../bot/home.js';
-import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, isQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
+import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, answerWhereQuestion, isQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
 export interface FeedbackDeps {
@@ -44,6 +44,8 @@ export interface FeedbackDeps {
   setHomeHere?: () => string;
   /** Textes des panneaux proches, du plus proche au plus loin (« c'est écrit quoi sur la pancarte ? »). */
   nearbySigns?: () => string[];
+  /** Position du bot et distances (joueur, maison), pour « t'es où ? ». */
+  where?: () => { x: number; y: number; z: number; toPlayer: number | null; toHome: number | null } | null;
   /** Action en cours et résultat de la dernière, pour « t'as fini ? ». */
   progress?: () => { current: string | null; lastOutcome: string | null };
 }
@@ -145,7 +147,8 @@ export class FeedbackHandler {
       return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
     }
     const pr = d.progress?.();
-    const answer = (pr ? answerProgressQuestion(text, pr) : null) ?? (st ? answerStatusQuestion(text, st) : null) ?? (inv ? answerInventoryQuestion(text, inv) : null);
+    const wh = d.where?.();
+    const answer = (wh ? answerWhereQuestion(text, wh) : null) ?? (pr ? answerProgressQuestion(text, pr) : null) ?? (st ? answerStatusQuestion(text, st) : null) ?? (inv ? answerInventoryQuestion(text, inv) : null);
     if (answer) {
       d.say(answer);
       d.logger.info({ channel }, `question du joueur : « ${text} » → ${answer}`);

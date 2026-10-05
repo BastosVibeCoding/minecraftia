@@ -150,3 +150,13 @@ export function answerProgressQuestion(text: string, p: { current: string | null
   if (p.lastOutcome) return `Oui, c'est fini : ${p.lastOutcome}.`;
   return "Je n'ai rien en cours, je te suis.";
 }
+
+/** « t'es où ? » : position, distance au joueur et à la maison. */
+export function answerWhereQuestion(text: string, w: { x: number; y: number; z: number; toPlayer: number | null; toHome: number | null }): string | null {
+  const t = norm(text);
+  if (!/\b(t'es ou|tu es ou|ou es[- ]tu|ou t'es|t'es passee? ou|ta position|tes coordonnees)\b/.test(t)) return null;
+  const parts = [`Je suis en ${Math.round(w.x)} ${Math.round(w.y)} ${Math.round(w.z)}`];
+  if (w.toPlayer !== null) parts.push(w.toPlayer <= 4 ? 'juste à côté de toi' : `à ${Math.round(w.toPlayer)} blocs de toi`);
+  if (w.toHome !== null) parts.push(w.toHome <= 6 ? 'à la maison' : `à ${Math.round(w.toHome)} blocs de la maison`);
+  return `${parts.join(', ')}.`;
+}
