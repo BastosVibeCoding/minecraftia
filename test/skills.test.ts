@@ -314,3 +314,29 @@ it("sable dans l'eau et à la surface : la surface d'abord (cas réel : le bot s
   await SKILLS.collect!.run({ bot, followPlayer: 'B' }, { blocks: ['sand'], count: 1 }, new AbortController().signal);
   expect(targets).toEqual([5]);
 });
+
+it("four occupé : vide la sortie et l'entrée étrangère avant de cuire le sable (cas réel : destination full)", async () => {
+  const calls: string[] = [];
+  const inv = [{ name: 'sand', count: 8, type: 10 }, { name: 'coal', count: 4, type: 2 }];
+  const bot = {
+    registry: { itemsByName: { sand: { id: 10 }, coal: { id: 2 } }, blocksByName: { furnace: { id: 51 } } },
+    inventory: { items: () => inv },
+    findBlock: () => ({ name: 'furnace', position: vec(1, 64, 0) }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    openFurnace: async () => ({
+      outputItem: () => (calls.includes('takeOutput') ? null : { name: 'glass', count: 8 }),
+      inputItem: () => (calls.includes('takeInput') ? null : { type: 99, name: 'raw_iron' }),
+      fuelItem: () => null,
+      takeOutput: async () => void calls.push('takeOutput'),
+      takeInput: async () => void calls.push('takeInput'),
+      putFuel: async () => void calls.push('putFuel'),
+      putInput: async () => {
+        calls.push('putInput');
+        throw new Error('fin du test');
+      },
+      close: () => {},
+    }),
+  } as unknown as Bot;
+  await SKILLS.smelt!.run({ bot, followPlayer: 'B' }, { item: 'sand', count: 8 }, new AbortController().signal).catch(() => null);
+  expect(calls).toEqual(['takeOutput', 'takeInput', 'putFuel', 'putInput']);
+});

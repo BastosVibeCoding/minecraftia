@@ -43,7 +43,7 @@ const RULES: Record<Exclude<UtteranceLabel, 'chatter'>, RegExp[]> = {
   teaching: [/\bregarde\b|\bobserve\b/, /je (te )?montre/, /(?<!pas )comme (ca|ça)\b(?! ?\?)/, /fais comme moi|voila comment|apprends/],
   order: [
     // verbe à l'impératif en tête de phrase ou après « non, » / « plutôt »
-    new RegExp(`(^${FILLER}|[,;.!] *|\\bplutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|recupere|ramasse|reprends|prends|prend |trouve|clique|ramene-moi|chope|attaque|tue|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |fait |apporte|rapporte|ramene|aide[- ]moi|cherche|plante|seme|cuis|range|dors|allume)(?! ?(pas|plus)\\b)`),
+    new RegExp(`(^${FILLER}|[,;.!] *|\\bplutot )(construis|construit|batis|bati|pose|mine|creuse|coupe|recolte|recupere|ramasse|reprends|prends|prend |trouve|clique|ramene-moi|chope|attaque|tue|tape|suis[- ]moi|viens|va |fabrique|craft|mange|explore|reste|donne|equipe|protege|defends|fais |fait |apporte|rapporte|ramene|aide[- ]moi|cherche|plante|seme|cuis|range|dors|allume)(?! ?(pas|plus)\\b)`),
     new RegExp(`^${FILLER}(tu peux|peux[- ]tu|pourrais[- ]tu|tu pourrais|tu vas|il faut que tu|j'ai besoin)\\b`),
     /(s'il te plait|s'te plait|\bstp\b)/,
   ],

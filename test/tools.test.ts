@@ -154,3 +154,11 @@ it("« Léa t'as fini ? » : action en cours, ou résultat de la dernière (manq
   expect(answerProgressQuestion('tu fais quoi ?', { current: null, lastOutcome: null })).toBe("Je n'ai rien en cours, je te suis.");
   expect(answerProgressQuestion("t'as du sable ?", { current: null, lastOutcome: null })).toBeNull();
 });
+
+it("bois : jamais de fer dépensé pour une hache facultative (cas réel : 3 lingots gaspillés)", () => {
+  expect(toolPlan({ iron_ingot: 3, oak_planks: 2 }, 'axe', null, true)).toEqual({ missing: 'une hache en bois ou 3 planches' });
+  expect(toolPlan({ iron_ingot: 3, cobblestone: 3, oak_planks: 2 }, 'axe', null, true)).toEqual({ craft: 'stone_axe' });
+  // pour un minerai qui l'exige, le fer reste permis
+  expect(toolPlan({ iron_ingot: 3, oak_planks: 2 }, 'pickaxe', ['iron_pickaxe', 'diamond_pickaxe'], true)).toEqual({ craft: 'iron_pickaxe' });
+  expect(classifyByRules('Tape les mobs Léa', 'Lea').label).toBe('order');
+});

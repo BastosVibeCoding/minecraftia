@@ -176,8 +176,16 @@ export const smelt = {
     const window = await bot.openFurnace(furnace);
     try {
       const count = Math.min(p.count, countItem(bot, p.item));
+      // four déjà occupé (cas réel : « destination full ») : on récupère ce qui a cuit et ce qui
+      // attend dans l'entrée s'il s'agit d'autre chose ; un autre combustible déjà en place sert tel quel
+      if (window.outputItem()) await window.takeOutput().catch(() => null);
+      const waiting = window.inputItem();
+      if (waiting && waiting.type !== input.id) await window.takeInput().catch(() => null);
       const fuelPerItem = fuelName.includes('coal') ? 1 / 8 : fuelName.endsWith('_log') || fuelName.endsWith('_planks') ? 1 / 1.5 : 1;
-      await window.putFuel(bot.registry.itemsByName[fuelName]!.id, null, Math.min(countItem(bot, fuelName), Math.max(1, Math.ceil(count * fuelPerItem))));
+      const loaded = window.fuelItem();
+      if (!loaded || loaded.type === bot.registry.itemsByName[fuelName]!.id) {
+        await window.putFuel(bot.registry.itemsByName[fuelName]!.id, null, Math.min(countItem(bot, fuelName), Math.max(1, Math.ceil(count * fuelPerItem))));
+      }
       await window.putInput(input.id, null, count);
       let taken = 0;
       const deadline = Date.now() + 11_000 * count + 5_000;

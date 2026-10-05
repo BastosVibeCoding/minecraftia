@@ -56,7 +56,10 @@ export function toolPlan(inventory: Inventory, kind: ToolKind, allowed: string[]
   const sticks = count((n) => n === 'stick');
   // bois nécessaire en plus de la tête : 2 bâtons (2 planches) si besoin, 4 planches d'établi si aucun n'est là
   const extraWood = (sticks >= 2 ? 0 : 2) + (tableAvailable || (inventory.crafting_table ?? 0) > 0 ? 0 : 4);
-  const candidates = TIERS.filter((t) => ok(`${t.tier}_${kind}`));
+  // outil facultatif (la main suffit, ex. le bois) : jamais de fer ni de diamant dépensé pour lui
+  // (cas réel : 3 lingots de fer transformés en hache pour couper des bûches)
+  const affordable = allowed === null ? TIERS.filter((t) => t.tier === 'wooden' || t.tier === 'stone') : TIERS;
+  const candidates = affordable.filter((t) => ok(`${t.tier}_${kind}`));
   for (const t of candidates) {
     const head = HEAD[kind];
     const enough = t.tier === 'wooden' ? planks >= head + extraWood : count(t.matches) >= head && planks >= extraWood;
