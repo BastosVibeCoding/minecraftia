@@ -17,6 +17,8 @@ import { GapRecorder } from './gaps/gaps.js';
 import { companionMovements, installDoorOpener, isCompanionMovements } from './bot/movements.js';
 import { isBuildingBlock, PlacedBlocks } from './bot/placedBlocks.js';
 import { ResourceMemory } from './bot/resources.js';
+import { guessHome, HomeStore } from './bot/home.js';
+import { playerEntity } from './bot/mineflayerTypes.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -48,6 +50,8 @@ const MOVEMENTS_GUARD_MS = 2000;
 const IDLE_CHECK_MS = 1000;
 const OBSERVER_TICK_MS = 1000;
 const RECENT_EPISODES = 5;
+/** Fréquence des vérifications liées à la maison (proposition, routine du soir). */
+const HOME_TICK_MS = 30_000;
 const OWN_BLOCK_MS = 15_000;
 
 /** Session de jeu : tout ce qui vit entre une apparition du bot et sa déconnexion. */
@@ -91,6 +95,12 @@ export class Companion {
   readonly gaps: GapRecorder;
   readonly placed: PlacedBlocks;
   readonly resources: ResourceMemory;
+  readonly home: HomeStore;
+  private homeTimer: NodeJS.Timeout | null = null;
+  /** Une proposition de maison devinée attend sa réponse. */
+  private homeAsked = false;
+  /** La routine du soir (rentrer, dormir) a déjà été lancée cette nuit. */
+  private nightHandled = false;
   private readonly voiceClient: VoiceClient | null;
   private readonly voiceLink: VoiceLink;
   private readonly heard: HeardAudioExtractor;
@@ -117,6 +127,7 @@ export class Companion {
     );
     this.placed = new PlacedBlocks(deps.tree.store.db, clock);
     this.resources = new ResourceMemory(deps.tree.store.db, clock);
+    this.home = new HomeStore(deps.tree.store.db, clock, config.homeRadius);
     this.gaps = new GapRecorder(deps.tree.store.db, clock, logger.child({ module: 'manques' }));
     this.heard = new HeardAudioExtractor(config.followPlayer);
     this.voiceClient = config.voice.url
@@ -158,6 +169,7 @@ export class Companion {
       say: (text) => void this.speaker.speak(text),
       gaps: this.gaps,
       botName: config.minecraft.username,
+      setHomeHere: () => this.setHomeHere(),
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
       lastGained: () => this.session?.loop.lastGained() ?? null,
       status: () => (this.session ? { health: this.session.bot.health, food: this.session.bot.food } : null),
@@ -182,13 +194,63 @@ export class Companion {
       // le temps de jeu actif (décroissance des poids) n'avance que si le joueur suivi est là
       this.deps.playClock.setActive(Boolean(this.session?.bot.players[this.config.followPlayer]));
     }, OBSERVER_TICK_MS);
+    this.homeTimer = setInterval(() => this.homeTick(), HOME_TICK_MS);
     this.connection.start();
+  }
+
+  /** Bloc à ne jamais casser : posé par un joueur, bloc de construction, ou dans la zone de la maison. */
+  isProtected(b: { name: string; position: { x: number; y: number; z: number } }): boolean {
+    return this.placed.isProtected(b) || this.home.inZone(b.position);
+  }
+
+  /** Désigne la maison là où se trouve le joueur suivi (à défaut, le bot). */
+  setHomeHere(): string {
+    const bot = this.session?.bot;
+    if (!bot) return "Je ne suis pas connectée, je ne peux pas noter la maison.";
+    const at = playerEntity(bot, this.config.followPlayer)?.position ?? bot.entity.position;
+    const h = this.home.set(at);
+    this.homeAsked = false;
+    return `C'est noté : la maison est ici (${h.x} ${h.y} ${h.z}). Je n'y casserai rien à moins de ${this.home.radius} blocs.`;
+  }
+
+  /**
+   * Toutes les 30 s : proposer une maison devinée (une fois, si le joueur est sur place), et le soir,
+   * quand le joueur est rentré, rentrer aussi et dormir.
+   */
+  private homeTick(): void {
+    const s = this.session;
+    if (!s) return;
+    const bot = s.bot;
+    const player = playerEntity(bot, this.config.followPlayer)?.position;
+    if (!this.homeAsked && this.home.mayAsk() && player) {
+      const guess = guessHome(this.placed.all().slice(-1500));
+      if (guess && Math.hypot(guess.home.x - player.x, guess.home.z - player.z) <= 24) {
+        this.homeAsked = true;
+        this.feedback.askHome(`On dirait que la maison est ici (${guess.reason}). C'est bien la maison ?`, (yes) => {
+          if (yes) {
+            const h = this.home.set(guess.home);
+            void this.speaker.speak(`D'accord, c'est la maison (${h.x} ${h.y} ${h.z}).`);
+          } else this.home.refuseGuess();
+          this.homeAsked = false;
+        });
+      }
+    }
+    const h = this.home.get();
+    const tod = bot.time?.timeOfDay ?? 6000;
+    const night = tod >= 12542 && tod <= 23460;
+    if (!night) this.nightHandled = false;
+    else if (h && player && !this.nightHandled && !s.actions.isBusy && Math.hypot(player.x - h.x, player.z - h.z) <= 32) {
+      this.nightHandled = true;
+      this.logger.info('le joueur est rentré pour la nuit : retour à la maison et sommeil');
+      s.loop.order('rentre à la maison puis dors');
+    }
   }
 
   stop(): void {
     this.endSession();
     this.connection.stop();
     if (this.observerTimer) clearInterval(this.observerTimer);
+    if (this.homeTimer) clearInterval(this.homeTimer);
     this.deps.playClock.setActive(false);
     this.observer.flush();
     this.telemetry.stop();
@@ -229,6 +291,17 @@ export class Companion {
   /** Commandes d'inspection (`!arbre`, `!autonomie`, `!pourquoi`, `!oublie`, `!budget`, `!aide`). */
   async command(text: string): Promise<void> {
     try {
+      const [name, arg = ''] = text.trim().split(/\s+/, 2);
+      if (name?.toLowerCase() === '!maison') {
+        const h = this.home.get();
+        const answer = /^(oublie|efface)$/i.test(arg)
+          ? (this.home.clear(), "J'ai oublié la maison.")
+          : /^(\?|ou|où)$/i.test(arg)
+            ? h ? `La maison est en ${h.x} ${h.y} ${h.z} (zone protégée : ${this.home.radius} blocs).` : "Je ne sais pas encore où est la maison."
+            : this.setHomeHere();
+        for (const line of chatLines(answer)) this.session?.bot.chat(line);
+        return;
+      }
       const { tree, autonomy, decider, budget, cache } = this.deps;
       const answer = await runCommand(text, { tree, autonomy, decider, budget, cache, gaps: this.gaps });
       if (answer) for (const line of chatLines(answer)) this.session?.bot.chat(line);
@@ -271,7 +344,7 @@ export class Companion {
       if (!bot.pathfinder) bot.loadPlugin(pathfinder);
       if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);
       if (!bot.pvp) bot.loadPlugin(pvpPlugin);
-      const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.placed.isProtected(b);
+      const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.isProtected(b);
       bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
       installDoorOpener(bot, () => this.clock.now());
       // recherche de chemin bornée : sans limite, un trajet avec droit de creuser vers un bloc enfoui
@@ -307,7 +380,7 @@ export class Companion {
     const reflexes = new ReflexEngine(
       new MineflayerReflexHost(bot, this.config.followPlayer),
       actions,
-      new MineflayerReflexExecutor(bot, this.config.followPlayer),
+      new MineflayerReflexExecutor(bot, this.config.followPlayer, () => this.home.get()),
       this.config.reflexes,
       this.clock,
       this.logger.child({ module: 'réflexes' }),
@@ -339,7 +412,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.placed.isProtected(b), resources: this.resources, restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.placed.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.isProtected(b), resources: this.resources, home: () => this.home.get(), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,

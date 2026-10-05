@@ -311,3 +311,36 @@ it("« Léa ? » tout seul : elle répond « Oui ? » (manque réel)", async () 
   expect(said).toEqual(['Oui ?']);
   expect(loopCalls).toEqual([]);
 });
+
+describe("maison par la voix (demande du joueur)", () => {
+  async function handler() {
+    const clock = new ManualClock(0);
+    const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+    const said: string[] = [];
+    let designated = 0;
+    const h = new FeedbackHandler({
+      classifier: new UtteranceClassifier(null, null, 'fast', 'Alex'), tree: new BehaviorTree(store, { playTime: () => 0 }), autonomy: new Autonomy(store),
+      cache: new DecisionCache(store.db, clock), proposals: new ProposalBroker(clock), observer: new Observer('B', () => {}), store, clock, logger: silentLogger,
+      loop: () => ({ order: () => {}, request: () => {} }) as never, actions: () => null, lastDecision: () => null, lastDecisionAt: () => 0, say: (t) => said.push(t), botName: 'Alex',
+      setHomeHere: () => (designated++, "C'est noté : la maison est ici."),
+    });
+    return { h, said, designated: () => designated };
+  }
+
+  it("« Alex, ici c'est la maison » enregistre la maison et le confirme", async () => {
+    const t = await handler();
+    await t.h.handle('B', "Alex, ici c'est la maison", 'voice');
+    expect(t.designated()).toBe(1);
+    expect(t.said).toEqual(["C'est noté : la maison est ici."]);
+  });
+
+  it("maison devinée : « oui » la garde, « non » la refuse", async () => {
+    const t = await handler();
+    const answers: boolean[] = [];
+    t.h.askHome("On dirait que la maison est ici (un lit, des coffres). C'est bien la maison ?", (yes) => answers.push(yes));
+    await t.h.handle('B', 'oui', 'voice');
+    t.h.askHome('Et ici ?', (yes) => answers.push(yes));
+    await t.h.handle('B', 'non', 'chat');
+    expect(answers).toEqual([true, false]);
+  });
+});

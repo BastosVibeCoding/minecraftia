@@ -10,7 +10,8 @@ import type { ActionController } from '../skills/actionController.js';
 import type { Store } from '../store/store.js';
 import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
-import { isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
+import { classifyByRules, isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
+import { isHomeDesignation } from '../bot/home.js';
 import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
@@ -39,6 +40,8 @@ export interface FeedbackDeps {
   lastGained?: () => { item: string; at: number } | null;
   /** Vie et faim du bot, pour « t'as faim ? », « ça va ? ». */
   status?: () => { health: number; food: number } | null;
+  /** Désigne la maison là où est le joueur ; renvoie la phrase de confirmation. */
+  setHomeHere?: () => string;
   /** Action en cours et résultat de la dernière, pour « t'as fini ? ». */
   progress?: () => { current: string | null; lastOutcome: string | null };
 }
@@ -47,6 +50,8 @@ export interface FeedbackDeps {
 const FEEDBACK_WINDOW_MS = 120_000;
 /** Intervalle minimal entre deux réponses de conversation (pas de bavardage en rafale). */
 const CHAT_INTERVAL_MS = 15_000;
+/** Délai pour répondre à « c'est bien la maison ? ». */
+const HOME_ANSWER_MS = 120_000;
 /** Délai pour répondre à « je mine quoi ? » ; ensuite la question est oubliée. */
 const CLARIFY_WINDOW_MS = 60_000;
 
@@ -61,6 +66,14 @@ export class FeedbackHandler {
   private lastChatAt = -Infinity;
   /** Dernière phrase qui parlait d'un objet (« t'as combien de fer ? »). */
   private lastMention: { text: string; at: number } | null = null;
+  /** Question « c'est bien la maison ? » en attente de oui / non. */
+  private pendingHome: { onAnswer: (yes: boolean) => void; until: number } | null = null;
+
+  /** Pose une question oui/non sur la maison devinée ; la réponse du joueur la tranche. */
+  askHome(question: string, onAnswer: (yes: boolean) => void): void {
+    this.pendingHome = { onAnswer, until: this.deps.clock.now() + HOME_ANSWER_MS };
+    this.deps.say(question);
+  }
 
   constructor(private readonly deps: FeedbackDeps) {}
 
@@ -75,6 +88,22 @@ export class FeedbackHandler {
 
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
+    // « ici c'est la maison » : le joueur désigne la maison
+    if (d.setHomeHere && isHomeDesignation(text)) {
+      this.pendingHome = null;
+      d.say(d.setHomeHere());
+      return { label: 'order', confidence: 0.9, classifier: 'rules' };
+    }
+    // réponse à « c'est bien la maison ? » (oui / non)
+    const home = this.pendingHome;
+    if (home && d.clock.now() <= home.until) {
+      const c = classifyByRules(text, d.botName ?? 'Alex');
+      if (c.label === 'approval' || c.label === 'correction') {
+        this.pendingHome = null;
+        home.onAnswer(c.label === 'approval');
+        return c;
+      }
+    }
     // réponse à « je mine quoi ? » : elle complète l'ordre en attente
     const pending = this.pendingOrder;
     this.pendingOrder = null;

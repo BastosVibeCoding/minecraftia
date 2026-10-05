@@ -55,6 +55,7 @@ describe('bibliothèque de compétences', () => {
         place: { item: 'furnace' },
         furnace_take: {},
         pickup: {},
+        go_home: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);

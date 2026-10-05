@@ -255,10 +255,16 @@ const CHEST_RADIUS = 32;
 export const store = {
   name: 'store',
   domain: 'survive' as Domain,
-  description: 'store {items?: string[]} — ranger dans le coffre le plus proche (tout sauf outils, armes et nourriture si items est absent)',
+  description: 'store {items?: string[]} — ranger dans les coffres de la maison (sinon le coffre le plus proche) ; tout sauf outils, armes et nourriture si items est absent',
   params: z.object({ items: z.array(z.string().min(1)).max(10).optional() }),
-  timeoutMs: () => 40_000,
-  async run({ bot }: SkillContext, p: { items?: string[] }, signal: AbortSignal): Promise<ActionRunOutput> {
+  timeoutMs: () => 150_000, // trajet jusqu'à la maison compris
+  async run({ bot, home }: SkillContext, p: { items?: string[] }, signal: AbortSignal): Promise<ActionRunOutput> {
+    // maison connue : on range dans ses coffres plutôt que dans le coffre le plus proche
+    const h = home?.();
+    const me = bot.entity.position;
+    if (h && Math.hypot(h.x - me.x, h.y - me.y, h.z - me.z) > 12) {
+      await travelHome(bot, h, signal);
+    }
     const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], CHEST_RADIUS);
     if (!chest) return fail('aucun coffre à portée', { precondition: true });
     await goNear(bot, chest.position, 2, signal);
@@ -464,4 +470,54 @@ export const pickup = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup];
+/**
+ * Trajet jusqu'à la maison, par étapes de 48 blocs : le pathfinder abandonne les trajets trop longs
+ * d'un coup. S'arrête à 4 blocs de la maison.
+ */
+export async function travelHome(bot: Bot, h: { x: number; y: number; z: number }, signal: AbortSignal): Promise<boolean> {
+  for (let hop = 0; hop < 12 && !signal.aborted; hop++) {
+    const me = bot.entity.position;
+    const d = Math.hypot(h.x - me.x, h.z - me.z);
+    if (d <= 4 && Math.abs(h.y - me.y) <= 4) return true;
+    if (d <= 48) {
+      await goNear(bot, h, 3, signal);
+      continue;
+    }
+    const k = 48 / d;
+    const stepGoal = { x: me.x + (h.x - me.x) * k, y: me.y, z: me.z + (h.z - me.z) * k };
+    const before = bot.entity.position.clone();
+    await goNearXZ(bot, stepGoal, signal);
+    if (bot.entity.position.distanceTo(before) < 2) return false; // bloqué
+  }
+  const me = bot.entity.position;
+  return Math.hypot(h.x - me.x, h.z - me.z) <= 6;
+}
+
+async function goNearXZ(bot: Bot, p: { x: number; z: number }, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  const stop = () => bot.pathfinder.setGoal(null);
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    await bot.pathfinder.goto(new goals.GoalNearXZ(p.x, p.z, 3));
+  } catch {
+    // étape impossible : l'appelant constate qu'on n'a pas bougé
+  } finally {
+    signal.removeEventListener('abort', stop);
+  }
+}
+
+/** Rentrer à la maison (« rentre à la maison »), même de loin. */
+export const goHome = {
+  name: 'go_home',
+  domain: 'explore' as Domain,
+  description: 'go_home {} — rentrer à la maison',
+  params: z.object({}),
+  timeoutMs: () => 180_000,
+  async run(ctx: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
+    const h = ctx.home?.();
+    if (!h) return fail("je ne sais pas encore où est la maison : dis « ici c'est la maison » quand tu y es", { precondition: true });
+    return (await travelHome(ctx.bot, h, signal)) ? { status: 'success', detail: { home: h } } : fail('chemin vers la maison bloqué');
+  },
+};
+
+export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];

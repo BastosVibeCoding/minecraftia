@@ -31,6 +31,8 @@ export interface SkillContext {
   isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
   /** Mémoire des endroits où des ressources ont été vues ou récoltées. */
   resources?: ResourceMemory;
+  /** Position de la maison, si elle est connue. */
+  home?: () => { x: number; y: number; z: number } | null;
   /** Réglages de déplacement normaux, remis après une récolte (collectblock impose les siens). */
   restoreMovements?: () => void;
 }
@@ -125,6 +127,18 @@ export function isUnderWater(bot: Pick<Bot, 'blockAt'>, pos: Bot['entity']['posi
   return wet(0, 1, 0) || wet(1, 0, 0) || wet(-1, 0, 0) || wet(0, 0, 1) || wet(0, 0, -1);
 }
 
+/** Distance maximale à la maison pendant une exploration ou une recherche. */
+export const HOME_RANGE = 128;
+
+/** Ramène une destination à HOME_RANGE blocs de la maison (inchangée sans maison). */
+export function clampToHome(p: { x: number; z: number }, home: { x: number; z: number } | null): { x: number; z: number } {
+  if (!home) return p;
+  const dx = p.x - home.x;
+  const dz = p.z - home.z;
+  const d = Math.hypot(dx, dz);
+  return d <= HOME_RANGE ? p : { x: home.x + (dx / d) * HOME_RANGE, z: home.z + (dz / d) * HOME_RANGE };
+}
+
 /** Rayon de recherche des blocs à récolter, et essais ratés d'affilée avant d'abandonner. */
 const COLLECT_RADIUS = 48;
 const MAX_COLLECT_MISSES = 4;
@@ -189,7 +203,7 @@ const collect = {
           // rien en vue : endroits connus, puis recherche par étapes (une seule fois par ordre)
           if (searched) break;
           searched = true;
-          if (await searchFor({ bot, found: () => pickTarget() !== undefined, names, memory: ctx.resources, followPlayer: ctx.followPlayer }, signal)) continue;
+          if (await searchFor({ bot, found: () => pickTarget() !== undefined, names, memory: ctx.resources, followPlayer: ctx.followPlayer, home: ctx.home?.() ?? null }, signal)) continue;
           notFound = true;
           break;
         }
@@ -330,7 +344,7 @@ const attack = {
     // seulement ce qu'il voit : pas de cible repérée à travers un mur
     const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS && canSee(bot, e));
     // aucune cible en vue (« tue les vaches ») : on part la chercher, comme pour une récolte
-    if (!nextTarget() && !(await searchFor({ bot, found: () => nextTarget() !== null, names: p.targets, memory: undefined, followPlayer: ctx.followPlayer }, signal))) {
+    if (!nextTarget() && !(await searchFor({ bot, found: () => nextTarget() !== null, names: p.targets, memory: undefined, followPlayer: ctx.followPlayer, home: ctx.home?.() ?? null }, signal))) {
       ctx.speak?.(`Je ne trouve pas de ${mobNameFr(p.targets)} dans le coin.`);
       return fail('aucune cible', { targets: p.targets, precondition: true });
     }
@@ -388,10 +402,12 @@ const explore = {
   description: 'explore {radius: 8-64} — partir explorer les environs puis revenir',
   params: z.object({ radius: z.number().min(8).max(64).default(24) }),
   timeoutMs: () => 90_000,
-  async run({ bot }: SkillContext, p: { radius: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+  async run({ bot, home }: SkillContext, p: { radius: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const angle = Math.random() * Math.PI * 2;
     const me = bot.entity.position;
-    const goal = new goals.GoalNearXZ(me.x + Math.cos(angle) * p.radius, me.z + Math.sin(angle) * p.radius, 3);
+    // rester dans le coin de la maison : la destination est ramenée à HOME_RANGE blocs d'elle
+    const target = clampToHome({ x: me.x + Math.cos(angle) * p.radius, z: me.z + Math.sin(angle) * p.radius }, home?.() ?? null);
+    const goal = new goals.GoalNearXZ(target.x, target.z, 3);
     await cancellable(bot.pathfinder.goto(goal), signal, () => bot.pathfinder.setGoal(null));
     return { status: 'success', detail: { distance: Math.round(bot.entity.position.distanceTo(me)) } };
   },

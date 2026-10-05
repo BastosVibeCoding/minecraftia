@@ -12,10 +12,15 @@ const { goals } = pathfinderPkg;
 const BAD_FOOD = new Set(['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'suspicious_stew']);
 
 /** Exécution physique des réflexes avec mineflayer. Tout s'arrête dès que le signal est annulé. */
+/** Distance maximale à la maison pour s'y replier quand la vie est basse. */
+const HOME_REFUGE_RANGE = 96;
+
 export class MineflayerReflexExecutor implements ReflexExecutor {
   constructor(
     private readonly bot: Bot,
     private readonly followPlayer: string,
+    /** Maison désignée par le joueur (pas une valeur apprise) : refuge quand la vie est basse. */
+    private readonly home: () => { x: number; y: number; z: number } | null = () => null,
   ) {}
 
   stop(): void {
@@ -39,7 +44,7 @@ export class MineflayerReflexExecutor implements ReflexExecutor {
       case 'break_fall':
         return this.breakFall(signal);
       case 'flee':
-        return this.flee(signal);
+        return this.flee(signal, d.reason.startsWith('vie basse'));
       case 'eat':
         return this.eat(signal);
     }
@@ -175,11 +180,19 @@ export class MineflayerReflexExecutor implements ReflexExecutor {
     );
   }
 
-  private async flee(signal: AbortSignal) {
+  private async flee(signal: AbortSignal, lowHealth = false) {
     const bot = this.bot;
     const threats = this.threatsWithin(16);
     if (threats.length === 0) return;
     const me = bot.entity.position;
+    // vie basse et maison pas trop loin : on s'y replie plutôt que de fuir au hasard
+    const h = lowHealth ? this.home() : null;
+    if (h && Math.hypot(h.x - me.x, h.z - me.z) <= HOME_REFUGE_RANGE) {
+      bot.setControlState('sprint', true);
+      bot.pathfinder.setGoal(new goals.GoalNear(h.x, h.y, h.z, 2));
+      while (!signal.aborted && this.threatsWithin(10).length > 0 && bot.entity.position.distanceTo(me.offset(h.x - me.x, h.y - me.y, h.z - me.z)) > 3) await abortableSleep(200, signal);
+      return;
+    }
     const centroid = threats.reduce((acc, e) => acc.plus(e.position), me.scaled(0)).scaled(1 / threats.length);
     let away = me.minus(centroid);
     away = away.norm() > 0 ? away.scaled(1 / away.norm()) : me.scaled(0).offset(1, 0, 0);

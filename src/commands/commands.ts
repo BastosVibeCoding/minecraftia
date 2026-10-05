@@ -54,7 +54,7 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
   const arg = rest.join(' ');
   switch (name?.toLowerCase()) {
     case '!aide':
-      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget, !manques (ce que je ne sais pas encore faire).';
+      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget, !manques (ce que je ne sais pas encore faire), !maison (ici c\'est la maison ; !maison ? ; !maison oublie).';
 
     case '!arbre': {
       const profile = d.tree.profile();

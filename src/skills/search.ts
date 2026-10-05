@@ -43,7 +43,13 @@ export interface SearchDeps {
   names: string[];
   memory?: ResourceMemory | undefined;
   followPlayer: string;
+  /** Maison connue : on ne s'en éloigne pas de plus de `maxFromHome` blocs. */
+  home?: Pos | null;
 }
+
+/** Distance maximale à la maison pendant une recherche. */
+const MAX_FROM_HOME = 128;
+const farFromHome = (p: { x: number; z: number }, home: Pos | null | undefined) => Boolean(home) && Math.hypot(p.x - home!.x, p.z - home!.z) > MAX_FROM_HOME;
 
 async function travel(bot: Bot, goal: InstanceType<typeof goals.GoalNear> | InstanceType<typeof goals.GoalNearXZ>, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
@@ -68,7 +74,7 @@ export async function searchFor(d: SearchDeps, signal: AbortSignal): Promise<boo
   const { bot } = d;
   const start = bot.entity.position.clone();
   const visited: Pos[] = [];
-  for (const spot of d.memory?.nearest(d.names, start, MEMORY_RANGE).slice(0, 2) ?? []) {
+  for (const spot of (d.memory?.nearest(d.names, start, MEMORY_RANGE) ?? []).filter((s) => !farFromHome(s, d.home)).slice(0, 2)) {
     await travel(bot, new goals.GoalNear(spot.x, spot.y, spot.z, 4), signal);
     if (signal.aborted) return false;
     if (d.found()) return true;
@@ -82,6 +88,8 @@ export async function searchFor(d: SearchDeps, signal: AbortSignal): Promise<boo
     const to = { x: start.x + dx, y: start.y, z: start.z + dz };
     const leg = Math.hypot(to.x - from.x, to.z - from.z);
     if (walked + leg > SEARCH_MAX_DISTANCE) break;
+    // rester dans le coin de la maison
+    if (farFromHome(to, d.home)) continue;
     await travel(bot, new goals.GoalNearXZ(to.x, to.z, 3), signal);
     if (signal.aborted) return false;
     walked += leg;

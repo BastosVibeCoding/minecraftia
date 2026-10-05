@@ -21,6 +21,8 @@ export const ConfigSchema = z.object({
    * ses blocs ; il construit seulement sur demande.
    */
   buildInitiative: z.boolean().default(false),
+  /** Rayon de la zone protégée autour de la maison (le bot n'y casse rien), en blocs. */
+  homeRadius: z.number().int().min(0).max(128).default(24),
   /** mirror : le bot devient comme le joueur. complement : point d'extension, non implémenté. */
   strategy: z.enum(['mirror', 'complement']).default('mirror'),
   /**

@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | joueurs | la maison | `HomeStore` : « ici c'est la maison » / `!maison` (persistée), maison devinée (lit, coffres, établi parmi les blocs posés) proposée puis confirmée par oui/non ; `go_home` par étapes ; rangement dans les coffres de la maison ; repli vers la maison quand la vie est basse (≤ 96 blocs) ; zone protégée `BOT_HOME_RADIUS` (24) ; exploration et recherche à ≤ 128 blocs ; le soir, quand le joueur est rentré, retour et sommeil |
 | 2026-10-05 | Léa | « tue les vaches / les cochons » → aucune cible | L'attaque part chercher la cible (étapes de 30 blocs), sinon « Je ne trouve pas de vache dans le coin. » ; délai 2 min |
 | 2026-10-05 | Alex | « mets les bûches dans le coffre » → aucun coffre à portée | Coffre cherché à 32 blocs (au lieu de 16) |
 | 2026-10-05 | Alex | « dors » → il fait jour, sans le dire | Tout ordre raté est expliqué au joueur (« Je n'y arrive pas : … »), sauf si la compétence l'a déjà dit. « tape un villageois » : ignoré volontairement |
@@ -56,6 +57,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `3304c0b` (2026-10-05, sur `!deploy`).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, la maison (demandée « maintenant » par le joueur).
 
 (aucun)

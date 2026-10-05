@@ -34,6 +34,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
     strategy: env.STRATEGY,
     gender: env.BOT_GENDER,
     buildInitiative: env.BOT_BUILD_INITIATIVE === undefined ? undefined : env.BOT_BUILD_INITIATIVE === 'true',
+    homeRadius: env.BOT_HOME_RADIUS === undefined ? undefined : Number(env.BOT_HOME_RADIUS),
     llmChain: env.LLM_CHAIN,
     openrouter: {
       apiKey: env.OPENROUTER_API_KEY,

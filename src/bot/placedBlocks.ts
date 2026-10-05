@@ -46,6 +46,14 @@ export class PlacedBlocks {
     return this.positions.has(key(pos));
   }
 
+  /** Tous les blocs posés connus, avec leur nom (pour deviner la maison). */
+  all(): { x: number; y: number; z: number; block: string }[] {
+    return (this.db.prepare('SELECT pos, block FROM placed_blocks').all() as { pos: string; block: string }[]).map((r) => {
+      const [x, y, z] = r.pos.split(',').map(Number) as [number, number, number];
+      return { x, y, z, block: r.block };
+    });
+  }
+
   get size(): number {
     return this.positions.size;
   }
