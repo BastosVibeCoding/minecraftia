@@ -296,3 +296,18 @@ it("réponse de conversation emballée en JSON par le modèle : seule la phrase 
   expect(plainReply('```json\n{"text": "Salut !"}\n```')).toBe('Salut !');
   expect(plainReply('  Pourquoi les creepers sont tristes ?\n Parce que…  ')).toBe('Pourquoi les creepers sont tristes ? Parce que…');
 });
+
+it("« Léa ? » tout seul : elle répond « Oui ? » (manque réel)", async () => {
+  const clock = new ManualClock(0);
+  const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+  const said: string[] = [];
+  const loopCalls: string[] = [];
+  const h = new FeedbackHandler({
+    classifier: new UtteranceClassifier(null, null, 'fast', 'Lea'), tree: new BehaviorTree(store, { playTime: () => 0 }), autonomy: new Autonomy(store),
+    cache: new DecisionCache(store.db, clock), proposals: new ProposalBroker(clock), observer: new Observer('B', () => {}), store, clock, logger: silentLogger,
+    loop: () => ({ order: (t: string) => loopCalls.push(t) }) as never, actions: () => null, lastDecision: () => null, lastDecisionAt: () => 0, say: (t) => said.push(t), botName: 'Lea',
+  });
+  await h.handle('B', 'Léa ?', 'voice');
+  expect(said).toEqual(['Oui ?']);
+  expect(loopCalls).toEqual([]);
+});

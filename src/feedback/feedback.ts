@@ -85,6 +85,11 @@ export class FeedbackHandler {
       return { label: 'order', confidence: 0.9, classifier: 'rules' };
     }
     // question sur l'inventaire : réponse directe, ni ordre ni retour sur la dernière action
+    // appelée par son seul nom (« Léa ? ») : elle répond, sans rien décider
+    if (d.botName && isAddressed(text, d.botName) && withoutVocative(text, d.botName).replace(/[^a-z0-9]/g, '') === '') {
+      d.say('Oui ?');
+      return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
+    }
     const inv = d.inventory?.();
     // « donne » tout court : le dernier objet évoqué (question, ordre) ou récolté, le plus récent des deux
     if (inv && isBareGive(d.botName ? withoutVocative(text, d.botName) : text)) {
