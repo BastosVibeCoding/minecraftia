@@ -175,4 +175,20 @@ CREATE TABLE placed_blocks (
 );
 `,
   },
+  {
+    version: 4,
+    name: 'endroits où des ressources ont été vues ou récoltées',
+    sql: `
+CREATE TABLE resource_spots (
+  block TEXT NOT NULL,
+  x INTEGER NOT NULL,
+  y INTEGER NOT NULL,
+  z INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (block, x, y, z)
+);
+CREATE INDEX resource_spots_block ON resource_spots(block, at DESC);
+`,
+  },
 ];

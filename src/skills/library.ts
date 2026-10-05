@@ -13,7 +13,9 @@ import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
 import { staircase } from './staircase.js';
+import type { ResourceMemory } from '../bot/resources.js';
 import { ensureHarvestTool } from './tools.js';
+import { blockNameFr, notFoundMessage, searchFor } from './search.js';
 
 const { goals } = pathfinderPkg;
 type Vec3 = Bot['entity']['position'];
@@ -27,6 +29,8 @@ export interface SkillContext {
   speak?: (text: string) => void;
   /** Bloc à ne jamais casser (posé par un joueur, bloc de construction). */
   isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
+  /** Mémoire des endroits où des ressources ont été vues ou récoltées. */
+  resources?: ResourceMemory;
   /** Réglages de déplacement normaux, remis après une récolte (collectblock impose les siens). */
   restoreMovements?: () => void;
 }
@@ -130,7 +134,8 @@ const collect = {
   domain: 'gather' as Domain,
   description: 'collect {blocks: string[] (noms Minecraft, ex. ["oak_log"]), count: 1-32} — récolter ou miner des blocs proches',
   params: z.object({ blocks: z.array(z.string().min(1)).min(1).max(5), count: z.number().int().min(1).max(32).default(8) }),
-  timeoutMs: (p: { count: number }) => Math.min(300_000, 10_000 * p.count + 20_000),
+  // + 2 min de recherche possible quand rien n'est en vue
+  timeoutMs: (p: { count: number }) => Math.min(300_000, 10_000 * p.count + 140_000),
   async run(ctx: SkillContext, p: { blocks: string[]; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
     const names = expandBlockNames(Object.keys(bot.registry.blocksByName), p.blocks);
@@ -154,29 +159,40 @@ const collect = {
     let lastError: string | undefined;
     let seen = false;
     let onlyPlaced = true;
+    let searched = false;
+    let notFound = false;
+    type Target = NonNullable<ReturnType<Bot['blockAt']>>;
+    /** Meilleur bloc à récolter d'ici : pas posé par un joueur, pas déjà raté, à l'air libre d'abord. */
+    const pickTarget = (): Target | undefined => {
+      let wetFallback: Target | undefined;
+      for (const b of bot.findBlocks({ matching: ids, maxDistance: COLLECT_RADIUS, count: 32 }).map((pos) => bot.blockAt(pos))) {
+        if (!b) continue;
+        seen = true;
+        // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
+        if (ctx.isProtected?.(b)) continue;
+        onlyPlaced = false;
+        if (skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) continue;
+        // un bloc dans l'eau est plus dur à récolter et on peut s'y noyer (cas réel : sable) :
+        // à l'air libre d'abord, dans l'eau seulement s'il n'y a rien d'autre
+        if (isUnderWater(bot, b.position)) {
+          wetFallback ??= b;
+          continue;
+        }
+        return b;
+      }
+      return wetFallback;
+    };
     try {
       while (!signal.aborted && gained() < p.count && misses < MAX_COLLECT_MISSES) {
-        const candidates = bot.findBlocks({ matching: ids, maxDistance: COLLECT_RADIUS, count: 32 }).map((pos) => bot.blockAt(pos));
-        let target: NonNullable<(typeof candidates)[number]> | undefined;
-        let wetFallback: typeof target;
-        for (const b of candidates) {
-          if (!b) continue;
-          seen = true;
-          // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
-          if (ctx.isProtected?.(b)) continue;
-          onlyPlaced = false;
-          if (skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) continue;
-          // un bloc dans l'eau est plus dur à récolter et on peut s'y noyer (cas réel : sable) :
-          // à l'air libre d'abord, dans l'eau seulement s'il n'y a rien d'autre
-          if (isUnderWater(bot, b.position)) {
-            wetFallback ??= b;
-            continue;
-          }
-          target = b;
+        const target = pickTarget();
+        if (!target) {
+          // rien en vue : endroits connus, puis recherche par étapes (une seule fois par ordre)
+          if (searched) break;
+          searched = true;
+          if (await searchFor({ bot, found: () => pickTarget() !== undefined, names, memory: ctx.resources, followPlayer: ctx.followPlayer }, signal)) continue;
+          notFound = true;
           break;
         }
-        target ??= wetFallback;
-        if (!target) break;
         // outil adapté avant chaque bloc (hache cassée en pleine récolte, pioche trop faible pour le
         // minerai) : inventaire, fabrication, coffres proches ; sinon on le demande au joueur
         const tool = await ensureHarvestTool(bot, target.name, signal).catch(() => ({ ok: true as const }));
@@ -192,8 +208,11 @@ const collect = {
         } catch (err) {
           lastError = err instanceof Error ? err.message : String(err);
         }
-        if (gained() > g0) misses = 0;
-        else {
+        if (gained() > g0) {
+          misses = 0;
+          // gisement : on retient l'endroit pour y revenir une prochaine fois
+          ctx.resources?.remember(target.name, target.position, 'récolté');
+        } else {
           misses++;
           skipped.add(`${target.position.x},${target.position.y},${target.position.z}`);
         }
@@ -202,7 +221,9 @@ const collect = {
       ctx.restoreMovements?.();
     }
     const total = gained();
+    if (notFound) ctx.speak?.(total > 0 ? `J'en ai récolté ${total}, je n'en trouve plus dans le coin.` : notFoundMessage(names));
     if (total > 0) return { status: 'success', detail: { gained: total, requested: p.count, ...(total < p.count && lastError ? { partial: lastError } : {}) } };
+    if (notFound) return fail(`introuvable après recherche : ${blockNameFr(names)}`, { precondition: true, blocks: p.blocks });
     if (!seen) return fail('aucun bloc à portée', { blocks: p.blocks });
     if (onlyPlaced) return fail('seulement des blocs posés par un joueur à portée', { blocks: p.blocks });
     return fail(lastError ?? 'rien récolté');

@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | joueurs | ressource hors de portée : la tâche n'est pas faite | Rien en vue → endroits mémorisés (`ResourceMemory`, migration 4 : récoltes des joueurs et du bot), puis recherche par étapes de 30 blocs (150 blocs max), sinon retour vers le joueur et « Je n'ai pas trouvé de … dans le coin, tu peux me montrer où ? » |
 | 2026-10-05 | joueurs | sable récolté sous l'eau, le bot s'est noyé | Récolte : bloc à l'air libre d'abord, bloc touchant l'eau seulement s'il n'y a rien d'autre (`isUnderWater`) |
 | 2026-10-05 | joueurs | latence : réponses lentes | Gemini saturé (7–20 s par décision depuis ~2 h) : chaque fournisseur sauf le dernier de la chaîne a 4,5 s pour répondre, sinon relais au suivant et pause de 2 min |
 | 2026-10-05 | Léa | « Léa ? » | Appelée par son seul nom : répond « Oui ? » |
@@ -51,4 +52,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (clique/sable, « t'as fini ? », « Oui ? », relais 4,5 s, récolte hors de l'eau).
 
-(aucun)
+1. Recherche par étapes quand rien n'est en vue
+2. Mémoire des endroits de ressources
+3. « Je n'ai pas trouvé de … » quand rien n'est trouvé

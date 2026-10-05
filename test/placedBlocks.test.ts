@@ -43,6 +43,10 @@ describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pou
       blockAt: (p: { x: number; y: number; z: number }) => ({ name: p.y === 64 ? 'oak_log' : 'air', position: p }),
       inventory: { items: () => [] },
       collectBlock: { collect: async (t: unknown) => void collected.push(t), cancelTask: async () => {} },
+      // plus rien d'utilisable : il part chercher plus loin (trajets simulés)
+      entity: { position: vec(0, 64, 0) },
+      players: {},
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
     } as unknown as Bot;
     const ctx = { bot, followPlayer: 'B', isProtected: (b: { name: string; position: { x: number; y: number; z: number } }) => placed.isProtected(b), restoreMovements: () => void restored++ };
     await SKILLS.collect!.run(ctx, { blocks: ['oak_log'], count: 2 }, new AbortController().signal);
@@ -57,6 +61,9 @@ describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pou
       blockAt: (p: { y: number }) => ({ name: p.y === 64 ? 'oak_log' : 'air', position: p }),
       inventory: { items: () => [] },
       collectBlock: { collect: async () => { throw new Error('ne doit pas être appelé'); } },
+      entity: { position: vec(0, 64, 0) },
+      players: {},
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
     } as unknown as Bot;
     const r = await SKILLS.collect!.run({ bot, followPlayer: 'B', isProtected: () => true }, { blocks: ['oak_log'], count: 2 }, new AbortController().signal);
     expect(r).toMatchObject({ status: 'failure' });

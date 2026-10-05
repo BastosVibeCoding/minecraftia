@@ -15,7 +15,8 @@ import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
 import { companionMovements, installDoorOpener, isCompanionMovements } from './bot/movements.js';
-import { PlacedBlocks } from './bot/placedBlocks.js';
+import { isBuildingBlock, PlacedBlocks } from './bot/placedBlocks.js';
+import { ResourceMemory } from './bot/resources.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
@@ -89,6 +90,7 @@ export class Companion {
   readonly feedback: FeedbackHandler;
   readonly gaps: GapRecorder;
   readonly placed: PlacedBlocks;
+  readonly resources: ResourceMemory;
   private readonly voiceClient: VoiceClient | null;
   private readonly voiceLink: VoiceLink;
   private readonly heard: HeardAudioExtractor;
@@ -114,6 +116,7 @@ export class Companion {
       },
     );
     this.placed = new PlacedBlocks(deps.tree.store.db, clock);
+    this.resources = new ResourceMemory(deps.tree.store.db, clock);
     this.gaps = new GapRecorder(deps.tree.store.db, clock, logger.child({ module: 'manques' }));
     this.heard = new HeardAudioExtractor(config.followPlayer);
     this.voiceClient = config.voice.url
@@ -198,7 +201,11 @@ export class Companion {
     if ((e.type === 'block_placed' || e.type === 'block_broken') && this.isOwnBlock(e.pos, e.t)) return;
     // tout bloc posé par un joueur (ou l'autre bot) devient intouchable ; cassé, il sort du registre
     if (e.type === 'block_placed') this.placed.placed(e.pos, e.block, e.player);
-    else if (e.type === 'block_broken') this.placed.broken(e.pos);
+    else if (e.type === 'block_broken') {
+      // ressource naturelle récoltée par un joueur : on retient l'endroit (pas une construction)
+      if (!this.placed.has(e.pos) && !isBuildingBlock(e.block)) this.resources.remember(e.block, e.pos, 'récolté');
+      this.placed.broken(e.pos);
+    }
     if (e.player === this.config.followPlayer) this.gaps.observe(e);
     this.observer.push(e);
   }
@@ -332,7 +339,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.placed.isProtected(b), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.placed.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.placed.isProtected(b), resources: this.resources, restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.placed.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,
