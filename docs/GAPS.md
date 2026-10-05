@@ -74,3 +74,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `cea39cf` (2026-10-05, sur `!deploy`).
 
 1. Désignation de la maison stricte
+2. Départ et retour avec son joueur
