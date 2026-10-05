@@ -56,9 +56,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (recherche, mémoire des gisements, « pas trouvé », pas de fer pour un outil facultatif, four vidé, « tape »).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `3304c0b` (2026-10-05, sur `!deploy`).
 
-1. Outil : coffre avant fabrication, fer permis
-2. Attaque : recherche de la cible
-3. Coffre à 32 blocs
-4. Ordre raté expliqué au joueur
+(aucun)
