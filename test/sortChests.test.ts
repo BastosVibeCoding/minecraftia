@@ -194,3 +194,17 @@ describe("le coffre à panneau passe avant le coffre deviné (cas réel : steaks
     expect(foodFam('cooked_beef')).toBe('nourriture');
   });
 });
+
+it("coffre à panneau sans coffre « divers » : ce qui n'est pas de sa famille part au coffre sans panneau le plus libre (cas réel)", () => {
+  const chests: ChestSurvey[] = [
+    { contents: { oak_log: 30 }, free: 4 },
+    { contents: { cobblestone: 20 }, free: 18 },
+    { contents: { cooked_beef: 40, glass: 8, white_wool: 3 }, free: 10 }, // panneau « nourriture »
+  ];
+  const beefIsFood = (n: string) => sortFamily(n, n === 'cooked_beef');
+  const roles = assignRoles(chests, [null, null, 'nourriture'], beefIsFood);
+  expect(planMoves(chests, roles, beefIsFood, [null, null, 'nourriture'])).toEqual([
+    { from: 2, to: 1, item: 'glass', count: 8 },
+    { from: 2, to: 1, item: 'white_wool', count: 3 },
+  ]);
+});

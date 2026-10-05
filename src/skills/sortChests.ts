@@ -74,15 +74,23 @@ export interface Move {
  * Déplacements pour que chaque objet soit dans un coffre de sa famille : vers le coffre de sa
  * famille s'il y en a un, sinon vers un coffre « divers » ; sinon il reste où il est.
  */
-export function planMoves(chests: ChestSurvey[], roles: string[], family: (name: string) => string): Move[] {
+export function planMoves(chests: ChestSurvey[], roles: string[], family: (name: string) => string, labels: (string | null)[] = []): Move[] {
   const moves: Move[] = [];
   const divers = roles.findIndex((r) => r === DIVERS);
+  // sans coffre « divers » : le coffre sans panneau le plus libre recueille ce qui n'a pas de place
+  const overflowFor = (from: number) => {
+    if (divers >= 0 && divers !== from) return divers;
+    const candidates = chests.map((c, j) => [j, c.free] as const).filter(([j]) => j !== from && !labels[j]);
+    return candidates.sort((x, y) => y[1] - x[1])[0]?.[0] ?? -1;
+  };
   for (const [i, c] of chests.entries()) {
     for (const [item, count] of Object.entries(c.contents)) {
       const f = family(item);
       if (roles[i] === f) continue;
       const target = roles.findIndex((r, j) => j !== i && r === f);
-      const to = target >= 0 ? target : roles[i] !== DIVERS && divers >= 0 && divers !== i ? divers : -1;
+      // un coffre à panneau ne garde que sa famille (cas réel : objets divers restés dans « nourriture ») ;
+      // un coffre sans panneau garde ce qui n'a nulle part où aller
+      const to = target >= 0 ? target : labels[i] ? overflowFor(i) : roles[i] !== DIVERS && divers >= 0 && divers !== i ? divers : -1;
       if (to >= 0) moves.push({ from: i, to, item, count });
     }
   }
@@ -159,7 +167,7 @@ export const sortChests = {
     }
     const roles = assignRoles(surveys, labels, family, positions.map((p) => ctx.chestRoles?.get(p) ?? null));
     ctx.chestRoles?.setMany(positions.map((p, i) => [p, roles[i]!]));
-    const moves = planMoves(surveys, roles, family);
+    const moves = planMoves(surveys, roles, family, labels);
     if (moves.length === 0) {
       ctx.speak?.('Les coffres sont déjà triés.');
       return { status: 'success', detail: { moved: 0, roles } };

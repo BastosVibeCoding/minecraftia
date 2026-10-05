@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | Alex | coffre à panneau « nourriture » : objets d'autres familles laissés dedans | Un coffre à panneau ne garde que sa famille : sans coffre de leur famille, les intrus vont au « divers », sinon au coffre sans panneau le plus libre |
 | 2026-10-05 | Alex | steaks pas rangés dans le coffre à panneau « nourriture » | Deux coffres « nourriture » (un deviné, un à panneau) : une famille marquée par un panneau n'est plus le rôle d'un coffre sans panneau (rôle retenu compris), qui prend sa famille suivante ; chair putréfiée, œil d'araignée → butin |
 | 2026-10-05 | Alex, Léa | tri : objets pris puis gardés, « Tri fini : 0 objets déplacés » | Coffre ouvert : l'inventaire du bot ne suit qu'à la fermeture ; les retraits sont comptés dans la fenêtre du coffre (`window.count`), aussi pour la reprise dans les coffres ; message honnête quand rien n'a bougé |
 | 2026-10-05 | Léa | « fabrique des vitres » (3×), « donne-moi une table de craft » → ingrédients manquants | craft : recette la plus proche de l'inventaire, ingrédients pris dans les coffres, planches et bâtons faits au besoin, établi fabriqué et posé si nécessaire, sinon le bot dit ce qui manque |
@@ -70,4 +71,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `9c284fb` (2026-10-05, sur `!deploy`).
 
-(aucun)
+1. Coffre à panneau vidé des intrus
