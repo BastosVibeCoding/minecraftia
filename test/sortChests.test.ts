@@ -89,3 +89,47 @@ describe("trier les coffres : panneaux d'abord, sinon le contenu dominant (deman
     expect(names(2)).toEqual(['coal', 'raw_iron']);
   });
 });
+
+describe("tri : corrections après l'essai en jeu", () => {
+  it("un rôle donné lors d'un tri précédent est gardé ; un panneau l'emporte toujours", () => {
+    const chests: ChestSurvey[] = [{ contents: { raw_iron: 50 }, free: 10 }, { contents: { cobblestone: 5 }, free: 20 }];
+    expect(assignRoles(chests, [null, null], fam, ['bois', 'divers'])).toEqual(['bois', 'divers']);
+    expect(assignRoles(chests, ['minerais', null], fam, ['bois', null])).toEqual(['minerais', 'terre et pierre']);
+  });
+
+  it("les rôles sont retenus en base d'un tri à l'autre", async () => {
+    const { openDatabase } = await import('../src/store/db.js');
+    const { ChestRoles } = await import('../src/bot/chestRoles.js');
+    const { db } = openDatabase(':memory:');
+    new ChestRoles(db).setMany([[{ x: 1, y: 64, z: 0 }, 'bois']]);
+    expect(new ChestRoles(db).get({ x: 1.4, y: 64, z: 0 })).toBe('bois');
+    expect(new ChestRoles(db).get({ x: 2, y: 64, z: 0 })).toBeNull();
+  });
+
+  it("un retrait raté ne fait jamais déposer les affaires du bot (cas réel : sa pioche partie dans un coffre)", async () => {
+    type It = { name: string; count: number; type: number };
+    const inv: It[] = [{ name: 'stone_pickaxe', count: 1, type: 9 }];
+    const deposited: string[] = [];
+    const chests: Record<number, It[]> = { 1: [{ name: 'oak_log', count: 30, type: 1 }, { name: 'stone_pickaxe', count: 1, type: 9 }], 2: [{ name: 'iron_pickaxe', count: 1, type: 8 }] };
+    const bot = {
+      entity: { position: vec(0, 64, 0) },
+      registry: { blocksByName: { chest: { id: 54 } }, foodsByName: {}, itemsByName: { stone_pickaxe: { id: 9 }, oak_log: { id: 1 }, iron_pickaxe: { id: 8 } } },
+      findBlocks: () => [vec(1, 64, 0), vec(2, 64, 0)],
+      blockAt: (p: { x: number; y: number; z: number }) => (p.y === 64 && p.x >= 1 && p.x <= 2 ? { name: 'chest', position: vec(p.x, p.y, p.z), getProperties: () => ({ type: 'single' }) } : { name: 'air', position: p }),
+      inventory: { items: () => inv.filter((i) => i.count > 0), emptySlotCount: () => 30 },
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      openContainer: async (b: { position: { x: number } }) => ({
+        inventoryStart: 27,
+        containerItems: () => chests[b.position.x]!,
+        withdraw: async () => {
+          throw new Error('retrait refusé');
+        },
+        deposit: async (type: number) => void deposited.push(String(type)),
+        close: () => {},
+      }),
+    } as unknown as Bot;
+    await SKILLS.sort_chests!.run({ bot, followPlayer: 'B' }, {}, new AbortController().signal);
+    expect(deposited).toEqual([]);
+    expect(inv[0]!.count).toBe(1);
+  });
+});

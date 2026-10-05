@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | joueurs | « le tri ne marche pas très bien » | Rôles des coffres mémorisés d'un tri à l'autre (ils changeaient à chaque tri) ; retrait vérifié dans l'inventaire (un retrait raté faisait déposer la pioche du bot) ; résumé dit à la fin ; familles « verre » et « construction » ; questions : graines, betteraves, « c'est écrit quoi sur la pancarte ? » ; test anti-caractères de contrôle |
 | 2026-10-05 | joueurs | « les bots peuvent trier les coffres ? » | Compétence `sort_chests` : rôle de chaque coffre = panneau posé dessus (bois, minerais, nourriture, divers…), sinon famille dominante, vide = divers ; objets déplacés vers le coffre de leur famille, sinon le divers ; coffres doubles comptés une fois ; verbe « trie » |
 | 2026-10-05 | Léa | trois coffres à la maison, elle ouvre le mauvais | Rangement : tour des coffres (8 max), chaque objet avec le même objet, sinon sa famille, sinon le coffre le plus libre, coffre plein → suivant ; reprendre cherche dans tous les coffres ; bug du compte après dépôt corrigé |
 | 2026-10-05 | joueurs | la maison | `HomeStore` : « ici c'est la maison » / `!maison` (persistée), maison devinée (lit, coffres, établi parmi les blocs posés) proposée puis confirmée par oui/non ; `go_home` par étapes ; rangement dans les coffres de la maison ; repli vers la maison quand la vie est basse (≤ 96 blocs) ; zone protégée `BOT_HOME_RADIUS` (24) ; exploration et recherche à ≤ 128 blocs ; le soir, quand le joueur est rentré, retour et sommeil |
@@ -61,4 +62,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `563b36a` (2026-10-05, sur `!deploy`).
 
-(aucun)
+1. Tri des coffres fiabilisé, lecture des panneaux, questions graines

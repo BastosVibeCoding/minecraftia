@@ -12,7 +12,7 @@ import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { classifyByRules, isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
 import { isHomeDesignation } from '../bot/home.js';
-import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
+import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, isQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
 export interface FeedbackDeps {
@@ -42,6 +42,8 @@ export interface FeedbackDeps {
   status?: () => { health: number; food: number } | null;
   /** Désigne la maison là où est le joueur ; renvoie la phrase de confirmation. */
   setHomeHere?: () => string;
+  /** Texte du panneau le plus proche, pour « c'est écrit quoi sur la pancarte ? ». */
+  nearestSign?: () => string | null;
   /** Action en cours et résultat de la dernière, pour « t'as fini ? ». */
   progress?: () => { current: string | null; lastOutcome: string | null };
 }
@@ -132,6 +134,13 @@ export class FeedbackHandler {
     }
     if (mentionsAnItem(text)) this.lastMention = { text, at: d.clock.now() };
     const st = d.status?.();
+    // « c'est écrit quoi sur la pancarte ? » : elle lit le panneau le plus proche
+    if (d.nearestSign && isQuestion(text) && /\b(pancartes?|panneaux?|ecrit)\b/.test(withoutVocative(text, d.botName ?? ''))) {
+      const sign = d.nearestSign();
+      const reply = sign ? `Le panneau dit : « ${sign} ».` : 'Je ne vois pas de panneau près de moi.';
+      d.say(reply);
+      return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
+    }
     const pr = d.progress?.();
     const answer = (pr ? answerProgressQuestion(text, pr) : null) ?? (st ? answerStatusQuestion(text, st) : null) ?? (inv ? answerInventoryQuestion(text, inv) : null);
     if (answer) {

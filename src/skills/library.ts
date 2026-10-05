@@ -15,6 +15,7 @@ import { EXTRA_SKILLS } from './extra.js';
 import { staircase } from './staircase.js';
 import { sortChests } from './sortChests.js';
 import type { ResourceMemory } from '../bot/resources.js';
+import type { ChestRoles } from '../bot/chestRoles.js';
 import { ensureHarvestTool } from './tools.js';
 import { blockNameFr, notFoundMessage, searchFor } from './search.js';
 
@@ -32,6 +33,8 @@ export interface SkillContext {
   isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
   /** Mémoire des endroits où des ressources ont été vues ou récoltées. */
   resources?: ResourceMemory;
+  /** Rôles des coffres retenus d'un tri à l'autre. */
+  chestRoles?: ChestRoles;
   /** Position de la maison, si elle est connue. */
   home?: () => { x: number; y: number; z: number } | null;
   /** Réglages de déplacement normaux, remis après une récolte (collectblock impose les siens). */

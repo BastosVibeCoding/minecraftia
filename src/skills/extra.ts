@@ -260,6 +260,8 @@ export function familyOf(name: string): string {
   if (/^(cobblestone|cobbled_deepslate|stone|deepslate|andesite|diorite|granite|tuff|calcite|dirt|coarse_dirt|gravel|sand|red_sand|clay_ball|flint)$/.test(name)) return 'terre et pierre';
   if (/(seeds$|^wheat$|^carrot$|^potato$|^beetroot$|^sugar_cane$|^pumpkin$|^melon_slice$|^bamboo$|_sapling$)/.test(name)) return 'cultures';
   if (/(_wool$|^string$|^leather$|^feather$|^bone$|^gunpowder$|^rotten_flesh$|^spider_eye$|^ender_pearl$)/.test(name)) return 'butin';
+  if (/(glass|_pane$)/.test(name)) return 'verre';
+  if (/(bricks$|_stairs$|_slab$|_wall$|fence|_door$|trapdoor$|terracotta$|concrete$)/.test(name)) return 'construction';
   return name.split('_').pop() ?? name;
 }
 

@@ -18,6 +18,7 @@ import { companionMovements, installDoorOpener, isCompanionMovements } from './b
 import { isBuildingBlock, PlacedBlocks } from './bot/placedBlocks.js';
 import { ResourceMemory } from './bot/resources.js';
 import { guessHome, HomeStore } from './bot/home.js';
+import { ChestRoles } from './bot/chestRoles.js';
 import { playerEntity } from './bot/mineflayerTypes.js';
 import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
@@ -96,6 +97,7 @@ export class Companion {
   readonly placed: PlacedBlocks;
   readonly resources: ResourceMemory;
   readonly home: HomeStore;
+  readonly chestRoles: ChestRoles;
   private homeTimer: NodeJS.Timeout | null = null;
   /** Une proposition de maison devinée attend sa réponse. */
   private homeAsked = false;
@@ -128,6 +130,7 @@ export class Companion {
     this.placed = new PlacedBlocks(deps.tree.store.db, clock);
     this.resources = new ResourceMemory(deps.tree.store.db, clock);
     this.home = new HomeStore(deps.tree.store.db, clock, config.homeRadius);
+    this.chestRoles = new ChestRoles(deps.tree.store.db);
     this.gaps = new GapRecorder(deps.tree.store.db, clock, logger.child({ module: 'manques' }));
     this.heard = new HeardAudioExtractor(config.followPlayer);
     this.voiceClient = config.voice.url
@@ -173,6 +176,13 @@ export class Companion {
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
       lastGained: () => this.session?.loop.lastGained() ?? null,
       status: () => (this.session ? { health: this.session.bot.health, food: this.session.bot.food } : null),
+      nearestSign: () => {
+        const bot = this.session?.bot;
+        if (!bot) return null;
+        const sign = bot.findBlock({ matching: (b) => b.name.endsWith('_sign'), maxDistance: 8 }) as (ReturnType<Bot['blockAt']> & { getSignText?: () => string[] }) | null;
+        const text = sign?.getSignText?.().map((t) => (t ?? '').trim()).filter(Boolean).join(' / ');
+        return text || null;
+      },
       progress: () => ({ current: this.session?.actions.current?.name ?? null, lastOutcome: this.session?.loop.lastResult ?? null }),
     });
     this.connection = new BotConnection(
@@ -412,7 +422,7 @@ export class Companion {
       actions,
       tree: this.deps.tree,
       router: this.deps.router,
-      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.isProtected(b), resources: this.resources, home: () => this.home.get(), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
+      skillContext: { bot, followPlayer: this.config.followPlayer, touch: (pos) => this.touchBlock(pos), isProtected: (b) => this.isProtected(b), resources: this.resources, chestRoles: this.chestRoles, home: () => this.home.get(), restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })), speak: (text) => void this.speaker.speak(text) },
       world: () => readWorld(bot, this.config.followPlayer, this.observer.activity(), this.recent),
       snapshot: () => snapshotOf(bot, this.session?.deaths ?? 0),
       clock: this.clock,

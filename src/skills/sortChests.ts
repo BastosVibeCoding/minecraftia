@@ -40,10 +40,13 @@ export function sortFamily(name: string, isFood: boolean): string {
  * Rôle de chaque coffre : la famille écrite sur son panneau, sinon la famille dominante de son contenu,
  * sinon (coffre vide) « divers ».
  */
-export function assignRoles(chests: ChestSurvey[], labels: (string | null)[], family: (name: string) => string): string[] {
+export function assignRoles(chests: ChestSurvey[], labels: (string | null)[], family: (name: string) => string, remembered: (string | null)[] = []): string[] {
   return chests.map((c, i) => {
     const label = labels[i];
     if (label) return label;
+    // rôle déjà donné lors d'un tri précédent : on le garde (sinon chaque tri changeait les rôles)
+    const kept = remembered[i];
+    if (kept) return kept;
     const totals: Record<string, number> = {};
     for (const [name, n] of Object.entries(c.contents)) totals[family(name)] = (totals[family(name)] ?? 0) + n;
     const top = Object.entries(totals).sort((a, b) => b[1] - a[1])[0];
@@ -78,6 +81,8 @@ export function planMoves(chests: ChestSurvey[], roles: string[], family: (name:
 }
 
 const CHESTS = ['chest', 'barrel', 'trapped_chest'];
+
+const countOf = (bot: Bot, name: string) => bot.inventory.items().filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
 
 /** Panneau posé sur le coffre (sur un côté ou dessus) : son texte, sinon `null`. */
 function signOn(bot: Bot, pos: Pos): string | null {
@@ -136,9 +141,14 @@ export const sortChests = {
         w.close();
       } else surveys.push({ contents, free: 0 });
     }
-    const roles = assignRoles(surveys, labels, family);
+    const roles = assignRoles(surveys, labels, family, positions.map((p) => ctx.chestRoles?.get(p) ?? null));
+    ctx.chestRoles?.setMany(positions.map((p, i) => [p, roles[i]!]));
+    const summary = roles.map((r, i) => `coffre ${i + 1} : ${r}${labels[i] ? ' (panneau)' : ''}`).join(', ');
     const moves = planMoves(surveys, roles, family);
-    if (moves.length === 0) return { status: 'success', detail: { moved: 0, roles, note: 'déjà trié' } };
+    if (moves.length === 0) {
+      ctx.speak?.(`Les coffres sont déjà triés (${summary}).`);
+      return { status: 'success', detail: { moved: 0, roles } };
+    }
 
     // 2. coffre par coffre : on retire ce qui n'est pas à sa place (selon la place dans l'inventaire),
     //    puis on le dépose dans le coffre de sa famille
@@ -155,9 +165,12 @@ export const sortChests = {
           if (bot.inventory.emptySlotCount() < 2) break;
           for (const it of w.containerItems().filter((x) => x.name === m.item)) {
             if (bot.inventory.emptySlotCount() < 2) break;
-            const n = it.count;
-            await w.withdraw(it.type, null, n).catch(() => null);
-            carried.push({ item: m.item, count: n, to: m.to });
+            // ce qui est vraiment arrivé dans l'inventaire : un retrait raté ne doit jamais faire
+            // déposer les affaires du bot à la place (cas réel : sa pioche partie dans un coffre)
+            const before = countOf(bot, m.item);
+            await w.withdraw(it.type, null, it.count).catch(() => null);
+            const got = countOf(bot, m.item) - before;
+            if (got > 0) carried.push({ item: m.item, count: got, to: m.to });
           }
         }
       } finally {
@@ -179,6 +192,7 @@ export const sortChests = {
         }
       }
     }
+    ctx.speak?.(`Tri fini : ${moved} objets déplacés (${summary}).`);
     if (stuck.length) ctx.speak?.(`Un coffre est plein, j'ai gardé sur moi : ${stuck.map((i) => `${i.count} ${i.item.replace(/_/g, ' ')}`).join(', ')}.`);
     return moved > 0 ? { status: 'success', detail: { moved, roles } } : { status: 'failure', detail: { reason: 'rien n\'a pu être déplacé (coffres pleins ?)' } };
   },

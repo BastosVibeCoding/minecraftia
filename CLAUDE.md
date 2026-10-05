@@ -37,6 +37,8 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
 - mineflayer : la blessure d'un mob (`entityHurt`) arrive souvent AVANT le coup de bras (`entitySwingArm`).
 - Heredocs bash + Python sous Windows : les apostrophes et contre-obliques se perdent ; écrire les
   fichiers TypeScript avec l'outil Write/Edit, et des titres de test entre guillemets doubles.
+  Un `\b` écrit depuis Python peut devenir un caractère « retour arrière » invisible :
+  `test/source.test.ts` échoue si un caractère de contrôle se glisse dans `src/`.
 - Easy LLM Voice : `heard_audio_batch` vient des paquets de micro d'un client Simple Voice Chat ;
   une voix injectée par un point d'accès n'est pas « entendue ».
 - Skins (FabricTailor 2.5.0) : `skin set URL` est cassé (MineSkin refuse son format, échec silencieux).

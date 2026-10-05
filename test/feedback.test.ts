@@ -344,3 +344,17 @@ describe("maison par la voix (demande du joueur)", () => {
     expect(answers).toEqual([true, false]);
   });
 });
+
+it("« Léa c'est écrit quoi sur la pancarte ? » : elle lit le panneau le plus proche (cas réel)", async () => {
+  const clock = new ManualClock(0);
+  const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+  const said: string[] = [];
+  const h = new FeedbackHandler({
+    classifier: new UtteranceClassifier(null, null, 'fast', 'Lea'), tree: new BehaviorTree(store, { playTime: () => 0 }), autonomy: new Autonomy(store),
+    cache: new DecisionCache(store.db, clock), proposals: new ProposalBroker(clock), observer: new Observer('B', () => {}), store, clock, logger: silentLogger,
+    loop: () => null, actions: () => null, lastDecision: () => null, lastDecisionAt: () => 0, say: (t) => said.push(t), botName: 'Lea',
+    nearestSign: () => 'Minerais',
+  });
+  await h.handle('B', "Léa c'est écrit quoi sur la pancarte ?", 'chat');
+  expect(said).toEqual(['Le panneau dit : « Minerais ».']);
+});

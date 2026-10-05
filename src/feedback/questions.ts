@@ -29,6 +29,8 @@ const FAMILIES: { words: RegExp; label: string; match: (item: string) => boolean
   { words: /\blits?\b/, label: 'lit', match: (i) => i.endsWith('_bed') },
   { words: /\bseaux?\b/, label: 'seau', match: (i) => i.endsWith('bucket') },
   { words: /\bbatons?\b/, label: 'bâtons', match: (i) => i === 'stick' },
+  { words: /\bbetteraves?\b/, label: 'betteraves', match: (i) => i === 'beetroot' || i === 'beetroot_seeds' },
+  { words: /\b(graines?|semences?)\b/, label: 'graines', match: (i) => i.endsWith('_seeds') },
   { words: /\bsables?\b/, label: 'sable', match: (i) => i === 'sand' || i === 'red_sand' },
   { words: /\bgraviers?\b/, label: 'gravier', match: (i) => i === 'gravel' },
   { words: /\bterre\b/, label: 'terre', match: (i) => i === 'dirt' || i === 'coarse_dirt' },
