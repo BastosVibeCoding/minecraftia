@@ -159,10 +159,9 @@ export const sortChests = {
     }
     const roles = assignRoles(surveys, labels, family, positions.map((p) => ctx.chestRoles?.get(p) ?? null));
     ctx.chestRoles?.setMany(positions.map((p, i) => [p, roles[i]!]));
-    const summary = roles.map((r, i) => `coffre ${i + 1} : ${r}${labels[i] ? ' (panneau)' : ''}`).join(', ');
     const moves = planMoves(surveys, roles, family);
     if (moves.length === 0) {
-      ctx.speak?.(`Les coffres sont déjà triés (${summary}).`);
+      ctx.speak?.('Les coffres sont déjà triés.');
       return { status: 'success', detail: { moved: 0, roles } };
     }
 
@@ -233,7 +232,8 @@ export const sortChests = {
         } else stuck.push(...notDeposited);
       }
     }
-    ctx.speak?.(moved > 0 ? `Tri fini : ${moved} objets déplacés (${summary}).` : `Je n'ai rien pu déplacer (${summary}).`);
+    // court, à la demande du joueur : pas le détail des coffres
+    ctx.speak?.(moved > 0 ? 'Tri fini.' : "Je n'ai rien pu déplacer.");
     if (stuck.length) ctx.speak?.(`Un coffre est plein, j'ai gardé sur moi : ${stuck.map((i) => `${i.count} ${i.item.replace(/_/g, ' ')}`).join(', ')}.`);
     return moved > 0
       ? { status: 'success', detail: { moved, roles, ...(errors.length ? { errors } : {}) } }
