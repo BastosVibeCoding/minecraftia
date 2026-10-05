@@ -58,6 +58,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, la maison (demandée « maintenant » par le joueur).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `0cbc6d6` (2026-10-05, sur `!deploy`).
 
-1. Rangement dans le bon coffre, reprise dans tous les coffres
+(aucun)
