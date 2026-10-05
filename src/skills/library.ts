@@ -13,6 +13,7 @@ import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
 import { EXTRA_SKILLS } from './extra.js';
 import { staircase } from './staircase.js';
+import { sortChests } from './sortChests.js';
 import type { ResourceMemory } from '../bot/resources.js';
 import { ensureHarvestTool } from './tools.js';
 import { blockNameFr, notFoundMessage, searchFor } from './search.js';
@@ -465,7 +466,7 @@ const say = {
 
 /** Bibliothèque : des primitives génériques ; leurs paramètres et leur enchaînement viennent de l'arbre. */
 export const SKILLS: Record<string, Skill> = Object.fromEntries(
-  [follow, collect, build, attack, craft, explore, eat, equip, say, staircase, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
+  [follow, collect, build, attack, craft, explore, eat, equip, say, staircase, sortChests, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
 );
 
 export type SkillName = keyof typeof SKILLS;
