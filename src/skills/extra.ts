@@ -78,9 +78,11 @@ export async function withdrawFromChests(bot: Bot, wanted: (name: string) => boo
           if (got >= max) break;
           const n = Math.min(it.count, max - got);
           // ce qui arrive vraiment dans l'inventaire (un retrait peut lever une erreur et réussir quand même)
-          const before = bot.inventory.items().filter((i) => i.name === it.name).reduce((s, i) => s + i.count, 0);
+          // coffre ouvert : on compte dans la partie « joueur » de sa fenêtre (l'inventaire du bot ne suit
+          // qu'à la fermeture)
+          const before = window.count(it.type, null);
           await window.withdraw(it.type, null, n).catch(() => null);
-          got += bot.inventory.items().filter((i) => i.name === it.name).reduce((s, i) => s + i.count, 0) - before;
+          got += window.count(it.type, null) - before;
         }
       } finally {
         window.close();

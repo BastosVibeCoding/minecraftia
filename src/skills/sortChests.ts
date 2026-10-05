@@ -85,7 +85,6 @@ const CHESTS = ['chest', 'barrel', 'trapped_chest'];
 /** Pause entre la fermeture d'un coffre et l'ouverture du suivant. */
 const WINDOW_GAP_MS = 400;
 
-const countOf = (bot: Bot, name: string) => bot.inventory.items().filter((i) => i.name === name).reduce((s, i) => s + i.count, 0);
 
 /** Panneau posé sur le coffre (sur un côté ou dessus) : son texte, sinon `null`. */
 function signOn(bot: Bot, pos: Pos): string | null {
@@ -176,9 +175,11 @@ export const sortChests = {
             if (bot.inventory.emptySlotCount() < 2) break;
             // ce qui est vraiment arrivé dans l'inventaire : un retrait raté ne doit jamais faire
             // déposer les affaires du bot à la place (cas réel : sa pioche partie dans un coffre)
-            const before = countOf(bot, m.item);
+            // coffre ouvert : l'inventaire du bot n'est mis à jour qu'à la fermeture, on compte donc dans
+            // la partie « joueur » de la fenêtre du coffre (cas réel : tout restait sur lui, « 0 déplacé »)
+            const before = w.count(it.type, null);
             await w.withdraw(it.type, null, it.count).catch(() => null);
-            const got = countOf(bot, m.item) - before;
+            const got = w.count(it.type, null) - before;
             if (got > 0) carried.push({ item: m.item, count: got, to: m.to });
           }
         }
@@ -224,7 +225,7 @@ export const sortChests = {
         } else stuck.push(...notDeposited);
       }
     }
-    ctx.speak?.(`Tri fini : ${moved} objets déplacés (${summary}).`);
+    ctx.speak?.(moved > 0 ? `Tri fini : ${moved} objets déplacés (${summary}).` : `Je n'ai rien pu déplacer (${summary}).`);
     if (stuck.length) ctx.speak?.(`Un coffre est plein, j'ai gardé sur moi : ${stuck.map((i) => `${i.count} ${i.item.replace(/_/g, ' ')}`).join(', ')}.`);
     return moved > 0
       ? { status: 'success', detail: { moved, roles, ...(errors.length ? { errors } : {}) } }

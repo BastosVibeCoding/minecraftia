@@ -229,6 +229,7 @@ describe("fabriquer avec des ingrédients pris dans les coffres (manques réels 
       pathfinder: { goto: async () => {}, setGoal: () => {} },
       openContainer: async () => ({
         containerItems: () => chest.filter((i) => i.count > 0),
+        count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
         withdraw: async (type: number, _m: null, n: number) => {
           const it = chest.find((i) => i.type === type)!;
           it.count -= n;

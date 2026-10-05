@@ -220,6 +220,7 @@ describe("four sans combustible (manque réel : « Léa va mettre le fer au four
       pathfinder: { goto: async () => {}, setGoal: () => {} },
       openContainer: async () => ({
         containerItems: () => chestItems,
+        count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
         withdraw: async (type: number, _m: null, n: number) => void inv.push({ name: chestItems.find((i) => i.type === type)!.name, count: n, type }),
         close: () => {},
       }),

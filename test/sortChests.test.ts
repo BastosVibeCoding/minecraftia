@@ -68,6 +68,7 @@ describe("trier les coffres : panneaux d'abord, sinon le contenu dominant (deman
         return {
           inventoryStart: 27,
           containerItems: () => c.filter((i) => i.count > 0),
+          count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
           withdraw: async (type: number, _m: null, n: number) => {
             const it = c.find((i) => i.type === type)!;
             it.count -= n;
@@ -121,6 +122,7 @@ describe("tri : corrections après l'essai en jeu", () => {
       openContainer: async (b: { position: { x: number } }) => ({
         inventoryStart: 27,
         containerItems: () => chests[b.position.x]!,
+        count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
         withdraw: async () => {
           throw new Error('retrait refusé');
         },
@@ -151,6 +153,7 @@ it("dépôt impossible : l'erreur est notée et les objets retournent dans leur 
       return {
         inventoryStart: 27,
         containerItems: () => c.filter((i) => i.count > 0),
+        count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
         withdraw: async (type: number, _m: null, n: number) => {
           const it = c.find((i) => i.type === type)!;
           it.count -= n;
