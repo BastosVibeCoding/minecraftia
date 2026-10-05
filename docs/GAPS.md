@@ -68,8 +68,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 9 éléments (tri : erreurs et retour au coffre, retraits comptés, familles, give, questions, panneaux, escaliers, exploration).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `ef883f8` (2026-10-05, sur `!deploy`).
 
-1. Fabrication avec ingrédients des coffres
-2. « t'es où ? »
-3. Tri : retraits comptés dans la fenêtre du coffre
+(aucun)
