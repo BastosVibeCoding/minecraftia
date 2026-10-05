@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChain, FallbackChainClient, type ChainEntry } from '../src/decider/chain.js';
+import { buildChain, FallbackChainClient, RELAY_TIMEOUT_MS, type ChainEntry } from '../src/decider/chain.js';
 import { LlmError, type LlmClient, type LlmRequest } from '../src/decider/llm.js';
 import { silentLogger } from './helpers.js';
 
@@ -96,4 +96,10 @@ describe('construction de la chaîne', () => {
   it('aucun fournisseur utilisable : pas de chaîne', () => {
     expect(buildChain('groq:openai/gpt-oss-20b', {}, silentLogger)).toBeNull();
   });
+});
+
+it("un fournisseur lent passe la main après 4,5 s ; le dernier de la chaîne garde son délai (cas réel : Gemini à 7-20 s)", () => {
+  const chain = buildChain('gemini:gemini-3.5-flash-lite,gemini:gemini-flash-lite-latest,groq:openai/gpt-oss-120b', { GEMINI_API_KEY: 'k', GROQ_API_KEY: 'k' }, silentLogger)!;
+  const timeouts = chain.entries.map((e) => (e.client as unknown as { opts: { timeoutMs: number } }).opts.timeoutMs);
+  expect(timeouts).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS, 20_000]);
 });

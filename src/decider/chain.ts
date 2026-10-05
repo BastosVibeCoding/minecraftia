@@ -22,6 +22,9 @@ export interface ChainEntry {
   maxTokens: number;
 }
 
+/** Délai maximal d'un fournisseur avant de passer au suivant (le dernier de la chaîne n'est pas concerné). */
+export const RELAY_TIMEOUT_MS = 4500;
+
 /** Durées de mise en pause d'un fournisseur selon l'échec. */
 const PAUSE = {
   rateLimit: 60_000, // saturation passagère
@@ -89,7 +92,7 @@ function pauseFor(e: LlmError): number {
  * Les fournisseurs sans clé configurée sont ignorés (et signalés).
  */
 export function buildChain(spec: string, env: Record<string, string | undefined>, logger: Logger): FallbackChainClient | null {
-  const entries: ChainEntry[] = [];
+  const valid: { raw: string; provider: ProviderName; model: string; key: string }[] = [];
   for (const raw of spec.split(',').map((s) => s.trim()).filter(Boolean)) {
     const i = raw.indexOf(':');
     const provider = raw.slice(0, i) as ProviderName;
@@ -104,16 +107,21 @@ export function buildChain(spec: string, env: Record<string, string | undefined>
       logger.warn({ entry: raw, variable: def.keyEnv }, 'clé absente : fournisseur ignoré');
       continue;
     }
-    const baseUrl = provider === 'ollama' ? (env.OLLAMA_URL ?? def.baseUrl) : def.baseUrl;
-    const free = provider !== 'openrouter' || model.endsWith(':free');
-    entries.push({
+    valid.push({ raw, provider, model, key });
+  }
+  const entries: ChainEntry[] = valid.map(({ raw, provider, model, key }, i) => {
+    const def = PROVIDERS[provider];
+    // un fournisseur lent (Gemini saturé : 7 à 20 s par réponse, cas réel) passe la main au suivant
+    // après RELAY_TIMEOUT_MS ; seul le dernier de la chaîne garde son délai long, pour qu'une réponse arrive
+    const timeoutMs = i < valid.length - 1 ? Math.min(def.timeoutMs, RELAY_TIMEOUT_MS) : def.timeoutMs;
+    return {
       name: raw,
       model,
-      free,
+      free: provider !== 'openrouter' || model.endsWith(':free'),
       // les modèles qui raisonnent (gpt-oss, nemotron…) ont besoin de place avant de répondre
       maxTokens: provider === 'gemini' || provider === 'ollama' ? 600 : 1500,
-      client: new OpenRouterClient({ apiKey: key, baseUrl, timeoutMs: def.timeoutMs, openRouterExtras: def.extras }),
-    });
-  }
+      client: new OpenRouterClient({ apiKey: key, baseUrl: provider === 'ollama' ? (env.OLLAMA_URL ?? def.baseUrl) : def.baseUrl, timeoutMs, openRouterExtras: def.extras }),
+    };
+  });
   return entries.length ? new FallbackChainClient(entries, logger) : null;
 }
