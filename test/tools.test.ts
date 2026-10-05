@@ -5,7 +5,8 @@ import { classifyByRules } from '../src/feedback/classifier.js';
 import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion } from '../src/feedback/questions.js';
 import { expandBlockNames, SKILLS } from '../src/skills/library.js';
 import { facing, planStep } from '../src/skills/staircase.js';
-import { askForTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
+import { askForTool, ensureHarvestTool, hasTool, toolFor, toolPlan } from '../src/skills/tools.js';
+import { vec } from './helpers.js';
 
 describe("outils : se refaire une hache cassée (question du joueur, 2026-10-05)", () => {
   it("choisit l'outil selon le bloc", () => {
@@ -155,10 +156,32 @@ it("« Léa t'as fini ? » : action en cours, ou résultat de la dernière (manq
   expect(answerProgressQuestion("t'as du sable ?", { current: null, lastOutcome: null })).toBeNull();
 });
 
-it("bois : jamais de fer dépensé pour une hache facultative (cas réel : 3 lingots gaspillés)", () => {
-  expect(toolPlan({ iron_ingot: 3, oak_planks: 2 }, 'axe', null, true)).toEqual({ missing: 'une hache en bois ou 3 planches' });
+it("hache : le moins cher d'abord, le fer accepté si c'est tout ce qu'il a (choix du joueur)", () => {
+  // le joueur accepte le fer pour une hache (le coffre est fouillé avant, dans ensureHarvestTool)
+  expect(toolPlan({ iron_ingot: 3, oak_planks: 2 }, 'axe', null, true)).toEqual({ craft: 'iron_axe' });
   expect(toolPlan({ iron_ingot: 3, cobblestone: 3, oak_planks: 2 }, 'axe', null, true)).toEqual({ craft: 'stone_axe' });
   // pour un minerai qui l'exige, le fer reste permis
   expect(toolPlan({ iron_ingot: 3, oak_planks: 2 }, 'pickaxe', ['iron_pickaxe', 'diamond_pickaxe'], true)).toEqual({ craft: 'iron_pickaxe' });
   expect(classifyByRules('Tape les mobs Léa', 'Lea').label).toBe('order');
+});
+
+it("outil tout fait dans le coffre : pris avant de fabriquer avec son fer (choix du joueur)", async () => {
+  const mcData = (await import('minecraft-data')).default('1.21');
+  const inv = [{ name: 'iron_ingot', count: 3, type: mcData.itemsByName.iron_ingot!.id }, { name: 'oak_planks', count: 4, type: mcData.itemsByName.oak_planks!.id }];
+  const crafted: string[] = [];
+  const axe = { name: 'iron_axe', count: 1, type: mcData.itemsByName.iron_axe!.id };
+  const bot = {
+    registry: mcData,
+    inventory: { items: () => inv },
+    findBlock: () => null,
+    findBlocks: () => [vec(3, 64, 0)],
+    blockAt: (p: unknown) => ({ name: 'chest', position: p }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    openContainer: async () => ({ containerItems: () => [axe], withdraw: async () => void inv.push(axe), close: () => {} }),
+    recipesFor: () => [{}],
+    craft: async (_r: unknown) => void crafted.push('craft'),
+  };
+  expect(await ensureHarvestTool(bot as never, 'oak_log', new AbortController().signal)).toEqual({ ok: true });
+  expect(inv.some((i) => i.name === 'iron_axe')).toBe(true);
+  expect(crafted).toEqual([]);
 });

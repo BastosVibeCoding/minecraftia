@@ -56,10 +56,7 @@ export function toolPlan(inventory: Inventory, kind: ToolKind, allowed: string[]
   const sticks = count((n) => n === 'stick');
   // bois nécessaire en plus de la tête : 2 bâtons (2 planches) si besoin, 4 planches d'établi si aucun n'est là
   const extraWood = (sticks >= 2 ? 0 : 2) + (tableAvailable || (inventory.crafting_table ?? 0) > 0 ? 0 : 4);
-  // outil facultatif (la main suffit, ex. le bois) : jamais de fer ni de diamant dépensé pour lui
-  // (cas réel : 3 lingots de fer transformés en hache pour couper des bûches)
-  const affordable = allowed === null ? TIERS.filter((t) => t.tier === 'wooden' || t.tier === 'stone') : TIERS;
-  const candidates = affordable.filter((t) => ok(`${t.tier}_${kind}`));
+  const candidates = TIERS.filter((t) => ok(`${t.tier}_${kind}`));
   for (const t of candidates) {
     const head = HEAD[kind];
     const enough = t.tier === 'wooden' ? planks >= head + extraWood : count(t.matches) >= head && planks >= extraWood;
@@ -103,7 +100,7 @@ function inventoryOf(bot: Bot): Inventory {
 }
 
 /** Va chercher dans les coffres proches un outil accepté, ou de quoi en fabriquer un. */
-async function fetchFromChests(bot: Bot, kind: ToolKind, allowed: string[] | null, signal: AbortSignal): Promise<void> {
+async function fetchFromChests(bot: Bot, kind: ToolKind, allowed: string[] | null, signal: AbortSignal, toolOnly = false): Promise<void> {
   const ids = ['chest', 'barrel', 'trapped_chest'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
   const chests = bot.findBlocks({ matching: ids, maxDistance: 16, count: 3 });
   const ok = (name: string) => allowed === null || allowed.includes(name);
@@ -122,7 +119,7 @@ async function fetchFromChests(bot: Bot, kind: ToolKind, allowed: string[] | nul
           await window.withdraw(tool.type, null, 1);
           return;
         }
-        for (const it of window.containerItems().filter((i) => wanted(i.name)).slice(0, 4)) await window.withdraw(it.type, null, Math.min(it.count, 8));
+        if (!toolOnly) for (const it of window.containerItems().filter((i) => wanted(i.name)).slice(0, 4)) await window.withdraw(it.type, null, Math.min(it.count, 8));
       } finally {
         window.close();
       }
@@ -150,6 +147,10 @@ export async function ensureHarvestTool(bot: Bot, block: string, signal: AbortSi
   if (!kind) return { ok: true };
   const tableBlock = () => bot.findBlock({ matching: bot.registry.blocksByName.crafting_table!.id, maxDistance: 16 });
   let plan = toolPlan(inventoryOf(bot), kind, allowed, Boolean(tableBlock()));
+  if ('have' in plan) return { ok: true };
+  // avant de fabriquer (et de dépenser du fer), un outil tout fait dans les coffres proches ?
+  await fetchFromChests(bot, kind, allowed, signal, true);
+  plan = toolPlan(inventoryOf(bot), kind, allowed, Boolean(tableBlock()));
   if ('have' in plan) return { ok: true };
   if ('missing' in plan) {
     await fetchFromChests(bot, kind, allowed, signal);
