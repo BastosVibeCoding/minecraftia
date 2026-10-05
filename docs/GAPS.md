@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-05 | joueurs | sable récolté sous l'eau, le bot s'est noyé | Récolte : bloc à l'air libre d'abord, bloc touchant l'eau seulement s'il n'y a rien d'autre (`isUnderWater`) |
 | 2026-10-05 | joueurs | latence : réponses lentes | Gemini saturé (7–20 s par décision depuis ~2 h) : chaque fournisseur sauf le dernier de la chaîne a 4,5 s pour répondre, sinon relais au suivant et pause de 2 min |
 | 2026-10-05 | Léa | « Léa ? » | Appelée par son seul nom : répond « Oui ? » |
 | 2026-10-05 | Léa | « t'as fini ? » (2×) | Question d'avancement : action en cours, sinon résultat de la dernière |
@@ -48,9 +49,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (attaque enchaînée, vision sans murs, questions d'état, vitres protégées du combat, JSON dans le chat, suivi silencieux).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-05, 6 éléments (clique/sable, « t'as fini ? », « Oui ? », relais 4,5 s, récolte hors de l'eau).
 
-1. Verbe « clique », questions sable/gravier/terre/verre/argile
-2. « t'as fini ? »
-3. « Léa ? » → « Oui ? »
-4. Relais au fournisseur suivant après 4,5 s (latence)
+(aucun)

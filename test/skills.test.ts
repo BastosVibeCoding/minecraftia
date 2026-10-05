@@ -79,8 +79,8 @@ describe("récolte bloc par bloc (cas réel : 3 bûches rapportées sur 30 deman
     const cut = new Set<number>();
     const bot = {
       registry: { blocksByName: { oak_log: { id: 7 } } },
-      findBlocks: () => Array.from({ length: trees }, (_, i) => ({ x: i, y: 64, z: 0 })).filter((p) => !cut.has(p.x)),
-      blockAt: (p: { x: number }) => ({ name: 'oak_log', position: p }),
+      findBlocks: () => Array.from({ length: trees }, (_, i) => vec(i, 64, 0)).filter((p) => !cut.has(p.x)),
+      blockAt: (p: { x: number; y: number }) => ({ name: p.y === 64 ? 'oak_log' : 'air', position: p }),
       inventory: { items: () => [{ name: 'oak_log', count: logs }] },
       collectBlock: {
         collect: async (t: { position: { x: number } }) => {
@@ -298,4 +298,19 @@ it("« tue les poules » : enchaîne les cibles à portée, puis s'arrête (manq
   } as unknown as Bot;
   const r = await SKILLS.attack!.run({ bot, followPlayer: 'B' }, { targets: ['chicken'], engageDistance: 3, retreatHp: 6, useShield: false }, new AbortController().signal);
   expect(r).toMatchObject({ status: 'success', detail: { killed: ['chicken', 'chicken'] } });
+});
+
+it("sable dans l'eau et à la surface : la surface d'abord (cas réel : le bot s'est noyé)", async () => {
+  const targets: number[] = [];
+  let sand = 0;
+  const water = new Set(['0,65,0']); // le sable en x=0 est sous l'eau, celui en x=5 à l'air libre
+  const bot = {
+    registry: { blocksByName: { sand: { id: 3 } } },
+    findBlocks: () => [vec(0, 64, 0), vec(5, 64, 0)],
+    blockAt: (p: { x: number; y: number; z: number }) => ({ name: water.has(`${p.x},${p.y},${p.z}`) ? 'water' : p.y === 64 ? 'sand' : 'air', position: p }),
+    inventory: { items: () => [{ name: 'sand', count: sand }] },
+    collectBlock: { collect: async (t: { position: { x: number } }) => void (targets.push(t.position.x), sand++), cancelTask: async () => {} },
+  } as unknown as Bot;
+  await SKILLS.collect!.run({ bot, followPlayer: 'B' }, { blocks: ['sand'], count: 1 }, new AbortController().signal);
+  expect(targets).toEqual([5]);
 });

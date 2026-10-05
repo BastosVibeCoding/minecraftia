@@ -4,6 +4,7 @@ import { isBuildingBlock, PlacedBlocks } from '../src/bot/placedBlocks.js';
 import { ManualClock } from '../src/core/clock.js';
 import { SKILLS } from '../src/skills/library.js';
 import { openDatabase } from '../src/store/db.js';
+import { vec } from './helpers.js';
 
 describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pour aller aux bûches)', () => {
   it("une bûche posée par un joueur est protégée, celle d'un arbre ne l'est pas", () => {
@@ -38,8 +39,8 @@ describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pou
     let restored = 0;
     const bot = {
       registry: { blocksByName: { oak_log: { id: 7 } } },
-      findBlocks: () => [{ x: 1, y: 64, z: 1 }, { x: 5, y: 64, z: 5 }],
-      blockAt: (p: { x: number; y: number; z: number }) => ({ name: 'oak_log', position: p }),
+      findBlocks: () => [vec(1, 64, 1), vec(5, 64, 5)],
+      blockAt: (p: { x: number; y: number; z: number }) => ({ name: p.y === 64 ? 'oak_log' : 'air', position: p }),
       inventory: { items: () => [] },
       collectBlock: { collect: async (t: unknown) => void collected.push(t), cancelTask: async () => {} },
     } as unknown as Bot;
@@ -52,8 +53,8 @@ describe('blocs posés par les joueurs (cas réel : le bot cassait la maison pou
   it("seulement des bûches posées à portée : la récolte n'y touche pas", async () => {
     const bot = {
       registry: { blocksByName: { oak_log: { id: 7 } } },
-      findBlocks: () => [{ x: 1, y: 64, z: 1 }],
-      blockAt: (p: unknown) => ({ name: 'oak_log', position: p }),
+      findBlocks: () => [vec(1, 64, 1)],
+      blockAt: (p: { y: number }) => ({ name: p.y === 64 ? 'oak_log' : 'air', position: p }),
       inventory: { items: () => [] },
       collectBlock: { collect: async () => { throw new Error('ne doit pas être appelé'); } },
     } as unknown as Bot;

@@ -112,6 +112,15 @@ export function expandBlockNames(known: string[], wanted: string[]): string[] {
   return [...out];
 }
 
+/** Le bloc touche de l'eau (dessus ou sur un côté) : récolte sous l'eau. */
+export function isUnderWater(bot: Pick<Bot, 'blockAt'>, pos: Bot['entity']['position']): boolean {
+  const wet = (dx: number, dy: number, dz: number) => {
+    const n = bot.blockAt(pos.offset(dx, dy, dz))?.name;
+    return n === 'water' || n === 'bubble_column' || n === 'seagrass' || n === 'tall_seagrass' || n === 'kelp' || n === 'kelp_plant';
+  };
+  return wet(0, 1, 0) || wet(1, 0, 0) || wet(-1, 0, 0) || wet(0, 0, 1) || wet(0, 0, -1);
+}
+
 /** Rayon de recherche des blocs à récolter, et essais ratés d'affilée avant d'abandonner. */
 const COLLECT_RADIUS = 48;
 const MAX_COLLECT_MISSES = 4;
@@ -149,17 +158,24 @@ const collect = {
       while (!signal.aborted && gained() < p.count && misses < MAX_COLLECT_MISSES) {
         const candidates = bot.findBlocks({ matching: ids, maxDistance: COLLECT_RADIUS, count: 32 }).map((pos) => bot.blockAt(pos));
         let target: NonNullable<(typeof candidates)[number]> | undefined;
+        let wetFallback: typeof target;
         for (const b of candidates) {
           if (!b) continue;
           seen = true;
           // jamais une bûche (ou autre) posée par un joueur : seulement ce qui a poussé là
           if (ctx.isProtected?.(b)) continue;
           onlyPlaced = false;
-          if (!skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) {
-            target = b;
-            break;
+          if (skipped.has(`${b.position.x},${b.position.y},${b.position.z}`)) continue;
+          // un bloc dans l'eau est plus dur à récolter et on peut s'y noyer (cas réel : sable) :
+          // à l'air libre d'abord, dans l'eau seulement s'il n'y a rien d'autre
+          if (isUnderWater(bot, b.position)) {
+            wetFallback ??= b;
+            continue;
           }
+          target = b;
+          break;
         }
+        target ??= wetFallback;
         if (!target) break;
         // outil adapté avant chaque bloc (hache cassée en pleine récolte, pioche trop faible pour le
         // minerai) : inventaire, fabrication, coffres proches ; sinon on le demande au joueur
