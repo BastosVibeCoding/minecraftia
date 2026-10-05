@@ -174,3 +174,23 @@ it("dépôt impossible : l'erreur est notée et les objets retournent dans leur 
   expect(inv).toEqual([]); // rien gardé sur lui
   expect(chests[1]!.filter((i) => i.name === 'cooked_beef').reduce((s, i) => s + i.count, 0)).toBe(10);
 });
+
+describe("le coffre à panneau passe avant le coffre deviné (cas réel : steaks hors du coffre « nourriture »)", () => {
+  const foodFam = (n: string) => sortFamily(n, ['cooked_beef', 'bread', 'apple', 'rotten_flesh'].includes(n));
+
+  it("un coffre deviné « nourriture » cède la place au coffre marqué « nourriture »", () => {
+    const chests: ChestSurvey[] = [
+      { contents: { oak_log: 30 }, free: 10 },
+      { contents: { cooked_beef: 60, cobblestone: 20 }, free: 5 }, // deviné nourriture, retenu comme tel
+      { contents: { bread: 2 }, free: 25 }, // panneau « nourriture »
+    ];
+    const roles = assignRoles(chests, [null, null, 'nourriture'], foodFam, ['bois', 'nourriture', null]);
+    expect(roles).toEqual(['bois', 'terre et pierre', 'nourriture']);
+    expect(planMoves(chests, roles, foodFam)).toEqual([{ from: 1, to: 2, item: 'cooked_beef', count: 60 }]);
+  });
+
+  it("chair putréfiée : avec le butin, pas avec la nourriture", () => {
+    expect(foodFam('rotten_flesh')).toBe('butin');
+    expect(foodFam('cooked_beef')).toBe('nourriture');
+  });
+});

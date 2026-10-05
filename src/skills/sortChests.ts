@@ -30,27 +30,35 @@ export function signFamily(text: string): string | null {
   return SIGN_WORDS.find(([r]) => r.test(t))?.[1] ?? null;
 }
 
+/** Nourriture qu'on ne mange pas : rangée avec le butin des monstres. */
+const BAD_FOOD = new Set(['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish']);
+
 /** Famille de rangement d'un objet (nourriture et équipement à part). */
 export function sortFamily(name: string, isFood: boolean): string {
+  if (BAD_FOOD.has(name)) return 'butin';
   if (isFood) return 'nourriture';
   if (isEquipment(name)) return 'outils';
   return familyOf(name);
 }
 
 /**
- * Rôle de chaque coffre : la famille écrite sur son panneau, sinon la famille dominante de son contenu,
- * sinon (coffre vide) « divers ».
+ * Rôle de chaque coffre : la famille écrite sur son panneau ; sinon le rôle retenu d'un tri précédent ;
+ * sinon la famille dominante de son contenu ; coffre vide = « divers ». Une famille qui a un coffre à
+ * panneau n'est jamais le rôle d'un coffre sans panneau (cas réel : steaks rangés dans un coffre
+ * « nourriture » deviné au lieu de celui marqué « nourriture ») : ce coffre prend sa famille suivante.
  */
 export function assignRoles(chests: ChestSurvey[], labels: (string | null)[], family: (name: string) => string, remembered: (string | null)[] = []): string[] {
+  const labelled = new Set(labels.filter((l): l is string => Boolean(l) && l !== DIVERS));
   return chests.map((c, i) => {
     const label = labels[i];
     if (label) return label;
-    // rôle déjà donné lors d'un tri précédent : on le garde (sinon chaque tri changeait les rôles)
     const kept = remembered[i];
-    if (kept) return kept;
+    if (kept && !labelled.has(kept)) return kept;
     const totals: Record<string, number> = {};
     for (const [name, n] of Object.entries(c.contents)) totals[family(name)] = (totals[family(name)] ?? 0) + n;
-    const top = Object.entries(totals).sort((a, b) => b[1] - a[1])[0];
+    const top = Object.entries(totals)
+      .filter(([f]) => !labelled.has(f))
+      .sort((a, b) => b[1] - a[1])[0];
     return top ? top[0] : DIVERS;
   });
 }
