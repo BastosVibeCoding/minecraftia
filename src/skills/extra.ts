@@ -66,7 +66,7 @@ export async function placeAround(bot: Bot, itemName: string, center: Bot['entit
 export async function withdrawFromChests(bot: Bot, wanted: (name: string) => boolean, max: number, signal: AbortSignal): Promise<number> {
   const ids = ['chest', 'barrel', 'trapped_chest'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
   let got = 0;
-  for (const pos of bot.findBlocks({ matching: ids, maxDistance: 16, count: 3 })) {
+  for (const pos of bot.findBlocks({ matching: ids, maxDistance: CHEST_RADIUS, count: 8 })) {
     if (signal.aborted || got >= max) break;
     const chest = bot.blockAt(pos);
     if (!chest) continue;
@@ -252,67 +252,145 @@ export const furnaceTake = {
 const CHEST_RADIUS = 32;
 
 /** Ranger dans le coffre le plus proche (tout, ou les objets demandés), en gardant outils, armes et nourriture. */
+/** Famille d'un objet, pour ranger avec ses semblables (bûches avec les bûches, minerais avec les minerais). */
+export function familyOf(name: string): string {
+  if (/_(log|stem|wood|hyphae)$/.test(name)) return 'bois';
+  if (name.endsWith('_planks') || name === 'stick') return 'planches';
+  if (/(_ore$|^raw_|_ingot$|_nugget$|^coal$|^charcoal$|^diamond$|^emerald$|^lapis_lazuli$|^redstone$|^quartz$|^copper_ingot$)/.test(name)) return 'minerais';
+  if (/^(cobblestone|cobbled_deepslate|stone|deepslate|andesite|diorite|granite|tuff|calcite|dirt|coarse_dirt|gravel|sand|red_sand|clay_ball|flint)$/.test(name)) return 'terre et pierre';
+  if (/(seeds$|^wheat$|^carrot$|^potato$|^beetroot$|^sugar_cane$|^pumpkin$|^melon_slice$|^bamboo$|_sapling$)/.test(name)) return 'cultures';
+  if (/(_wool$|^string$|^leather$|^feather$|^bone$|^gunpowder$|^rotten_flesh$|^spider_eye$|^ender_pearl$)/.test(name)) return 'butin';
+  return name.split('_').pop() ?? name;
+}
+
+export interface ChestSurvey {
+  /** Objets déjà présents (nom → quantité). */
+  contents: Record<string, number>;
+  /** Cases libres. */
+  free: number;
+}
+
+/**
+ * Où ranger chaque objet : dans le coffre qui contient déjà le même objet, sinon des objets de la même
+ * famille, sinon dans celui qui a le plus de place (cas réel : trois coffres à la maison, le bot
+ * rangeait tout dans le plus proche). Renvoie, pour chaque objet, l'ordre des coffres à essayer.
+ */
+export function planStorage(items: string[], chests: ChestSurvey[]): Record<string, number[]> {
+  const byFree = chests.map((_, i) => i).sort((a, b) => chests[b]!.free - chests[a]!.free);
+  const plan: Record<string, number[]> = {};
+  for (const name of items) {
+    const same = chests.map((c, i) => [i, c.contents[name] ?? 0] as const).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([i]) => i);
+    const fam = familyOf(name);
+    const family = chests
+      .map((c, i) => [i, Object.entries(c.contents).filter(([n]) => familyOf(n) === fam).reduce((s, [, n]) => s + n, 0)] as const)
+      .filter(([i, n]) => n > 0 && !same.includes(i))
+      .sort((a, b) => b[1] - a[1])
+      .map(([i]) => i);
+    const rest = byFree.filter((i) => !same.includes(i) && !family.includes(i));
+    plan[name] = [...same, ...family, ...rest];
+  }
+  return plan;
+}
+
+const CHEST_NAMES = ['chest', 'barrel', 'trapped_chest'];
+
 export const store = {
   name: 'store',
   domain: 'survive' as Domain,
-  description: 'store {items?: string[]} — ranger dans les coffres de la maison (sinon le coffre le plus proche) ; tout sauf outils, armes et nourriture si items est absent',
+  description: 'store {items?: string[]} — ranger dans les coffres de la maison (sinon les coffres proches), chaque objet avec ses semblables ; tout sauf outils, armes et nourriture si items est absent',
   params: z.object({ items: z.array(z.string().min(1)).max(10).optional() }),
-  timeoutMs: () => 150_000, // trajet jusqu'à la maison compris
+  timeoutMs: () => 180_000, // trajet jusqu'à la maison et tour des coffres compris
   async run({ bot, home }: SkillContext, p: { items?: string[] }, signal: AbortSignal): Promise<ActionRunOutput> {
     // maison connue : on range dans ses coffres plutôt que dans le coffre le plus proche
     const h = home?.();
     const me = bot.entity.position;
-    if (h && Math.hypot(h.x - me.x, h.y - me.y, h.z - me.z) > 12) {
-      await travelHome(bot, h, signal);
-    }
-    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], CHEST_RADIUS);
-    if (!chest) return fail('aucun coffre à portée', { precondition: true });
-    await goNear(bot, chest.position, 2, signal);
+    if (h && Math.hypot(h.x - me.x, h.y - me.y, h.z - me.z) > 12) await travelHome(bot, h, signal);
+    const ids = CHEST_NAMES.map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+    const positions = bot.findBlocks({ matching: ids, maxDistance: CHEST_RADIUS, count: 8 });
+    if (positions.length === 0) return fail('aucun coffre à portée', { precondition: true });
     const keep = (name: string) => isEquipment(name) || bot.registry.foodsByName[name] !== undefined;
-    const window = await bot.openContainer(chest);
-    let moved = 0;
-    try {
-      for (const item of bot.inventory.items()) {
-        if (signal.aborted) break;
-        if (p.items ? !p.items.includes(item.name) : keep(item.name)) continue;
-        try {
-          await window.deposit(item.type, null, item.count);
-          moved += item.count;
-        } catch {
-          break; // coffre plein
-        }
+    const toStore = () => bot.inventory.items().filter((i) => (p.items ? p.items.some((w) => i.name === w || matchingItems([i], w).length > 0) : !keep(i.name)));
+    if (toStore().length === 0) return fail('rien à ranger', { precondition: true });
+    // 1. tour des coffres : ce que chacun contient et la place libre
+    const surveys: ChestSurvey[] = [];
+    for (const pos of positions) {
+      if (signal.aborted) return fail('interrompu');
+      const block = bot.blockAt(pos);
+      if (!block) {
+        surveys.push({ contents: {}, free: 0 });
+        continue;
       }
-    } finally {
-      window.close();
+      await goNear(bot, pos, 2, signal);
+      try {
+        const window = await bot.openContainer(block);
+        const contents: Record<string, number> = {};
+        for (const it of window.containerItems()) contents[it.name] = (contents[it.name] ?? 0) + it.count;
+        surveys.push({ contents, free: Math.max(0, window.inventoryStart - window.containerItems().length) });
+        window.close();
+      } catch {
+        surveys.push({ contents: {}, free: 0 });
+      }
     }
-    return moved > 0 ? { status: 'success', detail: { moved } } : fail('rien à ranger ou coffre plein');
+    // 2. chaque objet dans son coffre, en passant au suivant si celui-ci est plein
+    const plan = planStorage([...new Set(toStore().map((i) => i.name))], surveys);
+    const byChest = new Map<number, string[]>();
+    for (const [name, order] of Object.entries(plan)) byChest.set(order[0]!, [...(byChest.get(order[0]!) ?? []), name]);
+    let moved = 0;
+    const left: string[] = [];
+    const deposit = async (chestIndex: number, names: string[]): Promise<string[]> => {
+      const block = bot.blockAt(positions[chestIndex]!);
+      if (!block || signal.aborted) return names;
+      await goNear(bot, positions[chestIndex]!, 2, signal);
+      const failed: string[] = [];
+      try {
+        const window = await bot.openContainer(block);
+        try {
+          for (const name of names) {
+            for (const it of bot.inventory.items().filter((i) => i.name === name)) {
+              // quantité notée avant : l'inventaire peut se mettre à jour pendant le dépôt
+              const n = it.count;
+              try {
+                await window.deposit(it.type, null, n);
+                moved += n;
+              } catch {
+                failed.push(name); // coffre plein
+                break;
+              }
+            }
+          }
+        } finally {
+          window.close();
+        }
+      } catch {
+        return names;
+      }
+      return failed;
+    };
+    for (const [chestIndex, names] of byChest) left.push(...(await deposit(chestIndex, names)));
+    // coffre plein : les objets restants vont au coffre suivant de leur ordre
+    for (const name of left) {
+      for (const next of plan[name]!.slice(1)) {
+        if ((await deposit(next, [name])).length === 0) break;
+      }
+    }
+    return moved > 0 ? { status: 'success', detail: { moved, chests: byChest.size } } : fail('coffres pleins');
   },
 };
 
-/** Prendre des objets dans le coffre le plus proche. */
+/** Prendre des objets dans les coffres proches (tous, pas seulement le plus proche). */
 export const retrieve = {
   name: 'retrieve',
   domain: 'survive' as Domain,
-  description: 'retrieve {item: nom d\'objet, count: 1-64} — prendre un objet dans le coffre le plus proche',
+  description: "retrieve {item: nom d'objet ou famille (ex. \"coal\", \"log\"), count: 1-64} — prendre un objet dans les coffres proches",
   params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(64).default(16) }),
-  timeoutMs: () => 30_000,
-  async run({ bot }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
-    const type = bot.registry.itemsByName[p.item];
-    if (!type) return fail('objet inconnu', { precondition: true });
-    const chest = nearest(bot, ['chest', 'barrel', 'trapped_chest'], CHEST_RADIUS);
-    if (!chest) return fail('aucun coffre à portée', { precondition: true });
-    await goNear(bot, chest.position, 2, signal);
-    const before = countItem(bot, p.item);
-    const window = await bot.openContainer(chest);
-    try {
-      const available = window.containerItems().filter((i) => i.type === type.id).reduce((s, i) => s + i.count, 0);
-      if (available === 0) return fail(`pas de ${p.item} dans le coffre`, { precondition: true });
-      await window.withdraw(type.id, null, Math.min(p.count, available));
-    } finally {
-      window.close();
-    }
-    const got = countItem(bot, p.item) - before;
-    return got > 0 ? { status: 'success', detail: { got } } : fail('rien pris');
+  timeoutMs: () => 90_000,
+  async run({ bot, home }: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const h = home?.();
+    const me = bot.entity.position;
+    if (h && Math.hypot(h.x - me.x, h.y - me.y, h.z - me.z) > 12) await travelHome(bot, h, signal);
+    const wanted = (name: string) => name === p.item || matchingItems([{ name }], p.item).length > 0;
+    const got = await withdrawFromChests(bot, wanted, p.count, signal);
+    return got > 0 ? { status: 'success', detail: { got } } : fail(`pas de ${p.item} dans les coffres`, { precondition: true });
   },
 };
 

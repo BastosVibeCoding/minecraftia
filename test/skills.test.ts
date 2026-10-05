@@ -4,7 +4,7 @@ import { evaluateOutcome, judged } from '../src/outcome/outcome.js';
 import { blueprint } from '../src/skills/blueprint.js';
 import { SkillParamsError, SKILLS, toAction } from '../src/skills/library.js';
 import type { ActionResult } from '../src/skills/actionController.js';
-import { matchingItems } from '../src/skills/extra.js';
+import { familyOf, matchingItems, planStorage, type ChestSurvey } from '../src/skills/extra.js';
 import { openWorld, vec } from './helpers.js';
 import { isAddressed } from '../src/feedback/classifier.js';
 
@@ -340,4 +340,59 @@ it("four occupé : vide la sortie et l'entrée étrangère avant de cuire le sab
   } as unknown as Bot;
   await SKILLS.smelt!.run({ bot, followPlayer: 'B' }, { item: 'sand', count: 8 }, new AbortController().signal).catch(() => null);
   expect(calls).toEqual(['takeOutput', 'takeInput', 'putFuel', 'putInput']);
+});
+
+describe("ranger dans le bon coffre (cas réel : trois coffres à la maison, le bot ouvrait le mauvais)", () => {
+  it("chaque objet va avec ses semblables, le reste dans le coffre le plus libre", () => {
+    const chests: ChestSurvey[] = [
+      { contents: { cobblestone: 64, dirt: 30 }, free: 20 },
+      { contents: { oak_log: 40, birch_planks: 12 }, free: 10 },
+      { contents: { raw_iron: 5, coal: 20 }, free: 24 },
+    ];
+    const plan = planStorage(['spruce_log', 'raw_iron', 'iron_ingot', 'cobblestone', 'white_wool'], chests);
+    expect(plan.spruce_log![0]).toBe(1); // bois avec le bois
+    expect(plan.raw_iron![0]).toBe(2); // même objet
+    expect(plan.iron_ingot![0]).toBe(2); // même famille (minerais)
+    expect(plan.cobblestone![0]).toBe(0);
+    expect(plan.white_wool![0]).toBe(2); // rien de semblable : le plus de place
+    expect(familyOf('deepslate_iron_ore')).toBe('minerais');
+  });
+
+  it("dépose dans le coffre du bois et dans celui des minerais, pas tout dans le plus proche", async () => {
+    const chestAt = (x: number) => vec(x, 64, 0);
+    const contents: Record<number, { name: string; count: number; type: number }[]> = {
+      1: [{ name: 'cobblestone', count: 64, type: 1 }],
+      2: [{ name: 'oak_log', count: 40, type: 2 }],
+      3: [{ name: 'coal', count: 20, type: 3 }],
+    };
+    const inv = [{ name: 'birch_log', count: 6, type: 20 }, { name: 'raw_iron', count: 4, type: 21 }, { name: 'stone_pickaxe', count: 1, type: 22 }];
+    const deposits: string[] = [];
+    let opened = 0;
+    const bot = {
+      entity: { position: vec(0, 64, 0) },
+      registry: { blocksByName: { chest: { id: 54 } }, foodsByName: {} },
+      findBlocks: () => [chestAt(1), chestAt(2), chestAt(3)],
+      blockAt: (p: { x: number }) => ({ name: 'chest', position: p }),
+      inventory: { items: () => inv.filter((i) => i.count > 0) },
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      openContainer: async (b: { position: { x: number } }) => {
+        const x = b.position.x;
+        opened++;
+        return {
+          inventoryStart: 27,
+          containerItems: () => contents[x]!,
+          deposit: async (type: number, _m: null, n: number) => {
+            const it = inv.find((i) => i.type === type)!;
+            deposits.push(`${it.name}→${x}`);
+            it.count -= n;
+          },
+          close: () => {},
+        };
+      },
+    } as unknown as Bot;
+    const r = await SKILLS.store!.run({ bot, followPlayer: 'B' }, {}, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'success' });
+    expect(deposits.sort()).toEqual(['birch_log→2', 'raw_iron→3']);
+    expect(opened).toBe(5); // 3 coffres inspectés, 2 utilisés
+  });
 });
