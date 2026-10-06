@@ -11,7 +11,7 @@ import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import { canSee } from '../bot/sight.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
-import { EXTRA_SKILLS, placeNearby, SMELT_SOURCE, smeltFor, withdrawFromChests } from './extra.js';
+import { CROPS, EXTRA_SKILLS, harvestCrops, placeNearby, SMELT_SOURCE, smeltFor, withdrawFromChests } from './extra.js';
 import { staircase } from './staircase.js';
 import { companionMovements } from '../bot/movements.js';
 import { isBuildingBlock } from '../bot/placedBlocks.js';
@@ -164,6 +164,8 @@ const collect = {
   timeoutMs: (p: { count: number }) => Math.min(300_000, 10_000 * p.count + 140_000),
   async run(ctx: SkillContext, p: { blocks: string[]; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
+    // cultures (blé, carottes…) : seulement les mûres, et on replante — jamais le blé encore vert
+    if (p.blocks.length > 0 && p.blocks.every((b) => CROPS[b.replace(/^minecraft:/, '')])) return harvestCrops.run(ctx, { count: p.count, replant: true }, signal);
     const names = expandBlockNames(Object.keys(bot.registry.blocksByName), p.blocks);
     const ids = names.map((b) => bot.registry.blocksByName[b]?.id).filter((id): id is number => id !== undefined);
     if (ids.length === 0) return fail('blocs inconnus', { blocks: p.blocks });

@@ -653,4 +653,68 @@ export const goHome = {
   },
 };
 
-export const EXTRA_SKILLS = [plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];
+/** Cultures : âge de maturité et graine à replanter. */
+export const CROPS: Record<string, { mature: number; seed: string }> = {
+  wheat: { mature: 7, seed: 'wheat_seeds' },
+  carrots: { mature: 7, seed: 'carrot' },
+  potatoes: { mature: 7, seed: 'potato' },
+  beetroots: { mature: 3, seed: 'beetroot_seeds' },
+};
+
+/** La culture est-elle mûre (âge maximal) ? */
+export function isMature(name: string, age: unknown): boolean {
+  const c = CROPS[name];
+  return Boolean(c) && Number(age) >= c!.mature;
+}
+
+/** Récolter les cultures mûres autour de soi et replanter aussitôt (« récolte le champ »). */
+export const harvestCrops = {
+  name: 'harvest_crops',
+  domain: 'gather' as Domain,
+  description: 'harvest_crops {count?: 1-64, replant?: true} — récolter les cultures mûres (blé, carottes, pommes de terre, betteraves) du champ et replanter',
+  params: z.object({ count: z.number().int().min(1).max(64).default(32), replant: z.boolean().default(true) }),
+  timeoutMs: (p: { count: number }) => Math.min(300_000, 20_000 + 5_000 * p.count),
+  async run(ctx: SkillContext, p: { count: number; replant: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
+    const { bot } = ctx;
+    const ids = Object.keys(CROPS).map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+    const mature = () =>
+      bot
+        .findBlocks({ matching: ids, maxDistance: 24, count: 64, useExtraInfo: (b: { name: string; getProperties: () => Record<string, unknown> }) => isMature(b.name, b.getProperties().age) })
+        .map((pos) => bot.blockAt(pos))
+        .filter((b): b is NonNullable<typeof b> => b !== null);
+    if (mature().length === 0) return fail('aucune culture mûre à portée', { precondition: true });
+    let harvested = 0;
+    let replanted = 0;
+    for (let n = 0; n < p.count && !signal.aborted; n++) {
+      const crop = mature()[0];
+      if (!crop) break;
+      const seed = CROPS[crop.name]!.seed;
+      const at = crop.position;
+      ctx.touch?.(at);
+      await goNear(bot, at, 2, signal);
+      if (signal.aborted) break;
+      try {
+        await bot.dig(crop, true);
+        harvested++;
+      } catch {
+        continue;
+      }
+      // ramasser ce qui est tombé (blé, graines…) en marchant sur la case
+      await goNear(bot, at, 0.5, signal);
+      if (!p.replant) continue;
+      const soil = bot.blockAt(at.offset(0, -1, 0));
+      const item = bot.inventory.items().find((i) => i.name === seed);
+      if (!soil || soil.name !== 'farmland' || !item) continue;
+      try {
+        await bot.equip(item, 'hand');
+        await bot.placeBlock(soil, at.minus(at).offset(0, 1, 0));
+        replanted++;
+      } catch {
+        // case déjà occupée ou hors de portée : on passe à la suivante
+      }
+    }
+    return harvested > 0 ? { status: 'success', detail: { harvested, replanted } } : fail('récolte impossible');
+  },
+};
+
+export const EXTRA_SKILLS = [harvestCrops, plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];

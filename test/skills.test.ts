@@ -57,6 +57,7 @@ describe('bibliothèque de compétences', () => {
         pickup: {},
         go_home: {},
         sort_chests: {},
+        harvest_crops: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
@@ -397,4 +398,33 @@ describe("ranger dans le bon coffre (cas réel : trois coffres à la maison, le 
     expect(deposits.sort()).toEqual(['birch_log→2', 'raw_iron→3']);
     expect(opened).toBe(5); // 3 coffres inspectés, 2 utilisés
   });
+});
+
+it("agriculture : récolte seulement le blé mûr et replante sur la terre labourée (évolution 3)", async () => {
+  const field: Record<string, { name: string; age: number }> = { '1,64,0': { name: 'wheat', age: 7 }, '2,64,0': { name: 'wheat', age: 3 } };
+  const inv = [{ name: 'wheat_seeds', count: 4, type: 1 }];
+  const dug: string[] = [];
+  const planted: string[] = [];
+  const blockAt = (p: { x: number; y: number; z: number }) => {
+    if (p.y === 63) return { name: 'farmland', position: vec(p.x, p.y, p.z) };
+    const c = field[`${p.x},${p.y},${p.z}`];
+    return c ? { name: c.name, position: vec(p.x, p.y, p.z), getProperties: () => ({ age: c.age }) } : { name: 'air', position: vec(p.x, p.y, p.z) };
+  };
+  const bot = {
+    registry: { blocksByName: { wheat: { id: 10 }, carrots: { id: 11 }, potatoes: { id: 12 }, beetroots: { id: 13 } } },
+    findBlocks: (o: { useExtraInfo: (b: unknown) => boolean }) => Object.keys(field).map((k) => k.split(',').map(Number) as [number, number, number]).map(([x, y, z]) => vec(x, y, z)).filter((p) => o.useExtraInfo(blockAt(p))),
+    blockAt,
+    inventory: { items: () => inv },
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    dig: async (b: { position: { x: number } }) => {
+      dug.push(String(b.position.x));
+      delete field[`${b.position.x},64,0`];
+    },
+    equip: async () => {},
+    placeBlock: async (soil: { position: { x: number } }) => void planted.push(String(soil.position.x)),
+  } as unknown as Bot;
+  const r = await SKILLS.harvest_crops!.run({ bot, followPlayer: 'B' }, { count: 10, replant: true }, new AbortController().signal);
+  expect(r).toMatchObject({ status: 'success', detail: { harvested: 1, replanted: 1 } });
+  expect(dug).toEqual(['1']);
+  expect(planted).toEqual(['1']);
 });

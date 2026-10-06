@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-06 | évolution 3 | agriculture | `harvest_crops` : récolte seulement les cultures mûres (blé, carottes, pommes de terre, betteraves), ramasse, replante sur la terre labourée ; une récolte « collect » de cultures est redirigée vers elle |
 | 2026-10-06 | évolution 2 | fonte automatique | `smeltFor` : lingots, verre, pierre, charbon de bois, viandes cuites… obtenus en faisant cuire ce qu'il faut (sur soi ou dans les coffres) ; utilisé par la fabrication et par la recherche d'outil (pioche en fer avec seulement du fer brut) |
 | 2026-10-06 | Léa, Alex | JSON dans le chat (`[ { "response": … } ]`) ; décision rejetée (explore radius > 64) | plainReply extrait la phrase de toute forme JSON (liste, objet imbriqué) ; paramètre numérique hors bornes ramené à la borne au lieu d'un nouvel appel. Configurations des mods vérifiées : valides |
 | 2026-10-05 | joueurs | que font les bots quand les humains se déconnectent ? | Son joueur absent 1 min : rentrer à la maison et ranger, puis se déconnecter ; déconnexion garantie à 5 min même si le retour échoue ; au démarrage, connexion seulement si son joueur est là ; reconnexion quand il revient (ping de la liste des joueurs). Chaque bot ne suit que son joueur |
@@ -77,3 +78,4 @@ Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite s
 
 1. JSON : réponses en liste nettoyées, paramètres ramenés aux bornes
 2. Fonte automatique
+3. Agriculture (récolte des mûres et replantation)
