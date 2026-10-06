@@ -350,3 +350,10 @@ it("paramètre hors limites ramené à la limite au lieu d'un nouvel appel (cas 
   const r = parseDecision(JSON.stringify({ skill: 'explore', params: { radius: 80 }, domain: 'explore', intent: 'explorer', basedOn: [], rationale: 'x' }));
   expect(r).toMatchObject({ ok: true, decision: { params: { radius: 64 } } });
 });
+
+it("explorer d'initiative devient un suivi ; sur ordre, il explore (cas réel : chute mortelle en explorant seul)", () => {
+  const act = Object.fromEntries(DOMAINS.map((d) => [d, { band: 'act' as Band, score: 0.9 }])) as Record<Domain, { band: Band; score: number }>;
+  const explore = { skill: 'explore', params: { radius: 24 }, domain: 'explore' as Domain, intent: 'explorer', basedOn: [], needsApproval: false, rationale: '' };
+  expect(applyGuards(explore, [], act, false).skill).toBe('follow');
+  expect(applyGuards(explore, [], act, true).skill).toBe('explore');
+});

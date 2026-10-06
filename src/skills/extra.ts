@@ -717,4 +717,22 @@ export const harvestCrops = {
   },
 };
 
-export const EXTRA_SKILLS = [harvestCrops, plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];
+/** Délai avant que les objets tombés à la mort ne disparaissent (5 min dans Minecraft). */
+export const DESPAWN_MS = 5 * 60_000;
+
+/** Retourner là où l'on est mort et ramasser ses affaires (« récupère ton stuff »). */
+export const recoverItems = {
+  name: 'recover_items',
+  domain: 'survive' as Domain,
+  description: "recover_items {} — retourner à l'endroit de ma dernière mort et ramasser mes affaires tombées (« récupère ton stuff »)",
+  params: z.object({}),
+  timeoutMs: () => 180_000,
+  async run(ctx: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
+    const death = ctx.lastDeath?.();
+    if (!death) return fail("je ne sais pas où je suis morte, ou mes affaires ont déjà disparu", { precondition: true });
+    if (!(await travelHome(ctx.bot, death, signal))) return fail("je n'arrive pas à rejoindre l'endroit où je suis morte");
+    return pickup.run(ctx, { radius: 12 }, signal);
+  },
+};
+
+export const EXTRA_SKILLS = [recoverItems, harvestCrops, plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];

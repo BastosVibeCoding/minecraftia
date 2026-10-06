@@ -176,7 +176,9 @@ export class DecisionLoop {
     // on note si la compétence a parlé (« il me faut du combustible… ») pour ne pas répéter l'échec
     let spoke = false;
     const base = this.deps.skillContext;
-    const ctx = { ...base, speak: (t: string) => ((spoke = true), base.speak ? base.speak(t) : base.bot.chat(t)) };
+    // une initiative ne réclame rien à voix haute (cas réel : « il me faut une pioche » répété) ;
+    // seul un ordre du joueur fait parler la compétence
+    const ctx = { ...base, ordered: Boolean(order), speak: (t: string) => ((spoke = true), order || skill === 'say' ? (base.speak ? base.speak(t) : base.bot.chat(t)) : undefined) };
     let action;
     try {
       action = toAction(ctx, skill, params);

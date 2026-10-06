@@ -59,6 +59,7 @@ describe('bibliothèque de compétences', () => {
         sort_chests: {},
         harvest_crops: {},
         bring: { item: 'oak_planks' },
+        recover_items: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);
@@ -428,4 +429,29 @@ it("agriculture : récolte seulement le blé mûr et replante sur la terre labou
   expect(r).toMatchObject({ status: 'success', detail: { harvested: 1, replanted: 1 } });
   expect(dug).toEqual(['1']);
   expect(planted).toEqual(['1']);
+});
+
+describe("corrections après la partie du 6 octobre", () => {
+  it("« mets ton armure » : la meilleure pièce de chaque emplacement", async () => {
+    const worn: string[] = [];
+    const items = [{ name: 'iron_helmet' }, { name: 'leather_helmet' }, { name: 'iron_chestplate' }, { name: 'diamond_boots' }];
+    const bot = { inventory: { items: () => items }, equip: async (i: { name: string }, slot: string) => void worn.push(`${i.name}@${slot}`) } as unknown as Bot;
+    const r = await SKILLS.equip!.run({ bot, followPlayer: 'B' }, { item: 'armor' }, new AbortController().signal);
+    expect(r).toMatchObject({ status: 'success', detail: { worn: 3 } });
+    expect(worn).toContain('iron_helmet@head');
+    expect(worn).not.toContain('leather_helmet@head');
+  });
+
+  it("« récupère ton stuff » : retourne là où il est mort ; sans mort récente, il le dit", async () => {
+    let pos = vec(100, 64, 0);
+    const bot = {
+      entity: { get position() { return pos; } },
+      entities: {},
+      inventory: { items: () => [] },
+      pathfinder: { goto: async (g: { x: number; z: number }) => void (pos = vec(g.x, 64, g.z)), setGoal: () => {} },
+    } as unknown as Bot;
+    await SKILLS.recover_items!.run({ bot, followPlayer: 'B', lastDeath: () => ({ x: 0, y: 64, z: 0 }) }, {}, new AbortController().signal);
+    expect(Math.hypot(pos.x, pos.z)).toBeLessThanOrEqual(4);
+    expect(await SKILLS.recover_items!.run({ bot, followPlayer: 'B', lastDeath: () => null }, {}, new AbortController().signal)).toMatchObject({ status: 'failure', detail: { precondition: true } });
+  });
 });

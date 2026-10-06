@@ -22,6 +22,7 @@ import type { ConsignesStore } from './feedback/consignes.js';
 import { ChestRoles } from './bot/chestRoles.js';
 import { playerEntity } from './bot/mineflayerTypes.js';
 import { SKILLS, toAction, type SkillContext } from './skills/library.js';
+import { DESPAWN_MS } from './skills/extra.js';
 import mcProtocol from 'minecraft-protocol';
 import { presenceAction } from './bot/presence.js';
 
@@ -116,6 +117,8 @@ export class Companion {
   private absentSince: number | null = null;
   /** Routine de départ (maison, rangement) en cours. */
   private leaving = false;
+  /** Dernière mort du bot (pour aller récupérer ses affaires). */
+  private lastDeath: { x: number; y: number; z: number; at: number } | null = null;
   /** Une proposition de maison devinée attend sa réponse. */
   private homeAsked = false;
   /** La routine du soir (rentrer, dormir) a déjà été lancée cette nuit. */
@@ -252,6 +255,7 @@ export class Companion {
       resources: this.resources,
       chestRoles: this.chestRoles,
       home: () => this.home.get(),
+      lastDeath: () => (this.lastDeath && this.clock.now() - this.lastDeath.at < DESPAWN_MS ? this.lastDeath : null),
       recentPlacements: (withinMs) => this.placed.recentBy(this.config.followPlayer, this.clock.now() - withinMs),
       // la plupart des recettes donnent 4 objets (planches, bâtons, torches) : on vise juste au-dessus
       craft: async (item, count, signal) => {
@@ -515,6 +519,8 @@ export class Companion {
     reflexes.start();
     bot.on('death', () => {
       this.logger.warn('le bot est mort');
+      const p = bot.entity?.position;
+      if (p) this.lastDeath = { x: p.x, y: p.y, z: p.z, at: this.clock.now() };
       if (this.session) this.session.deaths++;
       actions.abort('mort', 'death');
     });

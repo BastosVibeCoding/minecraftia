@@ -74,6 +74,9 @@ export function applyGuards(
   // construire, c'est placer des blocs là où le joueur les veut : un bot ne peut pas le deviner ;
   // sans `buildInitiative`, jamais de construction d'initiative, quelle que soit l'autonomie
   if (['build', 'place', 'extend_wall', 'copy_build'].includes(d.skill) && !buildInitiative) return fallbackDecision('construction : seulement sur demande du joueur');
+  // explorer d'initiative éloignait le bot de son joueur au hasard (chutes, morts, cas réel) :
+  // quand le joueur explore, le bot le suit ; il ne part explorer seul que sur demande
+  if (d.skill === 'explore') return fallbackDecision('exploration : seulement sur demande, sinon on suit le joueur');
   const key = actionKey(d.skill, d.params);
   const avoided = branches.flatMap((b) => b.avoid).some((a) => a.mechanism && actionKey(String(a.mechanism.skill), a.mechanism) === key);
   const endorsed = branches.flatMap((b) => b.mechanisms).some((m) => m.mechanism && actionKey(String(m.mechanism.skill), m.mechanism) === key);

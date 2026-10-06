@@ -40,6 +40,10 @@ export interface SkillContext {
   recentPlacements?: (withinMs: number) => { x: number; y: number; z: number; block: string; at: number }[];
   /** Fabriquer un objet (utilisé par « apporte-moi » quand les coffres ne suffisent pas). */
   craft?: (item: string, count: number, signal: AbortSignal) => Promise<void>;
+  /** Endroit de la dernière mort, tant que les affaires tombées n'ont pas disparu. */
+  lastDeath?: () => { x: number; y: number; z: number } | null;
+  /** Action lancée par un ordre du joueur (sinon initiative : le bot ne réclame rien à voix haute). */
+  ordered?: boolean;
   /** Rôles des coffres retenus d'un tri à l'autre. */
   chestRoles?: ChestRoles;
   /** Position de la maison, si elle est connue. */
@@ -535,10 +539,24 @@ const ARMOR_SLOT: Record<string, 'head' | 'torso' | 'legs' | 'feet'> = { helmet:
 const equip = {
   name: 'equip',
   domain: 'survive' as Domain,
-  description: 'equip {item: nom d\'objet} — tenir un outil ou porter une pièce d\'armure',
+  description: "equip {item: nom d'objet, ou \"armor\" pour mettre toute la meilleure armure} — tenir un outil ou porter une pièce d'armure",
   params: z.object({ item: z.string().min(1) }),
-  timeoutMs: () => 5_000,
+  timeoutMs: () => 15_000,
   async run({ bot }: SkillContext, p: { item: string }): Promise<ActionRunOutput> {
+    // « mets ton armure » : la meilleure pièce de chaque emplacement
+    if (/^(armor|armure|all|tout)$/i.test(p.item)) {
+      const TIER = ['netherite', 'diamond', 'iron', 'chainmail', 'golden', 'leather'];
+      let worn = 0;
+      for (const piece of Object.keys(ARMOR_SLOT)) {
+        const best = bot.inventory
+          .items()
+          .filter((i) => i.name.endsWith(`_${piece}`))
+          .sort((a, b) => TIER.indexOf(a.name.split('_')[0]!) - TIER.indexOf(b.name.split('_')[0]!))[0];
+        if (!best) continue;
+        await bot.equip(best, ARMOR_SLOT[piece]!).then(() => worn++, () => undefined);
+      }
+      return worn > 0 ? { status: 'success', detail: { worn } } : fail("pas d'armure dans l'inventaire", { precondition: true });
+    }
     const it = bot.inventory.items().find((i) => i.name === p.item);
     if (!it) return fail('objet absent de l\'inventaire', { item: p.item, precondition: true });
     const piece = Object.keys(ARMOR_SLOT).find((k) => p.item.endsWith(`_${k}`));

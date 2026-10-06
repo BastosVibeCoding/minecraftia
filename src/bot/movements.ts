@@ -9,6 +9,9 @@ export const isHandDoor = (name: string) => name.endsWith('_door') && name !== '
 /** Portes en bois et portillons : ce que le bot sait ouvrir. */
 export const isPassage = (name: string) => isHandDoor(name) || name.endsWith('_fence_gate');
 
+/** Hauteur maximale de chute acceptée sur un trajet. */
+const MAX_DROP = 3;
+
 /** Coût d'un pas dans l'eau : le bot préfère la terre ferme dès qu'un détour raisonnable existe. */
 export const LIQUID_COST = 4;
 
@@ -63,6 +66,8 @@ export function companionMovements(bot: Bot, opts: MovementOptions = {}): Instan
   if (isProtected) areas.exclusionAreasBreak.push((b) => (isProtected(b) ? 100 : 0));
   areas.exclusionAreasStep.push((b) => (b.name && isPassage(b.name) ? PASSAGE_COST : 0));
   (m as unknown as { liquidCost: number }).liquidCost = LIQUID_COST;
+  // chute de 4 blocs = dégâts ; 3 au plus (cas réel : « Alex fell from a high place »)
+  m.maxDropDown = MAX_DROP;
   const getBlock = m.getBlock.bind(m);
   m.getBlock = (pos, dx, dy, dz) => {
     const b = getBlock(pos, dx, dy, dz) as unknown as PathBlock;

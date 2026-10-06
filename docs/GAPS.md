@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-06 | joueurs | « plus bêtes, plus lents » : explorations seules, morts, stuff perdu, pioche réclamée en boucle | IA saine (Gemini 1,2 s, aucun repli). Exploration seulement sur ordre (sinon suivi) ; chute max 3 blocs ; `recover_items` (retour au lieu de la mort, 5 min) ; initiatives muettes (seuls les ordres font réclamer du matériel) ; « mets ton armure » (meilleure pièce par emplacement) ; verbes met, mets, enfile. La version en ligne datait du 5 octobre : tout le reste est déployé avec |
 | 2026-10-06 | évolution 6 | mémoire des consignes | « retiens que… », « à l'avenir… », « je n'aime pas que tu… », « ne … plus jamais », « mets toujours… » : retenues en base (20 max), données au modèle à chaque décision (prioritaires sur les habitudes), clé du cache incluse ; `!consignes`, `!oublie consigne <n>` |
 | 2026-10-06 | évolution 4 | aide à la construction | `extend_wall` (prolonger le mur que le joueur vient de construire, même bloc et hauteur, longueur ou « jusqu'ici ») ; `copy_build` (reproduire à côté ce qu'il vient de construire) ; `bring` (apporter des objets : coffres, sinon fabriqués, puis donnés) ; pose contre n'importe quelle face voisine ; sur ordre seulement ; verbes prolonge, continue, copie, refais |
 | 2026-10-06 | évolution 3 | agriculture | `harvest_crops` : récolte seulement les cultures mûres (blé, carottes, pommes de terre, betteraves), ramasse, replante sur la terre labourée ; une récolte « collect » de cultures est redirigée vers elle |
@@ -76,10 +77,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `88f8bfb` (2026-10-05, sur `!deploy`).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06, demandé par le joueur (JSON, fonte, agriculture, aide à la construction, consignes, corrections de la partie).
 
-1. JSON : réponses en liste nettoyées, paramètres ramenés aux bornes
-2. Fonte automatique
-3. Agriculture (récolte des mûres et replantation)
-4. Aide à la construction (prolonger, copier, apporter)
-5. Mémoire des consignes
+(aucun)

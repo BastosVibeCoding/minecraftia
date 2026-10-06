@@ -380,3 +380,8 @@ it("« Alex, retiens que le fer va à droite » : consigne retenue sans l'interp
   expect(consignes.texts()).toEqual(['retiens que le fer va dans le coffre de droite']);
   expect(said).toEqual(["C'est noté, je m'en souviendrai."]);
 });
+
+it("« met tes jambières » est un ordre (cas réel)", () => {
+  expect(classifyByRules('met tes jambieres', 'Alex').label).toBe('order');
+  expect(classifyByRules('mets ton armure', 'Alex').label).toBe('order');
+});
