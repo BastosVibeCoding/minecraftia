@@ -44,6 +44,8 @@ export interface SkillContext {
   lastDeath?: () => { x: number; y: number; z: number } | null;
   /** Action lancée par un ordre du joueur (sinon initiative : le bot ne réclame rien à voix haute). */
   ordered?: boolean;
+  /** Réglages de déplacement avec droit de creuser (blocs protégés exceptés), pour se sortir d'un chemin bloqué. */
+  digMovements?: () => void;
   /** Rôles des coffres retenus d'un tri à l'autre. */
   chestRoles?: ChestRoles;
   /** Position de la maison, si elle est connue. */

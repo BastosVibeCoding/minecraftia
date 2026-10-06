@@ -204,3 +204,8 @@ describe("rappels et « reste là » (manques réels de Léa, 6 octobre)", () =>
     expect(stub.calls.length).toBe(0);
   });
 });
+
+it("« Léa va à la maison et fait cuire le fer » : deux étapes (cas réel)", () => {
+  expect(splitOrder('Léa va à la maison et fait cuire le fer')).toEqual(['Léa va à la maison', 'fait cuire le fer']);
+  expect(splitOrder('va à la maison pour faire cuire le fer dans le four')).toEqual(['va à la maison pour faire cuire le fer dans le four']);
+});

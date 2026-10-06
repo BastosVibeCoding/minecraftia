@@ -262,6 +262,7 @@ export class Companion {
         await SKILLS.craft!.run(this.skillContextFor(bot), { item, count: Math.min(16, Math.max(1, Math.ceil(count / 4))) }, signal).catch(() => undefined);
       },
       restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b), noScaffoldAt: (p) => this.home.inZone(p) })),
+      digMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { canDig: true, isProtected: (b) => this.isProtected(b), noScaffoldAt: (p) => this.home.inZone(p) })),
       speak: (text) => void this.speaker.speak(text),
     };
   }

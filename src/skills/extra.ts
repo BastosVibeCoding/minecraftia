@@ -176,6 +176,10 @@ export const smelt = {
     // un four libre parmi tous ceux du coin : jamais retirer ce qui cuit déjà (cas réel : le fer en
     // train de cuire remplacé par de l'or alors qu'un deuxième four était libre)
     const product = Object.entries(SMELT_SOURCE).find(([, srcs]) => srcs.includes(p.item))?.[0];
+    // pas de four dans le coin mais une maison connue : on va utiliser ceux de la maison (cas réel)
+    const h = ctx.home?.();
+    const ids = ['furnace', 'blast_furnace', 'smoker'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+    if (h && bot.findBlocks({ matching: ids, maxDistance: 16, count: 1 }).length === 0) await travelHome(bot, h, signal);
     const window = await freeFurnace(bot, input.id, product, signal);
     if (!window) {
       ctx.speak?.("Tous les fours sont occupés et je n'en ai pas à poser. Tu veux que j'attende ?");
@@ -668,11 +672,19 @@ export async function travelHome(bot: Bot, h: { x: number; y: number; z: number 
       await goNear(bot, h, 3, signal);
       continue;
     }
-    const k = 48 / d;
-    const stepGoal = { x: me.x + (h.x - me.x) * k, y: me.y, z: me.z + (h.z - me.z) * k };
-    const before = bot.entity.position.clone();
-    await goNearXZ(bot, stepGoal, signal);
-    if (bot.entity.position.distanceTo(before) < 2) return false; // bloqué
+    // étape de 48 blocs ; si elle n'avance pas (sous terre, relief), on retente plus court
+    let moved = false;
+    for (const hopLen of [48, 16]) {
+      const k = hopLen / d;
+      const stepGoal = { x: me.x + (h.x - me.x) * k, y: me.y, z: me.z + (h.z - me.z) * k };
+      const before = bot.entity.position.clone();
+      await goNearXZ(bot, stepGoal, signal);
+      if (bot.entity.position.distanceTo(before) >= 2) {
+        moved = true;
+        break;
+      }
+    }
+    if (!moved) return false; // bloqué
   }
   const me = bot.entity.position;
   return Math.hypot(h.x - me.x, h.z - me.z) <= 6;
@@ -701,7 +713,17 @@ export const goHome = {
   async run(ctx: SkillContext, _p: Record<string, never>, signal: AbortSignal): Promise<ActionRunOutput> {
     const h = ctx.home?.();
     if (!h) return fail("je ne sais pas encore où est la maison : dis « ici c'est la maison » quand tu y es", { precondition: true });
-    return (await travelHome(ctx.bot, h, signal)) ? { status: 'success', detail: { home: h } } : fail('chemin vers la maison bloqué');
+    if (await travelHome(ctx.bot, h, signal)) return { status: 'success', detail: { home: h } };
+    // chemin bloqué (sous terre, cas réel) : on retente en ayant le droit de creuser, blocs protégés exceptés
+    if (ctx.digMovements && !signal.aborted) {
+      ctx.digMovements();
+      try {
+        if (await travelHome(ctx.bot, h, signal)) return { status: 'success', detail: { home: h, dug: true } };
+      } finally {
+        ctx.restoreMovements?.();
+      }
+    }
+    return fail('chemin vers la maison bloqué');
   },
 };
 

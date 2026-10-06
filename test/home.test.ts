@@ -76,3 +76,25 @@ it("le simple mot « maison » ne déplace plus la maison (cas réel)", () => {
   for (const t of ["Alex, ici c'est la maison", 'ici la maison', "c'est ici chez nous", 'la maison est ici', "notre maison, c'est ici", 'voici notre maison', 'voilà la base']) expect(isHomeDesignation(t), t).toBe(true);
   for (const t of ['on rentre à la maison', 'la maison est belle', 'je suis dans la maison', 'va à la maison', 'elle est où la maison', 'maison', "c'est la maison de qui", 'range ça à la maison', "ce n'est pas ici la maison", 'construis une maison ici']) expect(isHomeDesignation(t), t).toBe(false);
 });
+
+it("rentrer à la maison bloqué : retente en ayant le droit de creuser, puis remet les réglages (cas réel : sous terre)", async () => {
+  let pos = vec(100, 30, 0);
+  let canDig = false;
+  const calls: string[] = [];
+  const bot = {
+    entity: { get position() { return pos; } },
+    pathfinder: {
+      goto: async (g: { x: number; z: number }) => {
+        if (canDig) pos = vec(g.x, 64, g.z); // sans creuser, il ne bouge pas
+      },
+      setGoal: () => {},
+    },
+  } as unknown as Bot;
+  const r = await SKILLS.go_home!.run(
+    { bot, followPlayer: 'B', home: () => ({ x: 0, y: 64, z: 0 }), digMovements: () => void (calls.push('dig'), (canDig = true)), restoreMovements: () => void (calls.push('restore'), (canDig = false)) },
+    {},
+    new AbortController().signal,
+  );
+  expect(r).toMatchObject({ status: 'success', detail: { dug: true } });
+  expect(calls).toEqual(['dig', 'restore']);
+});
