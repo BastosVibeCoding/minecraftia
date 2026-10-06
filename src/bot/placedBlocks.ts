@@ -54,6 +54,14 @@ export class PlacedBlocks {
     });
   }
 
+  /** Blocs posés par ce joueur depuis `since`, du plus récent au plus ancien (pour prolonger ou copier). */
+  recentBy(player: string, since: number): { x: number; y: number; z: number; block: string; at: number }[] {
+    return (this.db.prepare('SELECT pos, block, at FROM placed_blocks WHERE player = ? AND at >= ? ORDER BY at DESC LIMIT 400').all(player, since) as { pos: string; block: string; at: number }[]).map((r) => {
+      const [x, y, z] = r.pos.split(',').map(Number) as [number, number, number];
+      return { x, y, z, block: r.block, at: r.at };
+    });
+  }
+
   get size(): number {
     return this.positions.size;
   }

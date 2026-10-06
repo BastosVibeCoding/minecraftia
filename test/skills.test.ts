@@ -58,6 +58,7 @@ describe('bibliothèque de compétences', () => {
         go_home: {},
         sort_chests: {},
         harvest_crops: {},
+        bring: { item: 'oak_planks' },
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);

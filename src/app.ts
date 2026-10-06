@@ -20,7 +20,7 @@ import { ResourceMemory } from './bot/resources.js';
 import { guessHome, HomeStore } from './bot/home.js';
 import { ChestRoles } from './bot/chestRoles.js';
 import { playerEntity } from './bot/mineflayerTypes.js';
-import { toAction, type SkillContext } from './skills/library.js';
+import { SKILLS, toAction, type SkillContext } from './skills/library.js';
 import mcProtocol from 'minecraft-protocol';
 import { presenceAction } from './bot/presence.js';
 
@@ -248,6 +248,11 @@ export class Companion {
       resources: this.resources,
       chestRoles: this.chestRoles,
       home: () => this.home.get(),
+      recentPlacements: (withinMs) => this.placed.recentBy(this.config.followPlayer, this.clock.now() - withinMs),
+      // la plupart des recettes donnent 4 objets (planches, bâtons, torches) : on vise juste au-dessus
+      craft: async (item, count, signal) => {
+        await SKILLS.craft!.run(this.skillContextFor(bot), { item, count: Math.min(16, Math.max(1, Math.ceil(count / 4))) }, signal).catch(() => undefined);
+      },
       restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })),
       speak: (text) => void this.speaker.speak(text),
     };

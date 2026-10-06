@@ -16,6 +16,7 @@ import { staircase } from './staircase.js';
 import { companionMovements } from '../bot/movements.js';
 import { isBuildingBlock } from '../bot/placedBlocks.js';
 import { sortChests } from './sortChests.js';
+import { BUILD_HELP_SKILLS } from './buildHelp.js';
 import type { ResourceMemory } from '../bot/resources.js';
 import type { ChestRoles } from '../bot/chestRoles.js';
 import { ensureHarvestTool } from './tools.js';
@@ -35,6 +36,10 @@ export interface SkillContext {
   isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
   /** Mémoire des endroits où des ressources ont été vues ou récoltées. */
   resources?: ResourceMemory;
+  /** Blocs posés récemment par le joueur suivi (du plus récent au plus ancien), pour prolonger ou copier. */
+  recentPlacements?: (withinMs: number) => { x: number; y: number; z: number; block: string; at: number }[];
+  /** Fabriquer un objet (utilisé par « apporte-moi » quand les coffres ne suffisent pas). */
+  craft?: (item: string, count: number, signal: AbortSignal) => Promise<void>;
   /** Rôles des coffres retenus d'un tri à l'autre. */
   chestRoles?: ChestRoles;
   /** Position de la maison, si elle est connue. */
@@ -557,7 +562,7 @@ const say = {
 
 /** Bibliothèque : des primitives génériques ; leurs paramètres et leur enchaînement viennent de l'arbre. */
 export const SKILLS: Record<string, Skill> = Object.fromEntries(
-  [follow, collect, build, attack, craft, explore, eat, equip, say, staircase, sortChests, ...EXTRA_SKILLS].map((s) => [s.name, s as unknown as Skill]),
+  [follow, collect, build, attack, craft, explore, eat, equip, say, staircase, sortChests, ...EXTRA_SKILLS, ...BUILD_HELP_SKILLS].map((s) => [s.name, s as unknown as Skill]),
 );
 
 export type SkillName = keyof typeof SKILLS;
