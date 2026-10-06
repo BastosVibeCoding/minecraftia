@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-06 | Alex | « récolte 5 diamant » → blocs inconnus (« diamond ») ; décisions lentes (25 s) | Objet demandé → ses minerais (diamond → diamond_ore + deepslate, aussi en français) ; Gemini lent depuis 17:28 : relais à 8 s quand aucun Groq ne suit (Léa), 4,5 s sinon |
 | 2026-10-06 | évolution 7 | déplacements | Échafaudage élargi (terre, pavés, ardoise des abîmes, andésite, diorite, granite, tuf) pour remonter d'un trou ou franchir un vide, jamais dans la zone de la maison ; `StuckWatcher` : coincé 5 s → saut, abandon du trajet après 3 essais ; chute max 3 blocs |
 | 2026-10-06 | Alex | épée en fer : lingot manquant alors qu'il était cuit dans le four ; « montre ton épée » | `takeFromFurnaces` : ce qui a déjà cuit est pris dans les fours avant de faire cuire ou de demander (fabrication et fonte) ; equip accepte un type (« sword », « épée », « pioche ») et prend la meilleure pièce ; verbes montre, sors |
 | 2026-10-06 | joueurs | « plus bêtes, plus lents » : explorations seules, morts, stuff perdu, pioche réclamée en boucle | IA saine (Gemini 1,2 s, aucun repli). Exploration seulement sur ordre (sinon suivi) ; chute max 3 blocs ; `recover_items` (retour au lieu de la mort, 5 min) ; initiatives muettes (seuls les ordres font réclamer du matériel) ; « mets ton armure » (meilleure pièce par emplacement) ; verbes met, mets, enfile. La version en ligne datait du 5 octobre : tout le reste est déployé avec |
@@ -79,8 +80,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06, demandé par le joueur (JSON, fonte, agriculture, aide à la construction, consignes, corrections de la partie).
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06 (fours, montre, déplacements, diamants, relais adaptatif).
 
-1. Fours fouillés pour les ingrédients déjà cuits
-2. « montre ton épée »
-3. Déplacements : échafaudage, déblocage
+(aucun)

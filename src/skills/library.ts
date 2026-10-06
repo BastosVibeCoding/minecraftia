@@ -130,6 +130,11 @@ export function expandBlockNames(known: string[], wanted: string[]): string[] {
     const family = ALIASES[w] ?? w.replace(/s$/, '');
     const before = out.size;
     for (const k of known) if (k.endsWith(`_${family}`)) out.add(k);
+    // un objet plutôt qu'un bloc (cas réel : « diamond » au lieu de diamond_ore) : ses minerais
+    if (out.size === before) {
+      const metal = ORE_WORDS[w] ?? w.replace(/^raw_/, '').replace(/_ingot$/, '');
+      for (const k of known) if (k === `${metal}_ore` || k.endsWith(`_${metal}_ore`)) out.add(k);
+    }
     // « wooden_stairs » : rien ne finit ainsi, on retente avec le dernier mot (« stairs »)
     if (out.size === before && w.includes('_')) {
       const last = w.split('_').pop()!;
@@ -159,6 +164,12 @@ export function clampToHome(p: { x: number; z: number }, home: { x: number; z: n
   const d = Math.hypot(dx, dz);
   return d <= HOME_RANGE ? p : { x: home.x + (dx / d) * HOME_RANGE, z: home.z + (dz / d) * HOME_RANGE };
 }
+
+/** Mots pour un minerai (français, objet obtenu) → nom du métal dans « <métal>_ore ». */
+const ORE_WORDS: Record<string, string> = {
+  diamant: 'diamond', diamants: 'diamond', diamonds: 'diamond', fer: 'iron', charbon: 'coal', or: 'gold', cuivre: 'copper',
+  emeraude: 'emerald', 'émeraude': 'emerald', emerald: 'emerald', lapis_lazuli: 'lapis', lapis: 'lapis', redstone: 'redstone', quartz: 'nether_quartz',
+};
 
 /** Rayon de recherche des blocs à récolter, et essais ratés d'affilée avant d'abandonner. */
 const COLLECT_RADIUS = 48;

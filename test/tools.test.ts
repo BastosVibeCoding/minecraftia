@@ -321,3 +321,13 @@ describe("fonte automatique (évolution 2)", () => {
     expect(chest[0]!.count).toBe(2);
   });
 });
+
+it("« récolte 5 diamant » : l'objet demandé donne ses minerais (cas réel : bloc « diamond » inconnu)", () => {
+  const known = ['diamond_ore', 'deepslate_diamond_ore', 'diamond_block', 'iron_ore', 'deepslate_iron_ore', 'coal_ore', 'lapis_ore', 'redstone_ore', 'nether_quartz_ore'];
+  expect(expandBlockNames(known, ['diamond']).sort()).toEqual(['deepslate_diamond_ore', 'diamond_ore']);
+  expect(expandBlockNames(known, ['diamant']).sort()).toEqual(['deepslate_diamond_ore', 'diamond_ore']);
+  expect(expandBlockNames(known, ['raw_iron']).sort()).toEqual(['deepslate_iron_ore', 'iron_ore']);
+  expect(expandBlockNames(known, ['lapis_lazuli'])).toEqual(['lapis_ore']);
+  expect(expandBlockNames(known, ['quartz'])).toEqual(['nether_quartz_ore']);
+  expect(expandBlockNames(known, ['diamond_block'])).toEqual(['diamond_block']);
+});

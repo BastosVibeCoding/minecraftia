@@ -24,6 +24,8 @@ export interface ChainEntry {
 
 /** Délai maximal d'un fournisseur avant de passer au suivant (le dernier de la chaîne n'est pas concerné). */
 export const RELAY_TIMEOUT_MS = 4500;
+/** Délai de relais quand aucun fournisseur rapide ne suit (le secours restant est plus lent). */
+export const SLOW_RELAY_TIMEOUT_MS = 8000;
 
 /** Durées de mise en pause d'un fournisseur selon l'échec. */
 const PAUSE = {
@@ -113,7 +115,11 @@ export function buildChain(spec: string, env: Record<string, string | undefined>
     const def = PROVIDERS[provider];
     // un fournisseur lent (Gemini saturé : 7 à 20 s par réponse, cas réel) passe la main au suivant
     // après RELAY_TIMEOUT_MS ; seul le dernier de la chaîne garde son délai long, pour qu'une réponse arrive
-    const timeoutMs = i < valid.length - 1 ? Math.min(def.timeoutMs, RELAY_TIMEOUT_MS) : def.timeoutMs;
+    // relais rapide seulement s'il reste un fournisseur rapide derrière (Groq) ; sinon le suivant est
+    // plus lent qu'un Gemini à la peine (cas réel : Nemotron 7-11 s), on patiente un peu plus
+    const fastBehind = valid.slice(i + 1).some((v) => v.provider === 'groq');
+    const relay = fastBehind ? RELAY_TIMEOUT_MS : SLOW_RELAY_TIMEOUT_MS;
+    const timeoutMs = i < valid.length - 1 ? Math.min(def.timeoutMs, relay) : def.timeoutMs;
     return {
       name: raw,
       model,

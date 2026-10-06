@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChain, FallbackChainClient, RELAY_TIMEOUT_MS, type ChainEntry } from '../src/decider/chain.js';
+import { buildChain, FallbackChainClient, RELAY_TIMEOUT_MS, SLOW_RELAY_TIMEOUT_MS, type ChainEntry } from '../src/decider/chain.js';
 import { LlmError, type LlmClient, type LlmRequest } from '../src/decider/llm.js';
 import { silentLogger } from './helpers.js';
 
@@ -102,4 +102,10 @@ it("un fournisseur lent passe la main après 4,5 s ; le dernier de la chaîne ga
   const chain = buildChain('gemini:gemini-3.5-flash-lite,gemini:gemini-flash-lite-latest,groq:openai/gpt-oss-120b', { GEMINI_API_KEY: 'k', GROQ_API_KEY: 'k' }, silentLogger)!;
   const timeouts = chain.entries.map((e) => (e.client as unknown as { opts: { timeoutMs: number } }).opts.timeoutMs);
   expect(timeouts).toEqual([RELAY_TIMEOUT_MS, RELAY_TIMEOUT_MS, 20_000]);
+});
+
+it("sans Groq derrière (chaîne de Léa), Gemini a 8 s avant le relais vers le secours lent (cas réel : Nemotron 7-11 s)", () => {
+  const chain = buildChain('gemini:gemini-3.5-flash-lite,gemini:gemini-flash-lite-latest,openrouter:nvidia/nemotron-3-super-120b-a12b:free', { GEMINI_API_KEY: 'k', OPENROUTER_API_KEY: 'k' }, silentLogger)!;
+  const timeouts = chain.entries.map((e) => (e.client as unknown as { opts: { timeoutMs: number } }).opts.timeoutMs);
+  expect(timeouts).toEqual([SLOW_RELAY_TIMEOUT_MS, SLOW_RELAY_TIMEOUT_MS, 30_000]);
 });
