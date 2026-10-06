@@ -97,3 +97,30 @@ describe("réglages protégés (cas réel : vitres cassées après un combat)", 
     expect((dig as unknown as { safeToBreak(b: unknown): boolean }).safeToBreak(glass)).toBe(false);
   });
 });
+
+describe("déplacements (évolution 7)", () => {
+  it("coincé : saute, puis abandonne le trajet après trois essais ; avancer remet à zéro", async () => {
+    const { StuckWatcher } = await import('../src/bot/movements.js');
+    const w = new StuckWatcher();
+    const still = { x: 0, y: 64, z: 0 };
+    const actions: string[] = [];
+    for (let i = 0; i < 20; i++) actions.push(w.step(true, still));
+    expect(actions.filter((a) => a === 'saut')).toHaveLength(3);
+    expect(actions).toContain('abandon');
+    const w2 = new StuckWatcher();
+    const moving = Array.from({ length: 10 }, (_, i) => w2.step(true, { x: i, y: 64, z: 0 }));
+    expect(moving.every((a) => a === 'rien')).toBe(true);
+    expect(new StuckWatcher().step(false, still)).toBe('rien');
+  });
+
+  it("échafaudage avec terre et pierres courantes, jamais dans la zone de la maison", async () => {
+    const { companionMovements } = await import('../src/bot/movements.js');
+    const mcData = (await import('minecraft-data')).default('1.21');
+    const bot = { registry: mcData, version: '1.21', world: { getBlock: () => null }, blockAt: () => null, entities: {} } as never;
+    const m = companionMovements(bot, { noScaffoldAt: (p) => p.x < 10 }) as unknown as { scafoldingBlocks: number[]; maxDropDown: number; exclusionPlace(b: unknown): number };
+    expect(m.scafoldingBlocks).toContain(mcData.itemsByName.cobbled_deepslate!.id);
+    expect(m.maxDropDown).toBe(3);
+    expect(m.exclusionPlace({ position: { x: 0, y: 64, z: 0 } })).toBe(100);
+    expect(m.exclusionPlace({ position: { x: 50, y: 64, z: 0 } })).toBe(0);
+  });
+});

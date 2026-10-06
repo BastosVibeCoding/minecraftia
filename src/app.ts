@@ -14,7 +14,7 @@ import { isAddressed, type UtteranceClassifier } from './feedback/classifier.js'
 import { FeedbackHandler } from './feedback/feedback.js';
 import { chatLines, runCommand } from './commands/commands.js';
 import { GapRecorder } from './gaps/gaps.js';
-import { companionMovements, installDoorOpener, isCompanionMovements } from './bot/movements.js';
+import { companionMovements, installDoorOpener, installStuckWatcher, isCompanionMovements } from './bot/movements.js';
 import { isBuildingBlock, PlacedBlocks } from './bot/placedBlocks.js';
 import { ResourceMemory } from './bot/resources.js';
 import { guessHome, HomeStore } from './bot/home.js';
@@ -261,7 +261,7 @@ export class Companion {
       craft: async (item, count, signal) => {
         await SKILLS.craft!.run(this.skillContextFor(bot), { item, count: Math.min(16, Math.max(1, Math.ceil(count / 4))) }, signal).catch(() => undefined);
       },
-      restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b) })),
+      restoreMovements: () => bot.pathfinder.setMovements(companionMovements(bot, { isProtected: (b) => this.isProtected(b), noScaffoldAt: (p) => this.home.inZone(p) })),
       speak: (text) => void this.speaker.speak(text),
     };
   }
@@ -474,21 +474,22 @@ export class Companion {
       if (!bot.collectBlock) bot.loadPlugin(collectBlockPlugin);
       if (!bot.pvp) bot.loadPlugin(pvpPlugin);
       const isProtected = (b: { name: string; position: { x: number; y: number; z: number } }) => this.isProtected(b);
-      bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
+      bot.pathfinder.setMovements(companionMovements(bot, { isProtected, noScaffoldAt: (p) => this.home.inZone(p) }));
+      installStuckWatcher(bot, () => this.logger.info('trajet abandonné : bloqué malgré trois sauts'));
       installDoorOpener(bot, () => this.clock.now());
       // recherche de chemin bornée : sans limite, un trajet avec droit de creuser vers un bloc enfoui
       // a fait gonfler la mémoire de Léa jusqu'à 4 Go (plantage « heap out of memory »)
       (bot.pathfinder as unknown as { searchRadius: number }).searchRadius = PATH_SEARCH_RADIUS;
       // collectblock et pvp imposent leurs réglages (creuser partout, vitres comprises) : on leur
       // donne les nôtres, protégés ; pvp n'a pas besoin de creuser pour suivre une cible
-      bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected });
-      (bot.pvp as unknown as { movements: unknown }).movements = companionMovements(bot, { isProtected });
+      bot.collectBlock.movements = companionMovements(bot, { canDig: true, isProtected, noScaffoldAt: (p) => this.home.inZone(p) });
+      (bot.pvp as unknown as { movements: unknown }).movements = companionMovements(bot, { isProtected, noScaffoldAt: (p) => this.home.inZone(p) });
       // garde : si un module remplace malgré tout nos réglages, on les remet (et on le note)
       const guard = setInterval(() => {
         const current = (bot.pathfinder as unknown as { movements?: unknown }).movements;
         if (current && !isCompanionMovements(current)) {
           this.logger.warn('réglages de déplacement remplacés par un module : blocs protégés rétablis');
-          bot.pathfinder.setMovements(companionMovements(bot, { isProtected }));
+          bot.pathfinder.setMovements(companionMovements(bot, { isProtected, noScaffoldAt: (p) => this.home.inZone(p) }));
         }
       }, MOVEMENTS_GUARD_MS);
       bot.once('end', () => clearInterval(guard));

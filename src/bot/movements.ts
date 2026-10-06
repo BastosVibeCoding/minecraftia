@@ -48,7 +48,12 @@ export interface MovementOptions {
   canDig?: boolean;
   /** Blocs à ne jamais casser (posés par un joueur, blocs de construction). */
   isProtected?: (b: { name: string; position: { x: number; y: number; z: number } }) => boolean;
+  /** Zone où ne jamais poser d'échafaudage (la maison). */
+  noScaffoldAt?: (p: { x: number; y: number; z: number }) => boolean;
 }
+
+/** Blocs courants qu'on peut poser pour monter d'un trou ou franchir un vide. */
+const SCAFFOLD = ['dirt', 'cobblestone', 'cobbled_deepslate', 'netherrack', 'andesite', 'diorite', 'granite', 'tuff', 'deepslate'];
 
 /**
  * Déplacements des bots : passage par les portes et portillons, l'eau évitée quand c'est possible,
@@ -68,6 +73,11 @@ export function companionMovements(bot: Bot, opts: MovementOptions = {}): Instan
   (m as unknown as { liquidCost: number }).liquidCost = LIQUID_COST;
   // chute de 4 blocs = dégâts ; 3 au plus (cas réel : « Alex fell from a high place »)
   m.maxDropDown = MAX_DROP;
+  // remonter d'un trou, franchir un vide : avec la terre ou la pierre qu'il porte, jamais à la maison
+  const scaffold = m as unknown as { scafoldingBlocks: number[]; exclusionAreasPlace: ((b: { position: { x: number; y: number; z: number } }) => number)[] };
+  scaffold.scafoldingBlocks = SCAFFOLD.map((n) => bot.registry.itemsByName[n]?.id).filter((id): id is number => id !== undefined);
+  const noScaffold = opts.noScaffoldAt;
+  if (noScaffold) scaffold.exclusionAreasPlace.push((b) => (noScaffold(b.position) ? 100 : 0));
   const getBlock = m.getBlock.bind(m);
   m.getBlock = (pos, dx, dy, dz) => {
     const b = getBlock(pos, dx, dy, dz) as unknown as PathBlock;
@@ -162,4 +172,61 @@ export function installDoorOpener(bot: Bot, now: () => number): void {
       // bloc illisible (chunk en cours de chargement) : on réessaiera au prochain passage
     }
   });
+}
+
+/** Blocage : déplacement de moins de STUCK_DISTANCE en STUCK_WINDOW s pendant un trajet. */
+const STUCK_WINDOW = 5;
+const STUCK_DISTANCE = 0.6;
+const STUCK_TRIES = 3;
+
+/**
+ * Surveille les trajets : un bot qui marche sans avancer (coincé contre un bloc, dans un trou)
+ * saute pour se dégager ; après trois essais, il abandonne le trajet plutôt que de rester bloqué.
+ */
+export class StuckWatcher {
+  private samples: Pos[] = [];
+  private tries = 0;
+
+  /** Appelé chaque seconde ; renvoie ce qui a été fait. */
+  step(moving: boolean, at: Pos): 'rien' | 'saut' | 'abandon' {
+    if (!moving) {
+      this.samples = [];
+      this.tries = 0;
+      return 'rien';
+    }
+    this.samples.push({ x: at.x, y: at.y, z: at.z });
+    if (this.samples.length > STUCK_WINDOW) this.samples.shift();
+    if (this.samples.length < STUCK_WINDOW) return 'rien';
+    const first = this.samples[0]!;
+    if (Math.hypot(at.x - first.x, at.y - first.y, at.z - first.z) >= STUCK_DISTANCE) {
+      this.tries = 0;
+      return 'rien';
+    }
+    this.samples = [];
+    this.tries++;
+    if (this.tries > STUCK_TRIES) {
+      this.tries = 0;
+      return 'abandon';
+    }
+    return 'saut';
+  }
+}
+
+/** Branche la surveillance des blocages sur le bot (une vérification par seconde). */
+export function installStuckWatcher(bot: Bot, onAbandon: () => void = () => {}): () => void {
+  const watcher = new StuckWatcher();
+  const timer = setInterval(() => {
+    const me = bot.entity?.position;
+    if (!me) return;
+    const action = watcher.step(bot.pathfinder?.isMoving() ?? false, me);
+    if (action === 'saut') {
+      bot.setControlState('jump', true);
+      setTimeout(() => bot.setControlState('jump', false), 400);
+    } else if (action === 'abandon') {
+      bot.pathfinder.setGoal(null);
+      onAbandon();
+    }
+  }, 1000);
+  bot.once('end', () => clearInterval(timer));
+  return () => clearInterval(timer);
 }
