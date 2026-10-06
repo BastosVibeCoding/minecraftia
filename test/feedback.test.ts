@@ -358,3 +358,9 @@ it("« Léa c'est écrit quoi sur la pancarte ? » : elle lit le panneau le plus
   await h.handle('B', "Léa c'est écrit quoi sur la pancarte ?", 'chat');
   expect(said).toEqual(['Le panneau dit : « Minerais ».']);
 });
+
+it("réponse emballée dans une liste JSON : seule la phrase est dite (cas réel : [ { \"response\": … } ])", () => {
+  expect(plainReply('[ { "response": "Si, je t\'entends très bien ! Je suis juste un peu concentrée sur la mine." } ]')).toBe("Si, je t'entends très bien ! Je suis juste un peu concentrée sur la mine.");
+  expect(plainReply('["Salut !"]')).toBe('Salut !');
+  expect(plainReply('{"reply": {"text": "Coucou"}}')).toBe('Coucou');
+});

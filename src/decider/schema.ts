@@ -47,6 +47,18 @@ function normalizeParams(params: Record<string, unknown>): Record<string, unknow
   return out;
 }
 
+/** Ramène à la limite permise les paramètres numériques trop grands ou trop petits. */
+function clampToBounds(params: Record<string, unknown>, issues: z.core.$ZodIssue[]): Record<string, unknown> {
+  const out = { ...params };
+  for (const issue of issues) {
+    const key = issue.path[0];
+    if (typeof key !== 'string' || typeof out[key] !== 'number') continue;
+    if (issue.code === 'too_big' && typeof issue.maximum === 'number') out[key] = issue.maximum;
+    if (issue.code === 'too_small' && typeof issue.minimum === 'number') out[key] = issue.minimum;
+  }
+  return out;
+}
+
 /** Extrait et valide la décision d'un texte de LLM ; renvoie une erreur lisible pour la nouvelle tentative. */
 export function parseDecision(text: string): { ok: true; decision: Decision } | { ok: false; error: string } {
   const start = text.indexOf('{');
@@ -62,7 +74,14 @@ export function parseDecision(text: string): { ok: true; decision: Decision } | 
   if (!parsed.success) return { ok: false, error: z.prettifyError(parsed.error) };
   const d = parsed.data;
   if (d.skill !== 'none') {
-    const params = SKILLS[d.skill]!.params.safeParse(normalizeParams(d.params));
+    const schema = SKILLS[d.skill]!.params;
+    let input = normalizeParams(d.params);
+    let params = schema.safeParse(input);
+    // nombre hors limites (cas réel : explore radius 80 > 64) : ramené à la limite plutôt qu'un nouvel appel
+    if (!params.success) {
+      input = clampToBounds(input, params.error.issues);
+      params = schema.safeParse(input);
+    }
     if (!params.success) return { ok: false, error: `paramètres de ${d.skill} : ${z.prettifyError(params.error)}` };
     d.params = params.data as Record<string, unknown>;
   }

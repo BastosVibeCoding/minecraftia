@@ -79,16 +79,30 @@ export function stripVocative(normalized: string, botName: string): string {
  * Texte de réponse à afficher : le modèle emballe parfois sa phrase en JSON (`{ "response": "…" }`)
  * ou dans un bloc de code (cas réel dans le chat) ; on n'en garde que la phrase.
  */
+/** Première chaîne de caractères trouvée dans une valeur JSON (en profondeur). */
+function firstString(v: unknown): string | null {
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) {
+    for (const x of v) {
+      const s = firstString(x);
+      if (s) return s;
+    }
+    return null;
+  }
+  if (v && typeof v === 'object') return firstString(Object.values(v));
+  return null;
+}
+
 export function plainReply(raw: string): string {
   let t = raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
-  if (t.startsWith('{')) {
+  // objet, liste, objet dans une liste (cas réel : [ { "response": "…" } ]) : la première phrase trouvée
+  if (t.startsWith('{') || t.startsWith('[')) {
     try {
-      const v = JSON.parse(t) as unknown;
-      const first = v && typeof v === 'object' ? Object.values(v).find((x) => typeof x === 'string') : undefined;
-      if (typeof first === 'string') t = first;
+      const first = firstString(JSON.parse(t) as unknown);
+      if (first) t = first;
     } catch {
       // JSON abîmé : on garde ce qui est entre les premiers guillemets de valeur
-      const m = /:\s*"([^"]+)"/.exec(t);
+      const m = /:\s*"([^"]+)"/.exec(t) ?? /\[\s*"([^"]+)"/.exec(t);
       if (m) t = m[1]!;
     }
   }

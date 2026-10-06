@@ -274,10 +274,12 @@ describe('routage des modèles', () => {
 });
 
 describe('validation des décisions', () => {
-  it('refuse une compétence inconnue et des paramètres hors bornes', () => {
+  it('refuse une compétence inconnue ; un paramètre hors bornes est ramené à la borne', () => {
     expect(parseDecision('{"skill":"teleport","params":{},"domain":"build","intent":"x"}').ok).toBe(false);
     const r = parseDecision('{"skill":"build","params":{"shape":"wall","material":"stone","width":500},"domain":"build","intent":"x"}');
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: true, decision: { params: { width: 16 } } });
+    // une forme inconnue reste refusée : seule une valeur numérique se ramène à sa borne
+    expect(parseDecision('{"skill":"build","params":{"shape":"tour_eiffel","material":"stone"},"domain":"build","intent":"x"}').ok).toBe(false);
   });
 
   it('tolère les écarts constatés au banc : dimensions décimales ou en texte, champ facultatif à null', () => {
@@ -285,7 +287,7 @@ describe('validation des décisions', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.decision.params).toMatchObject({ width: 7, height: 3, depth: 1 });
     // les bornes restent appliquées après arrondi
-    expect(parseDecision('{"skill":"build","params":{"shape":"wall","material":"stone","width":99.6},"domain":"build","intent":"x"}').ok).toBe(false);
+    expect(parseDecision('{"skill":"build","params":{"shape":"wall","material":"stone","width":99.6},"domain":"build","intent":"x"}')).toMatchObject({ ok: true, decision: { params: { width: 16 } } });
   });
 
   it('accepte du texte autour du JSON', () => {
@@ -342,4 +344,9 @@ describe("construction d'initiative (demande du joueur, 2026-10-05)", () => {
   it("sur ordre, elle construit toujours", () => {
     expect(applyGuards(floor, [], imitate, true, { oak_planks: 64 }, false).skill).toBe('build');
   });
+});
+
+it("paramètre hors limites ramené à la limite au lieu d'un nouvel appel (cas réel : explore radius 80)", () => {
+  const r = parseDecision(JSON.stringify({ skill: 'explore', params: { radius: 80 }, domain: 'explore', intent: 'explorer', basedOn: [], rationale: 'x' }));
+  expect(r).toMatchObject({ ok: true, decision: { params: { radius: 64 } } });
 });

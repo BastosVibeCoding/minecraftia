@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-06 | Léa, Alex | JSON dans le chat (`[ { "response": … } ]`) ; décision rejetée (explore radius > 64) | plainReply extrait la phrase de toute forme JSON (liste, objet imbriqué) ; paramètre numérique hors bornes ramené à la borne au lieu d'un nouvel appel. Configurations des mods vérifiées : valides |
 | 2026-10-05 | joueurs | que font les bots quand les humains se déconnectent ? | Son joueur absent 1 min : rentrer à la maison et ranger, puis se déconnecter ; déconnexion garantie à 5 min même si le retour échoue ; au démarrage, connexion seulement si son joueur est là ; reconnexion quand il revient (ping de la liste des joueurs). Chaque bot ne suit que son joueur |
 | 2026-10-05 | joueurs | le mot « maison » dans le chat ou à la voix déplaçait la maison | Désignation stricte : « ici c'est la maison », « c'est ici chez nous », « la maison est ici », « voici notre maison » (pas de question, pas de négation) |
 | 2026-10-05 | Alex | coffre à panneau « nourriture » : objets d'autres familles laissés dedans | Un coffre à panneau ne garde que sa famille : sans coffre de leur famille, les intrus vont au « divers », sinon au coffre sans panneau le plus libre |
@@ -73,4 +74,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : `88f8bfb` (2026-10-05, sur `!deploy`).
 
-(aucun)
+1. JSON : réponses en liste nettoyées, paramètres ramenés aux bornes
