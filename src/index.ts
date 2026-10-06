@@ -13,6 +13,7 @@ import { BehaviorTree } from './tree/tree.js';
 import { Autonomy } from './autonomy/autonomy.js';
 import { ProposalBroker } from './autonomy/proposals.js';
 import { UtteranceClassifier } from './feedback/classifier.js';
+import { ConsignesStore } from './feedback/consignes.js';
 import { Budget } from './decider/budget.js';
 import { DecisionCache } from './decider/cache.js';
 import { Decider } from './decider/decider.js';
@@ -72,12 +73,14 @@ async function main(): Promise<void> {
   const autonomy = new Autonomy(store);
   const proposals = new ProposalBroker(systemClock);
   const persona = { name: config.minecraft.username, gender: config.gender };
-  const decider = new Decider({ tree, llm, budget, cache, router, strategy, persona, buildInitiative: config.buildInitiative, autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
+  const consignes = new ConsignesStore(store.db, systemClock);
+  const decider = new Decider({ tree, llm, budget, cache, router, strategy, persona, buildInitiative: config.buildInitiative, consignes: () => consignes.texts(), autonomy: () => autonomy.all(), clock: systemClock, logger: logger.child({ module: 'décideur' }) });
 
   const companion = new Companion(config, logger, systemClock, mineflayer.createBot, {
     tree, playClock, decider, cache, router, autonomy, proposals,
     classifier: new UtteranceClassifier(llm, budget, config.openrouter.modelFast, config.minecraft.username, config.gender),
     budget,
+    consignes,
   });
   companion.start();
   logger.info({ follow: config.followPlayer, server: `${config.minecraft.host}:${config.minecraft.port}` }, `${config.minecraft.username} démarre`);

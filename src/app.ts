@@ -18,6 +18,7 @@ import { companionMovements, installDoorOpener, isCompanionMovements } from './b
 import { isBuildingBlock, PlacedBlocks } from './bot/placedBlocks.js';
 import { ResourceMemory } from './bot/resources.js';
 import { guessHome, HomeStore } from './bot/home.js';
+import type { ConsignesStore } from './feedback/consignes.js';
 import { ChestRoles } from './bot/chestRoles.js';
 import { playerEntity } from './bot/mineflayerTypes.js';
 import { SKILLS, toAction, type SkillContext } from './skills/library.js';
@@ -83,6 +84,8 @@ export interface CompanionDeps {
   proposals: ProposalBroker;
   classifier: UtteranceClassifier;
   budget: Budget;
+  /** Consignes durables du joueur (facultatif : sans elles, rien n'est retenu). */
+  consignes?: ConsignesStore;
 }
 
 /** Assemble les modules. Une nouvelle session est créée à chaque (re)connexion. */
@@ -187,6 +190,7 @@ export class Companion {
       gaps: this.gaps,
       botName: config.minecraft.username,
       setHomeHere: () => this.setHomeHere(),
+      ...(deps.consignes ? { consignes: deps.consignes } : {}),
       inventory: () => (this.session ? snapshotOf(this.session.bot, 0).inventory : null),
       lastGained: () => this.session?.loop.lastGained() ?? null,
       status: () => (this.session ? { health: this.session.bot.health, food: this.session.bot.food } : null),
@@ -424,7 +428,7 @@ export class Companion {
         return;
       }
       const { tree, autonomy, decider, budget, cache } = this.deps;
-      const answer = await runCommand(text, { tree, autonomy, decider, budget, cache, gaps: this.gaps });
+      const answer = await runCommand(text, { tree, autonomy, decider, budget, cache, gaps: this.gaps, ...(this.deps.consignes ? { consignes: this.deps.consignes } : {}) });
       if (answer) for (const line of chatLines(answer)) this.session?.bot.chat(line);
     } catch (err) {
       this.logger.error({ err, text }, 'commande en erreur');

@@ -12,6 +12,7 @@ import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { classifyByRules, isAddressed, withoutVocative, type Classification, type UtteranceClassifier } from './classifier.js';
 import { isHomeDesignation } from '../bot/home.js';
+import { isStandingInstruction, type ConsignesStore } from './consignes.js';
 import { answerInventoryQuestion, answerProgressQuestion, answerStatusQuestion, answerWhereQuestion, isQuestion, isBareGive, mentionedItems, mentionsAnItem } from './questions.js';
 import { clarifyingQuestion } from './clarify.js';
 
@@ -40,6 +41,8 @@ export interface FeedbackDeps {
   lastGained?: () => { item: string; at: number } | null;
   /** Vie et faim du bot, pour « t'as faim ? », « ça va ? ». */
   status?: () => { health: number; food: number } | null;
+  /** Consignes durables du joueur (« retiens que… », « à l'avenir… »). */
+  consignes?: ConsignesStore;
   /** Désigne la maison là où est le joueur ; renvoie la phrase de confirmation. */
   setHomeHere?: () => string;
   /** Textes des panneaux proches, du plus proche au plus loin (« c'est écrit quoi sur la pancarte ? »). */
@@ -48,6 +51,14 @@ export interface FeedbackDeps {
   where?: () => { x: number; y: number; z: number; toPlayer: number | null; toHome: number | null } | null;
   /** Action en cours et résultat de la dernière, pour « t'as fini ? ». */
   progress?: () => { current: string | null; lastOutcome: string | null };
+}
+
+/** Retire l'interpellation (« Alex, … ») en gardant la casse et les accents du texte d'origine. */
+function withoutVocativeKeepCase(text: string, botName: string): string {
+  const plain = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const m = /^\s*(?:(?:h[ée]+|hey|dis|ok)[\s,!]+)?([^\s,!:.]+)[\s,!:.]*/.exec(text);
+  if (m && plain(m[1]!) === plain(botName)) return text.slice(m[0].length).trim() || text.trim();
+  return text.trim();
 }
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
@@ -92,6 +103,13 @@ export class FeedbackHandler {
 
   async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
     const d = this.deps;
+    // consigne durable (« retiens que… », « je n'aime pas que tu… ») : retenue pour toutes les décisions
+    if (d.consignes && isStandingInstruction(text)) {
+      d.consignes.add(d.botName ? withoutVocativeKeepCase(text, d.botName) : text);
+      d.cache.clear();
+      d.say("C'est noté, je m'en souviendrai.");
+      return { label: 'teaching', confidence: 0.9, classifier: 'rules' };
+    }
     // « ici c'est la maison » : le joueur désigne la maison
     if (d.setHomeHere && isHomeDesignation(text)) {
       this.pendingHome = null;

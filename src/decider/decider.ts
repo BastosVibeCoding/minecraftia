@@ -39,6 +39,8 @@ export interface DeciderDeps {
   maxTokens?: number;
   /** Nom et genre du personnage (par défaut : Alex, au féminin). */
   persona?: Persona;
+  /** Consignes durables du joueur, données au modèle à chaque décision. */
+  consignes?: () => string[];
   /** Autoriser les constructions d'initiative (sinon seulement sur ordre). Par défaut : oui. */
   buildInitiative?: boolean;
 }
@@ -125,7 +127,9 @@ export class Decider {
     const bands = Object.fromEntries(Object.entries(autonomy).map(([d, a]) => [d, a.band]));
 
     const branches = strategy.transform(await tree.search(situationText, { k: 6 })).filter((b) => b.mechanisms.length > 0 || b.avoid.length > 0);
-    const hash = situationHash(world, branches.map((b) => b.situationId), bands) + (order ? `:${order}` : '');
+    const consignes = this.deps.consignes?.() ?? [];
+    // une consigne ajoutée ou retirée change la bonne décision : elle fait partie de la clé du cache
+    const hash = situationHash(world, branches.map((b) => b.situationId), bands) + (order ? `:${order}` : '') + (consignes.length ? `:c${consignes.join('|').length}-${consignes.length}` : '');
 
     const usable = branches.filter((b) => autonomy[b.domain]?.band !== 'observe' && b.mechanisms.length > 0);
     // un ordre du joueur passe toujours par le LLM (il peut viser une compétence sans branche apprise)
@@ -150,7 +154,7 @@ export class Decider {
     if (cached) return this.save(trigger, cached, 'cache', null, hash, situationText, branches);
     if (!this.deps.llm) return this.save(trigger, fallbackDecision('aucun LLM configuré'), 'fallback', null, hash, situationText, branches);
 
-    const ctx: DecisionContext = { trigger, world, autonomy, branches, lastOutcome, ...(order ? { order } : {}) };
+    const ctx: DecisionContext = { trigger, world, autonomy, branches, lastOutcome, ...(order ? { order } : {}), ...(consignes.length ? { consignes } : {}) };
     const { model } = router.pick('decide', hash);
     let error: string | undefined;
     // modèle qui a réellement répondu (une chaîne de fournisseurs peut remplacer le modèle demandé)

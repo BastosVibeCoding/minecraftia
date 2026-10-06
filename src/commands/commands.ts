@@ -6,6 +6,7 @@ import type { Decider } from '../decider/decider.js';
 import type { BehaviorTree } from '../tree/tree.js';
 import type { GapRecorder } from '../gaps/gaps.js';
 import { sanitizeChat } from '../bot/chat.js';
+import type { ConsignesStore } from '../feedback/consignes.js';
 
 const DOMAIN_FR: Record<Domain, string> = {
   build: 'construction',
@@ -25,6 +26,7 @@ export interface CommandDeps {
   budget: Budget;
   cache: DecisionCache;
   gaps?: GapRecorder;
+  consignes?: ConsignesStore;
 }
 
 /** Une ligne de chat Minecraft fait au plus 256 caractères : on découpe proprement. */
@@ -54,7 +56,7 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
   const arg = rest.join(' ');
   switch (name?.toLowerCase()) {
     case '!aide':
-      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget, !manques (ce que je ne sais pas encore faire), !maison (ici c\'est la maison ; !maison ? ; !maison oublie).';
+      return 'Commandes : !arbre (ce que j\'ai appris), !autonomie (ma confiance par domaine), !pourquoi (ma dernière décision), !oublie <chose>, !budget, !manques (ce que je ne sais pas encore faire), !maison (ici c\'est la maison ; !maison ? ; !maison oublie), !consignes (ce que tu m\'as demandé de retenir ; !oublie consigne <n>).';
 
     case '!arbre': {
       const profile = d.tree.profile();
@@ -90,8 +92,21 @@ export async function runCommand(input: string, d: CommandDeps): Promise<string 
         .join('\n');
     }
 
+    case '!consignes': {
+      const list = d.consignes?.texts() ?? [];
+      if (list.length === 0) return "Tu ne m'as donné aucune consigne à retenir. Dis par exemple « retiens que… » ou « à l'avenir… ».";
+      return ['Tes consignes :', ...list.map((t, i) => `${i + 1}. ${short(t, 90)}`)].join('\n');
+    }
+
     case '!oublie': {
       if (!arg) return 'Dis-moi quoi oublier : !oublie <chose>';
+      // « !oublie consigne 2 » : retire une consigne plutôt qu'un comportement appris
+      const c = /^consignes?\s+(\d+)$/i.exec(arg);
+      if (c && d.consignes) {
+        const removed = d.consignes.remove(Number(c[1]));
+        if (removed) d.cache.clear();
+        return removed ? `J'oublie la consigne : « ${short(removed, 80)} ».` : `Il n'y a pas de consigne n° ${c[1]}.`;
+      }
       const forgotten = await d.tree.forget(arg);
       if (forgotten.length === 0) return `Je ne trouve rien qui ressemble à « ${arg} ».`;
       d.cache.clear();

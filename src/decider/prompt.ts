@@ -15,6 +15,8 @@ export interface DecisionContext {
   lastOutcome: string | null;
   /** Ordre explicite du joueur, prioritaire sur l'imitation et sur la bande d'autonomie. */
   order?: string;
+  /** Consignes durables du joueur (« range toujours le fer à droite », « je n'aime pas que tu… »). */
+  consignes?: string[];
 }
 
 export interface Persona {
@@ -37,6 +39,7 @@ Règles :
 - Respecte la bande d'autonomie du domaine choisi : observe = seulement "follow" ; imitate = reproduire directement, sans demander, ce que le joueur fait ou vient de faire (needsApproval: false) ; propose = proposer d'abord (needsApproval: true, "say" formule la proposition) ; act = initiative permise sans demander.
 - N'utilise que les compétences du catalogue, avec leurs paramètres. Vérifie l'inventaire : sans matériaux, récolte d'abord ou suis le joueur.
 - Si "order" est présent, le joueur te demande quelque chose : exécute-le avec la compétence adaptée (même en bande observe), en reprenant ses préférences apprises si elles s'appliquent.
+- Si "consignes" est présent, ce sont des préférences durables du joueur : respecte-les toujours, elles l'emportent sur tes habitudes apprises.
 - Si rien de pertinent, choisis "follow".
 - "say" est facultatif, court, en français, tutoiement.
 
@@ -62,6 +65,7 @@ export function userPrompt(ctx: DecisionContext, previousError?: string): string
     })),
     lastOutcome: ctx.lastOutcome,
     ...(ctx.order ? { order: ctx.order } : {}),
+    ...(ctx.consignes?.length ? { consignes: ctx.consignes } : {}),
   };
   const retry = previousError ? `\n\nTa réponse précédente était invalide (${previousError}). Corrige-la et renvoie uniquement le JSON.` : '';
   return `${CONTEXT_MARK}${JSON.stringify(payload)}\n\nDécide maintenant.${retry}`;

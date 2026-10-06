@@ -364,3 +364,19 @@ it("réponse emballée dans une liste JSON : seule la phrase est dite (cas réel
   expect(plainReply('["Salut !"]')).toBe('Salut !');
   expect(plainReply('{"reply": {"text": "Coucou"}}')).toBe('Coucou');
 });
+
+it("« Alex, retiens que le fer va à droite » : consigne retenue sans l'interpellation, confirmée (évolution 6)", async () => {
+  const { ConsignesStore } = await import('../src/feedback/consignes.js');
+  const clock = new ManualClock(0);
+  const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+  const consignes = new ConsignesStore(store.db, clock);
+  const said: string[] = [];
+  const h = new FeedbackHandler({
+    classifier: new UtteranceClassifier(null, null, 'fast', 'Alex'), tree: new BehaviorTree(store, { playTime: () => 0 }), autonomy: new Autonomy(store),
+    cache: new DecisionCache(store.db, clock), proposals: new ProposalBroker(clock), observer: new Observer('B', () => {}), store, clock, logger: silentLogger,
+    loop: () => null, actions: () => null, lastDecision: () => null, lastDecisionAt: () => 0, say: (t) => said.push(t), botName: 'Alex', consignes,
+  });
+  await h.handle('B', 'Alex, retiens que le fer va dans le coffre de droite', 'voice');
+  expect(consignes.texts()).toEqual(['retiens que le fer va dans le coffre de droite']);
+  expect(said).toEqual(["C'est noté, je m'en souviendrai."]);
+});
