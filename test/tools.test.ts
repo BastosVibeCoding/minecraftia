@@ -1,4 +1,5 @@
 import type { Bot } from 'mineflayer';
+import { smeltFor } from '../src/skills/extra.js';
 import { describe, expect, it } from 'vitest';
 import { isBuildingBlock } from '../src/bot/placedBlocks.js';
 import { clarifyingQuestion } from '../src/feedback/clarify.js';
@@ -267,4 +268,56 @@ describe("fabriquer avec des ingrédients pris dans les coffres (manques réels 
 it("« Léa, t'es où ? » : position, distance au joueur et à la maison", () => {
   expect(answerWhereQuestion("Léa t'es où ?", { x: -283.4, y: 64, z: 91.6, toPlayer: 37.2, toHome: 120 })).toBe('Je suis en -283 64 92, à 37 blocs de toi, à 120 blocs de la maison.');
   expect(answerWhereQuestion('tu es où', { x: 0, y: 64, z: 0, toPlayer: 2, toHome: 3 })).toBe('Je suis en 0 64 0, juste à côté de toi, à la maison.');
+});
+
+describe("fonte automatique (évolution 2)", () => {
+  it("il faut des lingots de fer : il fait cuire le fer brut des coffres, puis s'arrête au nombre voulu", async () => {
+    const mcData = (await import('minecraft-data')).default('1.21');
+    const inv: { name: string; count: number; type: number }[] = [{ name: 'coal', count: 4, type: mcData.itemsByName.coal!.id }];
+    const chest = [{ name: 'raw_iron', count: 5, type: mcData.itemsByName.raw_iron!.id }];
+    const putInputs: number[] = [];
+    const bot = {
+      registry: mcData,
+      inventory: { items: () => inv.filter((i) => i.count > 0) },
+      entity: { position: vec(0, 64, 0) },
+      findBlocks: () => [vec(3, 64, 0)],
+      findBlock: () => ({ name: 'furnace', position: vec(2, 64, 0) }),
+      blockAt: (p: unknown) => ({ name: 'chest', position: p }),
+      pathfinder: { goto: async () => {}, setGoal: () => {} },
+      openContainer: async () => ({
+        containerItems: () => chest.filter((i) => i.count > 0),
+        count: (type: number) => inv.filter((i) => i.type === type).reduce((s, i) => s + i.count, 0),
+        withdraw: async (_t: number, _m: null, n: number) => {
+          chest[0]!.count -= n;
+          inv.push({ name: 'raw_iron', count: n, type: chest[0]!.type });
+        },
+        close: () => {},
+      }),
+      openFurnace: async () => {
+        let cooked = 0;
+        return {
+          outputItem: () => (cooked > 0 ? { name: 'iron_ingot', count: cooked } : null),
+          inputItem: () => null,
+          fuelItem: () => null,
+          takeOutput: async () => {
+            const n = cooked;
+            cooked = 0;
+            inv.push({ name: 'iron_ingot', count: n, type: mcData.itemsByName.iron_ingot!.id });
+            return { count: n };
+          },
+          putFuel: async () => {},
+          putInput: async (_t: number, _m: null, n: number) => {
+            putInputs.push(n);
+            inv.find((i) => i.name === 'raw_iron')!.count -= n;
+            cooked = n;
+          },
+          close: () => {},
+        };
+      },
+    } as unknown as Bot;
+    const got = await smeltFor({ bot, followPlayer: 'B' }, 'iron_ingot', 3, new AbortController().signal);
+    expect(got).toBe(3);
+    expect(putInputs).toEqual([3]);
+    expect(chest[0]!.count).toBe(2);
+  });
 });

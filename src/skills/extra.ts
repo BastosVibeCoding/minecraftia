@@ -208,6 +208,41 @@ export const smelt = {
   },
 };
 
+/** Ce qui se fabrique au four : objet obtenu → objets à cuire possibles. */
+export const SMELT_SOURCE: Record<string, string[]> = {
+  iron_ingot: ['raw_iron'],
+  gold_ingot: ['raw_gold'],
+  copper_ingot: ['raw_copper'],
+  glass: ['sand', 'red_sand'],
+  stone: ['cobblestone'],
+  smooth_stone: ['stone'],
+  brick: ['clay_ball'],
+  charcoal: ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'cherry_log', 'mangrove_log'],
+  cooked_beef: ['beef'],
+  cooked_porkchop: ['porkchop'],
+  cooked_chicken: ['chicken'],
+  cooked_mutton: ['mutton'],
+  cooked_cod: ['cod'],
+  cooked_salmon: ['salmon'],
+  baked_potato: ['potato'],
+};
+
+/**
+ * Obtenir `count` objets cuits (lingots, verre…) en faisant cuire ce qu'il faut, pris sur soi ou dans
+ * les coffres (cas d'usage : pioche en fer avec seulement du fer brut). Renvoie le nombre obtenu.
+ */
+export async function smeltFor(ctx: SkillContext, output: string, count: number, signal: AbortSignal): Promise<number> {
+  const { bot } = ctx;
+  const sources = SMELT_SOURCE[output];
+  if (!sources || count <= 0) return 0;
+  const before = countItem(bot, output);
+  let input = sources.find((s) => countItem(bot, s) > 0);
+  if (!input && (await withdrawFromChests(bot, (n) => sources.includes(n), count, signal)) > 0) input = sources.find((s) => countItem(bot, s) > 0);
+  if (!input || signal.aborted) return 0;
+  await smelt.run(ctx, { item: input, count: Math.min(count, 16) }, signal).catch(() => null);
+  return countItem(bot, output) - before;
+}
+
 /** Outils, armes, armure et torches : le bot les garde (ni rangés, ni donnés sans le demander). */
 export const isEquipment = (name: string) => /_(sword|axe|pickaxe|shovel|hoe|helmet|chestplate|leggings|boots)$|^(shield|bow|crossbow|torch)$/.test(name);
 

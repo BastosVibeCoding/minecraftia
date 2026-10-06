@@ -59,7 +59,7 @@ export const staircase = {
     const { bot } = ctx;
     const startY = Math.floor(bot.entity.position.y);
     if (startY <= p.targetY) return { status: 'failure', detail: { reason: `déjà à y=${startY}, l'escalier ne fait que descendre`, precondition: true } };
-    const tool = await ensureHarvestTool(bot, 'stone', signal).catch(() => ({ ok: true as const }));
+    const tool = await ensureHarvestTool(bot, 'stone', signal, ctx).catch(() => ({ ok: true as const }));
     if (!tool.ok) {
       ctx.speak?.(tool.ask);
       return { status: 'failure', detail: { reason: tool.ask, precondition: true } };

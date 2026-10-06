@@ -11,7 +11,7 @@ import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import { canSee } from '../bot/sight.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
-import { EXTRA_SKILLS, placeNearby, withdrawFromChests } from './extra.js';
+import { EXTRA_SKILLS, placeNearby, SMELT_SOURCE, smeltFor, withdrawFromChests } from './extra.js';
 import { staircase } from './staircase.js';
 import { companionMovements } from '../bot/movements.js';
 import { isBuildingBlock } from '../bot/placedBlocks.js';
@@ -229,7 +229,7 @@ const collect = {
         }
         // outil adapté avant chaque bloc (hache cassée en pleine récolte, pioche trop faible pour le
         // minerai) : inventaire, fabrication, coffres proches ; sinon on le demande au joueur
-        const tool = await ensureHarvestTool(bot, target.name, signal).catch(() => ({ ok: true as const }));
+        const tool = await ensureHarvestTool(bot, target.name, signal, ctx).catch(() => ({ ok: true as const }));
         if (!tool.ok) {
           ctx.speak?.(tool.ask);
           if (gained() > 0) break;
@@ -405,7 +405,7 @@ const craft = {
   domain: 'craft' as Domain,
   description: "craft {item: nom d'objet, count: 1-16} — fabriquer (ingrédients pris dans les coffres proches si besoin, planches et bâtons faits au besoin, établi posé si nécessaire)",
   params: z.object({ item: z.string().min(1), count: z.number().int().min(1).max(16).default(1) }),
-  timeoutMs: () => 90_000,
+  timeoutMs: () => 240_000, // cuisson au four comprise
   async run(ctx: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
     const item = bot.registry.itemsByName[p.item];
@@ -428,6 +428,8 @@ const craft = {
         missing -= await withdrawFromChests(bot, (n) => n === need.name, missing, signal);
         // planches et bâtons se fabriquent sur place à partir du bois
         if (missing > 0 && (need.name.endsWith('_planks') || need.name === 'stick')) await craftBasic(bot, need.name, missing, signal);
+        // lingots, verre… : on fait cuire ce qu'il faut (fer brut, sable…) pris sur soi ou dans les coffres
+        if (missing > 0 && SMELT_SOURCE[need.name]) missing -= await smeltFor(ctx, need.name, missing, signal);
       }
       if (chosen.requiresTable && !table) table = await ensureCraftingTable(bot, signal);
       recipe = bot.recipesFor(item.id, null, 1, table)[0];

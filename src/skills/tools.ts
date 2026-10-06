@@ -1,5 +1,6 @@
 import type { Bot } from 'mineflayer';
-import { countItem, goNear, placeNearby } from './extra.js';
+import { countItem, goNear, placeNearby, smeltFor } from './extra.js';
+import type { SkillContext } from './library.js';
 
 export type ToolKind = 'axe' | 'pickaxe' | 'shovel' | 'hoe';
 
@@ -141,7 +142,7 @@ function toolPlanFor(bot: Bot, kind: ToolKind, allowed: string[] | null): 'have'
  * si besoin), sinon pris dans un coffre proche puis fabriqué. Renvoie `{ ok: false, ask }` quand il
  * faut le demander au joueur ; `{ ok: true }` aussi quand la main suffit et qu'aucun outil n'est possible.
  */
-export async function ensureHarvestTool(bot: Bot, block: string, signal: AbortSignal): Promise<{ ok: true; crafted?: string } | { ok: false; ask: string }> {
+export async function ensureHarvestTool(bot: Bot, block: string, signal: AbortSignal, smelter?: SkillContext): Promise<{ ok: true; crafted?: string } | { ok: false; ask: string }> {
   const kind = toolFor(block);
   const allowed = requiredTools(bot, block);
   if (!kind) return { ok: true };
@@ -156,6 +157,13 @@ export async function ensureHarvestTool(bot: Bot, block: string, signal: AbortSi
     await fetchFromChests(bot, kind, allowed, signal);
     plan = toolPlan(inventoryOf(bot), kind, allowed, Boolean(tableBlock()));
     if ('have' in plan) return { ok: true };
+    // pas de lingots mais du minerai brut (sur soi ou dans les coffres) : on le fait cuire d'abord
+    if ('missing' in plan && smelter && allowed?.some((t) => t.startsWith('iron_'))) {
+      const head = HEAD[kind];
+      await smeltFor(smelter, 'iron_ingot', head - countItem(bot, 'iron_ingot'), signal);
+      plan = toolPlan(inventoryOf(bot), kind, allowed, Boolean(tableBlock()));
+      if ('have' in plan) return { ok: true };
+    }
     // la main suffit (bûches, terre) : on continue sans outil, sans déranger le joueur
     if ('missing' in plan) return allowed === null ? { ok: true } : { ok: false, ask: askForTool(block, plan.missing) };
   }
