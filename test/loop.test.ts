@@ -5,7 +5,7 @@ import { DOMAINS } from '../src/core/types.js';
 import { Budget } from '../src/decider/budget.js';
 import { DecisionCache } from '../src/decider/cache.js';
 import { Decider } from '../src/decider/decider.js';
-import { DecisionLoop, isRecallOrder } from '../src/decider/loop.js';
+import { DecisionLoop, isRecallOrder, isStayOrder } from '../src/decider/loop.js';
 import { splitOrder } from '../src/decider/orders.js';
 import { ModelRouter } from '../src/decider/router.js';
 import type { Episode } from '../src/observer/types.js';
@@ -184,5 +184,23 @@ describe("ordre raté : le bot explique pourquoi (cas réel : « Alex, dors » e
     loop.order('donne ton sable');
     await flush();
     expect(said.at(-1)).toBe("Je n'y arrive pas : pas de sand dans l'inventaire.");
+  });
+});
+
+describe("rappels et « reste là » (manques réels de Léa, 6 octobre)", () => {
+  it("« Léa vient » et « Viens, je te donne du fer » sont des rappels ; « reste là » n'en est pas un", () => {
+    expect(isRecallOrder('Léa vient')).toBe(true);
+    expect(isRecallOrder('Viens, je te donne du fer.')).toBe(true);
+    expect(isRecallOrder('Non, non, reste là.')).toBe(false);
+    expect(isStayOrder('Non, non, reste là.')).toBe(true);
+    expect(isStayOrder('ne bouge plus')).toBe(true);
+    expect(isStayOrder('viens ici')).toBe(false);
+  });
+
+  it("« reste là » : il reste sur place, sans appel au modèle", async () => {
+    const { stub, loop } = await setup();
+    loop.order('Non, non, reste là.');
+    await flush();
+    expect(stub.calls.length).toBe(0);
   });
 });

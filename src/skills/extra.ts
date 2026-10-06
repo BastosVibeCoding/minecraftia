@@ -764,4 +764,19 @@ export const recoverItems = {
   },
 };
 
-export const EXTRA_SKILLS = [recoverItems, harvestCrops, plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];
+/** Rester sur place (« reste là », « ne bouge pas ») au lieu de suivre le joueur. */
+export const stay = {
+  name: 'stay',
+  domain: 'explore' as Domain,
+  description: 'stay {seconds?: 5-600} — rester sur place sans suivre le joueur (« reste là », « ne bouge pas »)',
+  params: z.object({ seconds: z.number().int().min(5).max(600).default(120) }),
+  timeoutMs: (p: { seconds: number }) => p.seconds * 1000 + 5_000,
+  async run({ bot }: SkillContext, p: { seconds: number }, signal: AbortSignal): Promise<ActionRunOutput> {
+    bot.pathfinder.setGoal(null);
+    bot.clearControlStates();
+    await abortableSleep(p.seconds * 1000, signal).catch(() => undefined);
+    return { status: 'success', detail: { seconds: p.seconds } };
+  },
+};
+
+export const EXTRA_SKILLS = [stay, recoverItems, harvestCrops, plant, smelt, furnaceTake, store, retrieve, torch, sleep, give, place, pickup, goHome];

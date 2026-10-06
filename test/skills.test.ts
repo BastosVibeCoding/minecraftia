@@ -60,6 +60,7 @@ describe('bibliothèque de compétences', () => {
         harvest_crops: {},
         bring: { item: 'oak_planks' },
         recover_items: {},
+        stay: {},
       };
       const params = s.params.parse(examples[s.name] ?? {});
       expect(s.timeoutMs(params)).toBeGreaterThan(0);

@@ -42,7 +42,9 @@ const RESUME_ORDER_MS = 30_000;
 const normOrder = (t: string) =>
   t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-const RECALL = /\b(arrete|stop|stoppe|halte|attends|viens|reviens|rejoins moi|suis moi|ici)\b/;
+const RECALL = /\b(arrete|stop|stoppe|halte|attends|viens|vient|reviens|revient|rejoins moi|suis moi|ici)\b/;
+/** « reste là », « ne bouge pas » : rester sur place, sans suivre. */
+const STAY = /\b(reste (la|ici|sur place|la ou tu es)|ne bouge (pas|plus)|bouge pas|attends[- ]moi (la|ici)|stay)\b/;
 /** Verbes d'action : « viens m'aider à couper du bois » n'est pas un simple rappel. */
 const ACTION = /\b(construi\w*|bati\w*|pose\w*|min\w*|creus\w*|coup\w*|recolt\w*|ramass\w*|attaqu\w*|tue\w*|fabriqu\w*|craft\w*|mang\w*|explor\w*|donn\w*|equip\w*|apport\w*|ramen\w*|aid\w*|cherch\w*|plant\w*|cuis\w*|rang\w*|dor\w*)\b/;
 
@@ -53,8 +55,14 @@ const ACTION = /\b(construi\w*|bati\w*|pose\w*|min\w*|creus\w*|coup\w*|recolt\w*
  */
 export function isRecallOrder(text: string): boolean {
   const t = normOrder(text);
-  if (!RECALL.test(t)) return false;
-  return !ACTION.test(t.replace(/\b(arrete|stop|stoppe) (de |du |d')?\w+/g, ' '));
+  if (!RECALL.test(t) || STAY.test(t)) return false;
+  // « arrête de creuser » et « je te donne du fer » (c'est le joueur qui donne) ne sont pas des demandes d'action
+  return !ACTION.test(t.replace(/\b(arrete|stop|stoppe) (de |du |d')?\w+/g, ' ').replace(/\bje (te|vous) \w+/g, ' '));
+}
+
+/** Ordre de rester sur place (« non, reste là », « ne bouge pas ») : exécuté directement, sans modèle. */
+export function isStayOrder(text: string): boolean {
+  return STAY.test(normOrder(text));
 }
 
 /**
@@ -114,6 +122,15 @@ export class DecisionLoop {
     }
     this.interruptedOrder = null;
     this.deps.actions.abort('ordre du joueur');
+    if (isStayOrder(text)) {
+      this.nextSteps = null;
+      this.pending = null;
+      this.recalledAt = this.deps.clock.now();
+      this.lastDecisionAt = this.deps.clock.now();
+      this.deps.logger.info({ order: text }, 'ordre de rester sur place');
+      void this.execute(null, 'stay', { seconds: 120 });
+      return;
+    }
     if (isRecallOrder(text)) {
       this.nextSteps = null;
       this.pending = null;
