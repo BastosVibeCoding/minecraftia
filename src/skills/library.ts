@@ -11,7 +11,7 @@ import { isHostile, playerEntity } from '../bot/mineflayerTypes.js';
 import { canSee } from '../bot/sight.js';
 import type { Action, ActionRunOutput } from './actionController.js';
 import { blueprint, type BlueprintSpec } from './blueprint.js';
-import { CROPS, EXTRA_SKILLS, harvestCrops, placeNearby, SMELT_SOURCE, smeltFor, withdrawFromChests } from './extra.js';
+import { CROPS, EXTRA_SKILLS, harvestCrops, placeNearby, SMELT_SOURCE, smeltFor, takeFromFurnaces, withdrawFromChests } from './extra.js';
 import { staircase } from './staircase.js';
 import { companionMovements } from '../bot/movements.js';
 import { isBuildingBlock } from '../bot/placedBlocks.js';
@@ -437,6 +437,8 @@ const craft = {
         let missing = need.count - countItem(bot, need.name);
         if (missing <= 0) continue;
         missing -= await withdrawFromChests(bot, (n) => n === need.name, missing, signal);
+        // déjà cuit dans un four (lingots, verre…) : avant de faire cuire ou de le demander
+        if (missing > 0 && SMELT_SOURCE[need.name]) missing -= await takeFromFurnaces(bot, (n) => n === need.name, signal);
         // planches et bâtons se fabriquent sur place à partir du bois
         if (missing > 0 && (need.name.endsWith('_planks') || need.name === 'stick')) await craftBasic(bot, need.name, missing, signal);
         // lingots, verre… : on fait cuire ce qu'il faut (fer brut, sable…) pris sur soi ou dans les coffres
@@ -536,10 +538,16 @@ const eat = {
 };
 
 const ARMOR_SLOT: Record<string, 'head' | 'torso' | 'legs' | 'feet'> = { helmet: 'head', chestplate: 'torso', leggings: 'legs', boots: 'feet' };
+/** Mots français pour un type d'objet à tenir ou porter. */
+const EQUIP_WORDS: Record<string, string> = {
+  epee: 'sword', 'épée': 'sword', pioche: 'pickaxe', hache: 'axe', pelle: 'shovel', houe: 'hoe', bouclier: 'shield', arc: 'bow', arbalete: 'crossbow', 'arbalète': 'crossbow',
+  casque: 'helmet', plastron: 'chestplate', jambieres: 'leggings', 'jambières': 'leggings', bottes: 'boots', torche: 'torch',
+};
+
 const equip = {
   name: 'equip',
   domain: 'survive' as Domain,
-  description: "equip {item: nom d'objet, ou \"armor\" pour mettre toute la meilleure armure} — tenir un outil ou porter une pièce d'armure",
+  description: "equip {item: nom d'objet ou type (\"sword\", \"pickaxe\"…), ou \"armor\" pour toute la meilleure armure} — tenir un objet en main (aussi pour « montre ton épée ») ou porter une pièce d'armure",
   params: z.object({ item: z.string().min(1) }),
   timeoutMs: () => 15_000,
   async run({ bot }: SkillContext, p: { item: string }): Promise<ActionRunOutput> {
@@ -557,11 +565,19 @@ const equip = {
       }
       return worn > 0 ? { status: 'success', detail: { worn } } : fail("pas d'armure dans l'inventaire", { precondition: true });
     }
-    const it = bot.inventory.items().find((i) => i.name === p.item);
+    // nom exact, sinon un type (« sword », « épée ») : la meilleure pièce de ce type
+    const wanted = EQUIP_WORDS[p.item.toLowerCase()] ?? p.item.toLowerCase();
+    const TIERS = ['netherite', 'diamond', 'iron', 'golden', 'stone', 'chainmail', 'wooden', 'leather'];
+    const it =
+      bot.inventory.items().find((i) => i.name === wanted) ??
+      bot.inventory
+        .items()
+        .filter((i) => i.name.endsWith(`_${wanted}`) && !(wanted === 'axe' && i.name.endsWith('_pickaxe')))
+        .sort((a, b) => TIERS.indexOf(a.name.split('_')[0]!) - TIERS.indexOf(b.name.split('_')[0]!))[0];
     if (!it) return fail('objet absent de l\'inventaire', { item: p.item, precondition: true });
-    const piece = Object.keys(ARMOR_SLOT).find((k) => p.item.endsWith(`_${k}`));
-    await bot.equip(it, piece ? ARMOR_SLOT[piece]! : p.item === 'shield' ? 'off-hand' : 'hand');
-    return { status: 'success' };
+    const piece = Object.keys(ARMOR_SLOT).find((k) => it.name.endsWith(`_${k}`));
+    await bot.equip(it, piece ? ARMOR_SLOT[piece]! : it.name === 'shield' ? 'off-hand' : 'hand');
+    return { status: 'success', detail: { item: it.name } };
   },
 };
 

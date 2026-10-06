@@ -236,11 +236,40 @@ export async function smeltFor(ctx: SkillContext, output: string, count: number,
   const sources = SMELT_SOURCE[output];
   if (!sources || count <= 0) return 0;
   const before = countItem(bot, output);
+  // déjà cuit dans un four (cas réel : le lingot manquant attendait dans le four) : on le prend d'abord
+  if ((await takeFromFurnaces(bot, (n) => n === output, signal)) >= count) return countItem(bot, output) - before;
   let input = sources.find((s) => countItem(bot, s) > 0);
   if (!input && (await withdrawFromChests(bot, (n) => sources.includes(n), count, signal)) > 0) input = sources.find((s) => countItem(bot, s) > 0);
   if (!input || signal.aborted) return 0;
   await smelt.run(ctx, { item: input, count: Math.min(count, 16) }, signal).catch(() => null);
   return countItem(bot, output) - before;
+}
+
+/**
+ * Prend dans les fours proches ce qui a déjà cuit et correspond à `wanted` (lingots, verre…).
+ * Renvoie le nombre d'objets récupérés.
+ */
+export async function takeFromFurnaces(bot: Bot, wanted: (name: string) => boolean, signal: AbortSignal): Promise<number> {
+  const ids = ['furnace', 'blast_furnace', 'smoker'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+  let got = 0;
+  for (const pos of bot.findBlocks({ matching: ids, maxDistance: 24, count: 8 })) {
+    if (signal.aborted) break;
+    const furnace = bot.blockAt(pos);
+    if (!furnace) continue;
+    await goNear(bot, pos, 2, signal);
+    try {
+      const window = await bot.openFurnace(furnace);
+      try {
+        const out = window.outputItem();
+        if (out && out.count > 0 && wanted(out.name)) got += (await window.takeOutput())?.count ?? out.count;
+      } finally {
+        window.close();
+      }
+    } catch {
+      // four inaccessible : au suivant
+    }
+  }
+  return got;
 }
 
 /** Outils, armes, armure et torches : le bot les garde (ni rangés, ni donnés sans le demander). */

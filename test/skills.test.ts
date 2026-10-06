@@ -4,9 +4,9 @@ import { evaluateOutcome, judged } from '../src/outcome/outcome.js';
 import { blueprint } from '../src/skills/blueprint.js';
 import { SkillParamsError, SKILLS, toAction } from '../src/skills/library.js';
 import type { ActionResult } from '../src/skills/actionController.js';
-import { familyOf, matchingItems, planStorage, type ChestSurvey } from '../src/skills/extra.js';
+import { familyOf, matchingItems, planStorage, takeFromFurnaces, type ChestSurvey } from '../src/skills/extra.js';
 import { openWorld, vec } from './helpers.js';
-import { isAddressed } from '../src/feedback/classifier.js';
+import { classifyByRules, isAddressed } from '../src/feedback/classifier.js';
 
 describe('plans de construction', () => {
   it('mur 7×4 : 28 blocs, posés couche par couche de bas en haut', () => {
@@ -454,4 +454,36 @@ describe("corrections après la partie du 6 octobre", () => {
     expect(Math.hypot(pos.x, pos.z)).toBeLessThanOrEqual(4);
     expect(await SKILLS.recover_items!.run({ bot, followPlayer: 'B', lastDeath: () => null }, {}, new AbortController().signal)).toMatchObject({ status: 'failure', detail: { precondition: true } });
   });
+});
+
+it("« montre ton épée » : la meilleure épée en main (cas réel)", async () => {
+  const held: string[] = [];
+  const items = [{ name: 'stone_sword' }, { name: 'iron_sword' }, { name: 'iron_pickaxe' }];
+  const bot = { inventory: { items: () => items }, equip: async (i: { name: string }, slot: string) => void held.push(`${i.name}@${slot}`) } as unknown as Bot;
+  expect(await SKILLS.equip!.run({ bot, followPlayer: 'B' }, { item: 'épée' }, new AbortController().signal)).toMatchObject({ status: 'success', detail: { item: 'iron_sword' } });
+  expect(await SKILLS.equip!.run({ bot, followPlayer: 'B' }, { item: 'sword' }, new AbortController().signal)).toMatchObject({ detail: { item: 'iron_sword' } });
+  expect(held[0]).toBe('iron_sword@hand');
+  expect(classifyByRules('montre ton épée', 'Alex').label).toBe('order');
+});
+
+it("ingrédient déjà cuit dans un four : pris avant de faire cuire ou de le demander (cas réel : lingot dans le four)", async () => {
+  const mcData = (await import('minecraft-data')).default('1.21');
+  const inv: { name: string; count: number; type: number }[] = [];
+  const bot = {
+    registry: mcData,
+    inventory: { items: () => inv },
+    findBlocks: () => [vec(2, 64, 0)],
+    blockAt: (q: unknown) => ({ name: 'furnace', position: q }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    openFurnace: async () => ({
+      outputItem: () => ({ name: 'iron_ingot', count: 1 }),
+      takeOutput: async () => {
+        inv.push({ name: 'iron_ingot', count: 1, type: mcData.itemsByName.iron_ingot!.id });
+        return { count: 1 };
+      },
+      close: () => {},
+    }),
+  } as unknown as Bot;
+  expect(await takeFromFurnaces(bot, (n) => n === 'iron_ingot', new AbortController().signal)).toBe(1);
+  expect(inv).toHaveLength(1);
 });
