@@ -331,6 +331,19 @@ describe('client OpenRouter', () => {
     expect((err as LlmError).retryable).toBe(true);
     expect((err as LlmError).message).not.toContain(key);
   });
+
+  it("format JSON imposé seulement si la consigne parle de JSON (Groq refuse sinon)", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fakeFetch = (async (_u: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 });
+    }) as typeof fetch;
+    const c = new OpenRouterClient({ apiKey: 'k', baseUrl: 'https://x', fetchImpl: fakeFetch, openRouterExtras: false });
+    await c.complete({ purpose: 'classify', model: FAST, system: 'Réponds en JSON', user: 'u', maxTokens: 10 });
+    await c.complete({ purpose: 'classify', model: FAST, system: 'Corrige la phrase, texte seul', user: 'u', maxTokens: 10 });
+    expect(bodies[0]!.response_format).toEqual({ type: 'json_object' });
+    expect(bodies[1]!.response_format).toBeUndefined();
+  });
 });
 
 describe("construction d'initiative (demande du joueur, 2026-10-05)", () => {

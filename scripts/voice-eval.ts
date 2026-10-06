@@ -69,7 +69,8 @@ async function main(): Promise<void> {
     let extra = 0;
     if (!ok) {
       const t0 = Date.now();
-      corrected = (await classifier.correctTranscript(s)) ?? s;
+      const c = await classifier.correctTranscript(s);
+      if (c && understood(c)) corrected = c;
       extra = (Date.now() - t0) / 1000;
       corrLat += extra;
       corrCalls++;
@@ -81,9 +82,11 @@ async function main(): Promise<void> {
       combo = t;
       comboLat += turbo.latence_moy_s;
       if (!understood(t)) {
+        // Comme en production : la correction n'est retenue que si elle rend la phrase comprise.
         const t0 = Date.now();
-        combo = (await classifier.correctTranscript(t)) ?? t;
+        const c = await classifier.correctTranscript(t);
         comboLat += (Date.now() - t0) / 1000;
+        if (c && understood(c)) combo = c;
       }
     }
     push('4. combinaison (turbo puis correction)', combo, comboLat);

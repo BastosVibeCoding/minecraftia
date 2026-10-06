@@ -78,7 +78,8 @@ export class OpenRouterClient implements LlmClient {
           model: req.model,
           max_tokens: req.maxTokens,
           temperature: 0.2,
-          response_format: { type: 'json_object' },
+          // Format JSON imposé seulement si la consigne demande du JSON (sinon Groq refuse : HTTP 400).
+          ...(/json/i.test(req.system + req.user) ? { response_format: { type: 'json_object' } } : {}),
           ...(this.opts.openRouterExtras === false ? {} : { usage: { include: true } }),
           messages: [
             { role: 'system', content: req.system },
