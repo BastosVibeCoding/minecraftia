@@ -12,6 +12,8 @@ export interface Classification {
   domain?: Domain;
   confidence: number;
   classifier: 'rules' | 'llm';
+  /** Phrase adressée au bot mais incomprise, laissée en suspens pour une nouvelle tentative (voix). */
+  unclear?: boolean;
 }
 
 const norm = (t: string) =>
@@ -164,6 +166,24 @@ export class UtteranceClassifier {
     private readonly botName = 'Alex',
     private readonly gender: 'feminine' | 'masculine' = 'feminine',
   ) {}
+
+  /**
+   * Corrige une phrase mal reconnue par la reconnaissance vocale (« mettez Jean-Bière » → « mets tes
+   * jambières »), d'après le contexte du jeu. `null` sans modèle, budget épuisé, erreur ou si rien ne change.
+   */
+  async correctTranscript(text: string): Promise<string | null> {
+    if (!this.llm || !this.budget || this.budget.exhausted()) return null;
+    const system = `Un joueur de Minecraft parle à voix haute à ${this.botName}, ${this.gender === 'feminine' ? 'sa compagne' : 'son compagnon'} de jeu. La reconnaissance vocale fait des erreurs (mots mal entendus, homophones : « boulot » pour « bouleau », « Jean-Bière » pour « jambières », « bétrave » pour « betterave »). Réécris la phrase la plus probable en français correct, avec le vocabulaire de Minecraft. Garde le sens, ne rajoute rien. Réponds uniquement avec la phrase corrigée, sans guillemets.`;
+    try {
+      const res = await this.llm.complete({ purpose: 'classify', model: this.model, system, user: text, maxTokens: 80 });
+      this.budget.record({ purpose: 'classify', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
+      const out = plainReply(res.text).slice(0, 200);
+      return out && norm(out) !== norm(text) ? out : null;
+    } catch (err) {
+      this.budget.record({ purpose: 'classify', model: this.model, promptTokens: 0, completionTokens: 0, costUsd: 0, latencyMs: 0, ok: false, error: err instanceof LlmError ? err.message : String(err) });
+      return null;
+    }
+  }
 
   /**
    * Réponse de conversation (« raconte-moi une blague ») : une ou deux phrases, dans le personnage.

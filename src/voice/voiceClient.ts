@@ -6,6 +6,10 @@ export interface Transcript {
   text: string;
   audioMs: number;
   latencyMs: number;
+  /** Numéro de la phrase côté service (pour demander une retranscription précise). */
+  id?: number;
+  /** Confiance de la transcription (0 = sûre, -1 = très douteuse). */
+  confidence?: number;
 }
 
 interface Pending {
@@ -24,6 +28,7 @@ export class VoiceClient {
   private retryMs = 2000;
   private nextId = 1;
   private pending = new Map<string, Pending>();
+  private refines = new Map<string, { resolve: (text: string | null) => void; timer: NodeJS.Timeout }>();
   private retryTimer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -55,6 +60,23 @@ export class VoiceClient {
   /** Paquet Opus entendu (base64), transmis tel quel au service. */
   sendAudio(speaker: string, opusBase64: string, t: number): void {
     if (this.connected) this.ws!.send(JSON.stringify({ type: 'audio', speaker, t, opus: opusBase64 }));
+  }
+
+  /**
+   * Retranscrit une phrase récente avec le modèle précis du service (plus lent, plus juste).
+   * Renvoie `null` si la phrase n'est plus disponible, en cas d'erreur ou de délai dépassé.
+   */
+  refine(id: number, timeoutMs = 20_000): Promise<string | null> {
+    if (!this.connected) return Promise.resolve(null);
+    const req = `r${this.nextId++}`;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.refines.delete(req);
+        resolve(null);
+      }, timeoutMs);
+      this.refines.set(req, { resolve, timer });
+      this.ws!.send(JSON.stringify({ type: 'refine', id, req }));
+    });
   }
 
   /** Synthèse : renvoie les trames Opus (base64, 20 ms) prêtes à jouer dans le jeu. */
@@ -97,7 +119,20 @@ export class VoiceClient {
       return;
     }
     if (msg.type === 'transcript' && typeof msg.text === 'string' && typeof msg.speaker === 'string') {
-      this.onTranscript({ speaker: msg.speaker, text: msg.text, audioMs: Number(msg.audio_ms ?? 0), latencyMs: Number(msg.latency_ms ?? 0) });
+      this.onTranscript({
+        speaker: msg.speaker,
+        text: msg.text,
+        audioMs: Number(msg.audio_ms ?? 0),
+        latencyMs: Number(msg.latency_ms ?? 0),
+        ...(typeof msg.id === 'number' ? { id: msg.id } : {}),
+        ...(typeof msg.confidence === 'number' ? { confidence: msg.confidence } : {}),
+      });
+    } else if (msg.type === 'refined' && typeof msg.req === 'string') {
+      const r = this.refines.get(msg.req);
+      if (!r) return;
+      this.refines.delete(msg.req);
+      clearTimeout(r.timer);
+      r.resolve(typeof msg.text === 'string' && msg.text.trim() ? msg.text : null);
     } else if ((msg.type === 'tts_result' || msg.type === 'error') && typeof msg.id === 'string') {
       const p = this.pending.get(msg.id);
       if (!p) return;

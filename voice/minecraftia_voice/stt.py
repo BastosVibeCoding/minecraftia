@@ -88,6 +88,10 @@ class Transcriber:
         )
 
     def transcribe(self, pcm16k: np.ndarray) -> str:
+        return self.transcribe_scored(pcm16k)[0]
+
+    def transcribe_scored(self, pcm16k: np.ndarray) -> tuple[str, float]:
+        """Texte et confiance moyenne (log-probabilité moyenne des segments, 0 = sûr, -1 = très douteux)."""
         audio = pcm16k.astype(np.float32) / 32768.0
         segments, _info = self._model.transcribe(
             audio,
@@ -98,4 +102,7 @@ class Transcriber:
             vad_parameters={"min_silence_duration_ms": 300},
             condition_on_previous_text=False,
         )
-        return " ".join(s.text.strip() for s in segments).strip()
+        segs = list(segments)
+        text = " ".join(s.text.strip() for s in segs).strip()
+        confidence = sum(s.avg_logprob for s in segs) / len(segs) if segs else -1.0
+        return text, float(confidence)

@@ -84,3 +84,44 @@ def test_une_voix_par_bot():
     vivienne = svc.engine_for("fr-FR-VivienneMultilingualNeural")
     assert vivienne.voice == "fr-FR-VivienneMultilingualNeural"
     assert svc.engine_for("fr-FR-VivienneMultilingualNeural") is vivienne
+
+
+class _FakeWs:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, payload):
+        self.sent.append(__import__("json").loads(payload))
+
+
+class _FakeTranscriber:
+    def __init__(self, text, confidence=-0.9):
+        self.text, self.confidence = text, confidence
+
+    def transcribe(self, pcm):
+        return self.text
+
+    def transcribe_scored(self, pcm):
+        return self.text, self.confidence
+
+
+def test_transcription_numerotee_puis_retranscription_precise_a_la_demande():
+    from minecraftia_voice.server import VoiceService
+    from minecraftia_voice.stt import Utterance
+
+    async def run():
+        svc = VoiceService(_FakeTranscriber("Alex, mettez Jean-Bière"), tts=object())
+        ws = _FakeWs()
+        svc.clients.add(ws)
+        await svc.emit_transcript(Utterance("Bilboquet86", np.zeros(16000, dtype=np.int16), 0, 1000))
+        msg = ws.sent[-1]
+        assert msg["type"] == "transcript" and msg["id"] == 1 and msg["confidence"] == -0.9
+        # le modèle précis est chargé à la première demande : ici on le remplace par un faux
+        svc._precise = _FakeTranscriber("Alex, mets tes jambières")
+        await svc.on_refine(ws, {"type": "refine", "id": 1, "req": "r1"})
+        assert ws.sent[-1] == {"type": "refined", "req": "r1", "text": "Alex, mets tes jambières", "latency_ms": ws.sent[-1]["latency_ms"]}
+        # phrase trop ancienne ou inconnue : pas de texte
+        await svc.on_refine(ws, {"type": "refine", "id": 99, "req": "r2"})
+        assert ws.sent[-1] == {"type": "refined", "req": "r2", "text": None}
+
+    asyncio.run(run())

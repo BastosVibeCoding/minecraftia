@@ -70,6 +70,8 @@ services:
     environment:
       WHISPER_MODEL: "small"
       WHISPER_THREADS: "4"
+      # retranscription précise, seulement pour une phrase adressée au bot et incomprise
+      WHISPER_PRECISE_MODEL: "large-v3-turbo"
       EDGE_VOICE: "fr-FR-DeniseNeural"   # voix féminine (Alex)
       TTS_ENGINE: "edge"
     volumes:

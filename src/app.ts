@@ -25,6 +25,7 @@ import { SKILLS, toAction, type SkillContext } from './skills/library.js';
 import { DESPAWN_MS } from './skills/extra.js';
 import mcProtocol from 'minecraft-protocol';
 import { presenceAction } from './bot/presence.js';
+import { understandVoice } from './feedback/voicePipeline.js';
 
 const mcPing = mcProtocol.ping;
 import type { Budget } from './decider/budget.js';
@@ -156,7 +157,7 @@ export class Companion {
     this.voiceClient = config.voice.url
       ? new VoiceClient(config.voice.url, logger.child({ module: 'voix' }), (t) => {
           logger.info({ speaker: t.speaker, audioMs: t.audioMs, latencyMs: t.latencyMs }, `voix entendue : « ${t.text} »`);
-          this.hear(t.speaker, t.text, 'voice');
+          this.hear(t.speaker, t.text, 'voice', t.id);
         })
       : null;
     this.voiceLink = new VoiceLink({ port: config.voice.linkPort, playerName: config.minecraft.username, logger: logger.child({ module: 'voix' }) });
@@ -403,7 +404,7 @@ export class Companion {
   }
 
   /** Énoncé du joueur suivi (chat ou voix transcrite). Les commandes `!…` sont traitées à part. */
-  hear(player: string, text: string, channel: 'chat' | 'voice'): void {
+  hear(player: string, text: string, channel: 'chat' | 'voice', voiceId?: number): void {
     if (player !== this.config.followPlayer) return;
     // « Léa, donne ton fer » dit par mon joueur à l'autre bot : ce n'est pas pour moi
     const peer = this.config.peers.find((p) => isAddressed(text, p) && !isAddressed(text, this.config.minecraft.username));
@@ -415,7 +416,22 @@ export class Companion {
       void this.command(text);
       return;
     }
-    void this.feedback.handle(player, text, channel).catch((err: unknown) => this.logger.error({ err }, "traitement d'un retour en erreur"));
+    if (channel === 'chat') {
+      void this.feedback.handle(player, text, channel).catch((err: unknown) => this.logger.error({ err }, "traitement d'un retour en erreur"));
+      return;
+    }
+    // voix : transcription rapide d'abord ; si la phrase adressée au bot reste incomprise,
+    // retranscription précise (turbo) puis correction par le modèle de langage
+    const voiceClient = this.voiceClient;
+    void understandVoice(text, voiceId, {
+      handle: (t, final) => this.feedback.handle(player, t, 'voice', { final }),
+      ...(voiceClient ? { refine: (id: number) => voiceClient.refine(id) } : {}),
+      correct: (t) => this.deps.classifier.correctTranscript(t),
+    })
+      .then(({ text: understood, route }) => {
+        if (route !== 'directe') this.logger.info({ route, original: text }, `voix comprise après ${route} : « ${understood} »`);
+      })
+      .catch((err: unknown) => this.logger.error({ err }, "traitement d'un retour en erreur"));
   }
 
   /** Commandes d'inspection (`!arbre`, `!autonomie`, `!pourquoi`, `!oublie`, `!budget`, `!aide`). */

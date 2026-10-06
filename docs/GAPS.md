@@ -7,6 +7,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-04 | Léa | « arrête-toi », « viens ici », « arrête de creuser » (3×) | Ordres de rappel exécutés par le code (arrêt + suivi), sans modèle : `isRecallOrder` dans `src/decider/loop.ts` |
 | 2026-10-04 | joueurs | portes non ouvertes, difficultés dans l'eau | `src/bot/movements.ts` : ouverture des portes en bois, coût de l'eau relevé à 4 |
 | 2026-10-04 | Alex | « donne ton bois » (2×) | Nouvelle compétence `give {item, count?}` : rejoint le joueur et lui lance les objets (nom exact ou famille, ex. « log ») |
+| 2026-10-06 | joueurs | voix : améliorer la compréhension (choix du joueur : combiner 1 + 2) | Transcription rapide (small) ; si une phrase adressée au bot reste incomprise : retranscription précise du même son (large-v3-turbo, chargé à la demande), puis correction par Gemini ; manque et réponse seulement à la fin |
 | 2026-10-06 | Léa | « fais cuire le fer » → aucun four (×7) ; « va à la maison » → chemin bloqué | Cuisson : sans four dans le coin, va à la maison d'abord ; « va à la maison et fait cuire » découpé en 2 étapes ; retour à la maison : étapes plus courtes puis droit de creuser (blocs protégés exceptés) |
 | 2026-10-06 | Léa | or brut mis à la place du fer en train de cuire alors qu'un 2e four était libre | Cuisson : un four libre parmi ceux du coin (entrée vide ou même objet, sortie vide ou même produit) ; jamais rien retiré de ce qui cuit ; sinon four posé depuis l'inventaire, sinon le dire |
 | 2026-10-06 | Alex | « prolonge ce mur » → pas de planches de bouleau | Construction (prolonger, copier, apporter) : coffres puis fabrication de ce qui manque avant d'abandonner |
@@ -86,4 +87,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06, 6 éléments (reste là, blocs fabriqués pour construire, four libre, cuisson à la maison, étapes « et fait », retour à la maison en creusant).
 
-(aucun)
+1. Voix : retranscription précise puis correction si incomprise

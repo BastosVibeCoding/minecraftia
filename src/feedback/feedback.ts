@@ -101,7 +101,11 @@ export class FeedbackHandler {
     return candidates[0]?.item ?? null;
   }
 
-  async handle(player: string, text: string, channel: 'chat' | 'voice'): Promise<Classification> {
+  /**
+   * `final: false` (voix) : une phrase adressée au bot mais incomprise n'est ni notée comme manque ni
+   * répondue ; elle revient marquée `unclear` pour être retranscrite ou corrigée, puis retraitée.
+   */
+  async handle(player: string, text: string, channel: 'chat' | 'voice', opts: { final?: boolean } = {}): Promise<Classification> {
     const d = this.deps;
     // consigne durable (« retiens que… », « je n'aime pas que tu… ») : retenue pour toutes les décisions
     if (d.consignes && isStandingInstruction(text)) {
@@ -215,6 +219,7 @@ export class FeedbackHandler {
       }
       case 'chatter':
         if (d.botName && isAddressed(text, d.botName)) {
+          if (opts.final === false) return { ...c, unclear: true };
           d.gaps?.misunderstood(text);
           // on lui parle : il répond, sans agir (au plus une fois toutes les 15 s)
           if (d.clock.now() - this.lastChatAt >= CHAT_INTERVAL_MS) {
