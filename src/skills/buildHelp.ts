@@ -50,10 +50,14 @@ export async function placeBlockAt(ctx: SkillContext, target: Bot['entity']['pos
   return false;
 }
 
-/** Assure `count` blocs de ce type sur soi, en complétant avec les coffres proches. */
-async function stockUp(bot: Bot, block: string, count: number, signal: AbortSignal): Promise<number> {
-  const missing = count - countItem(bot, block);
-  if (missing > 0) await withdrawFromChests(bot, (n) => n === block, missing, signal);
+/**
+ * Assure `count` blocs de ce type sur soi : coffres proches, puis fabrication de ce qui manque
+ * (cas réel : mur en planches de bouleau à prolonger, des bûches mais pas de planches).
+ */
+async function stockUp(ctx: SkillContext, block: string, count: number, signal: AbortSignal): Promise<number> {
+  const { bot } = ctx;
+  if (count - countItem(bot, block) > 0) await withdrawFromChests(bot, (n) => n === block, count - countItem(bot, block), signal);
+  if (count - countItem(bot, block) > 0 && ctx.craft && !signal.aborted) await ctx.craft(block, count - countItem(bot, block), signal);
   return countItem(bot, block);
 }
 
@@ -114,13 +118,13 @@ export const extendWall = {
     const wall = detectWall(ctx.recentPlacements?.(RECENT_MS) ?? []);
     if (!wall) return fail("je ne vois pas de mur que tu viens de construire : pose au moins deux blocs alignés", { precondition: true });
     let length = p.length;
-    const player = bot.players[ctx.followPlayer]?.entity?.position;
+    const player = bot.players?.[ctx.followPlayer]?.entity?.position;
     if (p.toPlayer && player) {
       const target = Math.round(wall.axis === 'x' ? player.x : player.z);
       length = Math.max(1, Math.min(32, Math.max(target - wall.to, wall.from - target)));
     }
     const cells = wallExtension(wall, length);
-    await stockUp(bot, wall.block, cells.length, signal);
+    await stockUp(ctx, wall.block, cells.length, signal);
     if (countItem(bot, wall.block) === 0) return fail(`pas de ${wall.block.replace(/_/g, ' ')}, ni sur moi ni dans les coffres`, { precondition: true });
     const me = bot.entity.position;
     let placed = 0;
@@ -170,7 +174,7 @@ export const copyBuild = {
     if (!free) return fail('pas de place libre à côté pour la copie', { precondition: true });
     const needs: Record<string, number> = {};
     for (const c of plan.cells) needs[c.block] = (needs[c.block] ?? 0) + 1;
-    for (const [block, n] of Object.entries(needs)) await stockUp(bot, block, n, signal);
+    for (const [block, n] of Object.entries(needs)) await stockUp(ctx, block, n, signal);
     const lacking = Object.entries(needs).filter(([b, n]) => countItem(bot, b) < n).map(([b, n]) => `${n - countItem(bot, b)} ${b.replace(/_/g, ' ')}`);
     if (lacking.length === Object.keys(needs).length && Object.keys(needs).every((b) => countItem(bot, b) === 0)) {
       ctx.speak?.(`Pour copier, il me manque ${lacking.join(', ')}. Tu peux m'en donner ?`);
@@ -195,9 +199,8 @@ export const bring = {
   timeoutMs: () => 240_000,
   async run(ctx: SkillContext, p: { item: string; count: number }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
-    await stockUp(bot, p.item, p.count, signal);
-    // pas assez : on fabrique le reste si c'est faisable (planches à partir de bûches…)
-    if (countItem(bot, p.item) < p.count && ctx.craft) await ctx.craft(p.item, p.count - countItem(bot, p.item), signal);
+    // coffres, puis fabrication du reste si c'est faisable (planches à partir de bûches…)
+    await stockUp(ctx, p.item, p.count, signal);
     const have = countItem(bot, p.item);
     if (have === 0) return fail(`pas de ${p.item.replace(/_/g, ' ')}, ni dans les coffres, ni à fabriquer`, { precondition: true });
     const r = await give.run(ctx, { item: p.item, count: Math.min(have, p.count) }, signal);

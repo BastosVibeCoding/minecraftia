@@ -78,3 +78,34 @@ describe("aide à la construction (évolution 4)", () => {
     expect(chest[0]!.count).toBe(32);
   });
 });
+
+it("prolonger un mur en planches sans planches : il en fabrique d'abord (cas réel : bouleau)", async () => {
+  const inv: { name: string; count: number; type: number }[] = [];
+  const crafted: string[] = [];
+  const bot = {
+    entity: { position: vec(0, 64, 0) },
+    registry: { blocksByName: { chest: { id: 54 } } },
+    inventory: { items: () => inv },
+    findBlocks: () => [],
+    blockAt: (q: { x: number; y: number; z: number }) => ({ name: q.y === 63 ? 'stone' : 'air', boundingBox: q.y === 63 ? 'block' : 'empty', position: vec(q.x, q.y, q.z) }),
+    pathfinder: { goto: async () => {}, setGoal: () => {} },
+    equip: async () => {},
+    placeBlock: async () => {},
+  } as unknown as Bot;
+  const wall = [{ x: 3, y: 64, z: 0, block: 'birch_planks', at: 2 }, { x: 2, y: 64, z: 0, block: 'birch_planks', at: 1 }];
+  const r = await SKILLS.extend_wall!.run(
+    {
+      bot,
+      followPlayer: 'B',
+      recentPlacements: () => wall,
+      craft: async (item, count) => {
+        crafted.push(`${item}x${count}`);
+        inv.push({ name: item, count, type: 9 });
+      },
+    },
+    { length: 2, toPlayer: false },
+    new AbortController().signal,
+  );
+  expect(crafted).toEqual(['birch_planksx2']);
+  expect(r).toMatchObject({ status: 'success', detail: { placed: 2 } });
+});
