@@ -322,30 +322,35 @@ it("sable dans l'eau et à la surface : la surface d'abord (cas réel : le bot s
   expect(targets).toEqual([5]);
 });
 
-it("four occupé : vide la sortie et l'entrée étrangère avant de cuire le sable (cas réel : destination full)", async () => {
+it("deux fours, le premier cuit du fer : l'or va dans le second, le fer n'est jamais retiré (cas réel)", async () => {
   const calls: string[] = [];
-  const inv = [{ name: 'sand', count: 8, type: 10 }, { name: 'coal', count: 4, type: 2 }];
+  const inv = [{ name: 'raw_gold', count: 4, type: 10 }, { name: 'coal', count: 4, type: 2 }];
+  const furnaces: Record<number, { input: { type: number; name: string } | null }> = { 1: { input: { type: 99, name: 'raw_iron' } }, 2: { input: null } };
   const bot = {
-    registry: { itemsByName: { sand: { id: 10 }, coal: { id: 2 } }, blocksByName: { furnace: { id: 51 } } },
+    registry: { itemsByName: { raw_gold: { id: 10 }, coal: { id: 2 } }, blocksByName: { furnace: { id: 51 } } },
     inventory: { items: () => inv },
-    findBlock: () => ({ name: 'furnace', position: vec(1, 64, 0) }),
+    findBlocks: () => [vec(1, 64, 0), vec(2, 64, 0)],
+    blockAt: (q: { x: number; y: number; z: number }) => ({ name: 'furnace', position: vec(q.x, q.y, q.z) }),
     pathfinder: { goto: async () => {}, setGoal: () => {} },
-    openFurnace: async () => ({
-      outputItem: () => (calls.includes('takeOutput') ? null : { name: 'glass', count: 8 }),
-      inputItem: () => (calls.includes('takeInput') ? null : { type: 99, name: 'raw_iron' }),
-      fuelItem: () => null,
-      takeOutput: async () => void calls.push('takeOutput'),
-      takeInput: async () => void calls.push('takeInput'),
-      putFuel: async () => void calls.push('putFuel'),
-      putInput: async () => {
-        calls.push('putInput');
-        throw new Error('fin du test');
-      },
-      close: () => {},
-    }),
+    openFurnace: async (b: { position: { x: number } }) => {
+      const x = b.position.x;
+      return {
+        outputItem: () => null,
+        inputItem: () => furnaces[x]!.input,
+        fuelItem: () => null,
+        takeInput: async () => void calls.push(`takeInput@${x}`),
+        takeOutput: async () => null,
+        putFuel: async () => void calls.push(`putFuel@${x}`),
+        putInput: async () => {
+          calls.push(`putInput@${x}`);
+          throw new Error('fin du test');
+        },
+        close: () => void calls.push(`close@${x}`),
+      };
+    },
   } as unknown as Bot;
-  await SKILLS.smelt!.run({ bot, followPlayer: 'B' }, { item: 'sand', count: 8 }, new AbortController().signal).catch(() => null);
-  expect(calls).toEqual(['takeOutput', 'takeInput', 'putFuel', 'putInput']);
+  await SKILLS.smelt!.run({ bot, followPlayer: 'B' }, { item: 'raw_gold', count: 4 }, new AbortController().signal).catch(() => null);
+  expect(calls).toEqual(['close@1', 'putFuel@2', 'putInput@2', 'close@2']);
 });
 
 describe("ranger dans le bon coffre (cas réel : trois coffres à la maison, le bot ouvrait le mauvais)", () => {

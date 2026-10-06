@@ -173,18 +173,18 @@ export const smelt = {
       ctx.speak?.("Il me faut du combustible pour le four (du charbon ou du bois). Je n'en ai pas, ni dans les coffres à côté : tu peux m'en donner ?");
       return fail('pas de combustible', { precondition: true });
     }
-    let furnace = nearest(bot, ['furnace'], 16);
-    if (!furnace) furnace = await placeNearby(bot, 'furnace');
-    if (!furnace) return fail('aucun four', { precondition: true });
-    await goNear(bot, furnace.position, 2, signal);
-    const window = await bot.openFurnace(furnace);
+    // un four libre parmi tous ceux du coin : jamais retirer ce qui cuit déjà (cas réel : le fer en
+    // train de cuire remplacé par de l'or alors qu'un deuxième four était libre)
+    const product = Object.entries(SMELT_SOURCE).find(([, srcs]) => srcs.includes(p.item))?.[0];
+    const window = await freeFurnace(bot, input.id, product, signal);
+    if (!window) {
+      ctx.speak?.("Tous les fours sont occupés et je n'en ai pas à poser. Tu veux que j'attende ?");
+      return fail('tous les fours sont occupés', { precondition: true });
+    }
     try {
       const count = Math.min(p.count, countItem(bot, p.item));
-      // four déjà occupé (cas réel : « destination full ») : on récupère ce qui a cuit et ce qui
-      // attend dans l'entrée s'il s'agit d'autre chose ; un autre combustible déjà en place sert tel quel
+      // ce qui a déjà cuit de la même chose est récupéré au passage
       if (window.outputItem()) await window.takeOutput().catch(() => null);
-      const waiting = window.inputItem();
-      if (waiting && waiting.type !== input.id) await window.takeInput().catch(() => null);
       const fuelPerItem = fuelName.includes('coal') ? 1 / 8 : fuelName.endsWith('_log') || fuelName.endsWith('_planks') ? 1 / 1.5 : 1;
       const loaded = window.fuelItem();
       if (!loaded || loaded.type === bot.registry.itemsByName[fuelName]!.id) {
@@ -207,6 +207,29 @@ export const smelt = {
     }
   },
 };
+
+/**
+ * Ouvre un four libre : entrée vide (ou le même objet en cours) et sortie vide (ou le même produit).
+ * Sinon, pose le four de l'inventaire s'il y en a un. Renvoie la fenêtre ouverte, ou `null`.
+ */
+async function freeFurnace(bot: Bot, inputId: number, product: string | undefined, signal: AbortSignal) {
+  const ids = ['furnace', 'blast_furnace', 'smoker'].map((n) => bot.registry.blocksByName[n]?.id).filter((id): id is number => id !== undefined);
+  for (const pos of bot.findBlocks({ matching: ids, maxDistance: 16, count: 8 })) {
+    if (signal.aborted) return null;
+    const block = bot.blockAt(pos);
+    if (!block) continue;
+    await goNear(bot, pos, 2, signal);
+    const w = await bot.openFurnace(block).catch(() => null);
+    if (!w) continue;
+    const input = w.inputItem();
+    const output = w.outputItem();
+    const free = (!input || input.type === inputId) && (!output || output.name === product);
+    if (free) return w;
+    w.close();
+  }
+  const placed = await placeNearby(bot, 'furnace');
+  return placed ? bot.openFurnace(placed).catch(() => null) : null;
+}
 
 /** Ce qui se fabrique au four : objet obtenu → objets à cuire possibles. */
 export const SMELT_SOURCE: Record<string, string[]> = {
