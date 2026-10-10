@@ -4,8 +4,10 @@
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
- * Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
+ * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
+ * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
+ * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
 import { Rcon } from './rcon.js';
@@ -38,7 +40,7 @@ function number(reply: string): number {
  * (assez petits pour passer la porte) dès la vague 2, vindicateurs dès la 3, un ravageur dès la 6,
  * et un boss géant (trop grand pour la porte : à abattre depuis les remparts) toutes les 5 vagues.
  */
-function mobCommand(n: number, i: number, x: number, z: number, p: number): string {
+function mobCommand(n: number, i: number, x: number, z: number, p: number, id: string): { command: string; name: string; health: number } {
   // e : vague « effective », plus avancée quand la partie est plus dure
   const e = n + (p - 1);
   const boss = n % (p > 1 ? 3 : 5) === 0 && i === 0;
@@ -67,15 +69,71 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
     giant || boss ? `{id:"minecraft:generic.attack_damage",base:${(boss ? 5 : 3) + Math.floor(n / 3)}}` : '',
     zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
-  return (
-    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague"${sapper ? ',"sapeur"' : ''}],PersistenceRequired:1b,${baby}${charged}` +
-    `${name ? `CustomName:'"${name}"',CustomNameVisible:1b,` : ''}${armor}${weapon}` +
-    `ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],Health:${health}f,attributes:[${attrs.join(',')}]}`
+  const command =
+    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague","${id}"${sapper ? ',"sapeur"' : ''}],PersistenceRequired:1b,${baby}${charged}` +
+    `CustomName:'${healthBar(name, health, health)}',CustomNameVisible:1b,${armor}${weapon}` +
+    `ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],Health:${health}f,attributes:[${attrs.join(',')}]}`;
+  return { command, name, health };
+}
+
+/** Nom affiché au-dessus d'un monstre : son nom éventuel et une barre de vie (verte, jaune, rouge). */
+function healthBar(name: string, hp: number, max: number): string {
+  const filled = Math.max(0, Math.min(10, Math.ceil((hp / max) * 10)));
+  const color = filled > 6 ? 'green' : filled > 3 ? 'yellow' : 'red';
+  const parts = [
+    ...(name ? [`{"text":"${name} ","color":"white"}`] : []),
+    `{"text":"${'█'.repeat(filled)}","color":"${color}"}`,
+    `{"text":"${'█'.repeat(10 - filled)}","color":"dark_gray"}`,
+  ];
+  return `[${parts.join(',')}]`;
+}
+
+/** Équipement de départ, redonné à chaque nouvelle partie. */
+const KIT = [
+  'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots',
+  'iron_sword[enchantments={levels:{"minecraft:sharpness":2}}]',
+  'bow[enchantments={levels:{"minecraft:power":2,"minecraft:infinity":1}}]',
+  'arrow 64', 'shield', 'flint_and_steel', 'cooked_beef 32', 'cobblestone 64',
+];
+/** Copie intacte du château, 1000 blocs plus à l'est, recopiée sur le château à chaque nouvelle partie. */
+const MODEL_DX = 1000;
+
+/**
+ * Nouvelle partie : château remis à neuf (blocs posés retirés, brèches rebouchées, coffre rempli),
+ * inventaires vidés puis kit de départ, scores à zéro, nouveau Roi, tout le monde dans la cour.
+ */
+async function newGame(rcon: Rcon): Promise<void> {
+  await rcon.run('kill @e[tag=vague]');
+  await rcon.run('kill @e[tag=roi]');
+  await rcon.run('kill @e[type=minecraft:zombie_villager]');
+  await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
+  await rcon.run('forceload add -32 -32 32 32');
+  for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
+    await rcon.run(`clone ${x0 + MODEL_DX} -61 -32 ${x1 + MODEL_DX} -43 32 ${x0} -61 -32`);
+  }
+  await rcon.run(`forceload remove ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
+  await rcon.run('forceload remove -32 -32 32 32');
+  await rcon.run('kill @e[type=minecraft:item]');
+  await rcon.run('kill @e[type=minecraft:iron_golem]');
+  await rcon.run(
+    "summon minecraft:villager 0 -60 -3 {CustomName:'\"Le Roi\"',CustomNameVisible:1b,NoAI:1b,PersistenceRequired:1b,Tags:[\"roi\"],Glowing:1b," +
+      'Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Health:150f,attributes:[{id:"minecraft:generic.max_health",base:150}]}',
   );
+  await rcon.run('scoreboard players reset * tues');
+  await rcon.run('scoreboard players reset * morts');
+  await rcon.run('clear @a');
+  await rcon.run('effect clear @a');
+  await rcon.run('xp set @a 0 levels');
+  await rcon.run('gamemode survival @a');
+  await rcon.run('tp @a 0 -60 12');
+  for (const item of KIT) await rcon.run(`give @a minecraft:${item}`);
+  await rcon.run('effect give @a minecraft:instant_health 1 5 true');
+  await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
 
 /** Articles du marchand (prix en émeraudes) ; `components` au format NBT des objets. */
 const SHOP: { price: number; item: string; count?: number; components?: string }[] = [
+  { price: 1, item: 'flint_and_steel' },
   { price: 2, item: 'arrow', count: 32 },
   { price: 3, item: 'cooked_beef', count: 16 },
   { price: 4, item: 'golden_apple', count: 2 },
@@ -133,6 +191,11 @@ async function main(): Promise<void> {
   // pas de messages de commandes dans le chat (les nôtres comme celles des admins)
   for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
+  if (firstWave === '1') await newGame(rcon);
+  // vie des joueurs en cœurs, sous les pseudos et dans la liste (Tab)
+  await rcon.run('scoreboard objectives add vie health {"text":"❤","color":"red"}');
+  await rcon.run('scoreboard objectives setdisplay below_name vie');
+  await rcon.run('scoreboard objectives setdisplay list vie');
   // équipe « château » : un monstre de l'équipe ignore les joueurs (alliés) et vise le Roi ; on peut toujours le frapper
   await rcon.run('team add chateau');
   await rcon.run('team modify chateau friendlyFire true');
@@ -187,6 +250,9 @@ async function main(): Promise<void> {
     await sleep(5000);
   }
 
+  /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
+  const tracked = new Map<string, { name: string; max: number; shown: number }>();
+  let nextMob = 0;
   for (let n = Number(firstWave); ; n++) {
     const p = Math.max(1, Number(power));
     const total = Math.round((4 + 3 * n) * p);
@@ -194,7 +260,10 @@ async function main(): Promise<void> {
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
     for (let i = 0; i < total; i++) {
       const [x, z] = SPAWNS[i % SPAWNS.length]!;
-      await rcon.run(mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p));
+      const id = `m${nextMob++}`;
+      const mob = mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p, id);
+      await rcon.run(mob.command);
+      tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health });
       if (i % 4 === 3) await sleep(1000);
     }
     const started = Date.now();
@@ -206,9 +275,25 @@ async function main(): Promise<void> {
         await rcon.run('bossbar set minecraft:vague name {"text":"Le Roi est mort","color":"dark_red"}');
         await say('Le Roi est mort !', `Vous avez tenu ${n - 1} vague${n - 1 > 1 ? 's' : ''}`);
         console.log(`partie terminée à la vague ${n}`);
-        return;
+        // nouvelle partie dans 30 s : le conteneur redémarre le script (--restart), qui remet tout à zéro
+        await sleep(25_000);
+        await say('Nouvelle partie !', 'Le château est remis à neuf');
+        await sleep(5_000);
+        process.exit(0);
       }
       await rcon.run('bossbar set minecraft:vague players @a');
+      // barres de vie au-dessus des monstres, mises à jour quand leur vie change
+      for (const [id, mob] of tracked) {
+        const reply = await rcon.run(`data get entity @e[tag=${id},limit=1] Health`);
+        if (!/data: /.test(reply)) {
+          tracked.delete(id);
+          continue;
+        }
+        const hp = number(reply);
+        if (Math.ceil((hp / mob.max) * 10) === Math.ceil((mob.shown / mob.max) * 10)) continue;
+        mob.shown = hp;
+        await rcon.run(`data merge entity @e[tag=${id},limit=1] {CustomName:'${healthBar(mob.name, hp, mob.max)}'}`);
+      }
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
       // les monstres égarés (à plus de 70 blocs du Roi) reviennent devant la porte
