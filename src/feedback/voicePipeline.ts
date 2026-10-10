@@ -23,27 +23,27 @@ export type VoiceRoute = 'directe' | 'retranscription' | 'correction' | 'incompr
 /**
  * Comprendre une phrase dite à voix haute, en trois temps (le reste du temps, aucun délai) :
  * 1. la transcription rapide ; si elle est comprise, c'est fini ;
- * 2. sinon, si elle s'adressait au bot, une retranscription précise du même son ;
- * 3. sinon, une correction par le modèle de langage ; enfin, la dernière version est traitée pour de bon
- *    (manque noté, réponse de conversation).
+ * 2. sinon, si elle s'adressait au bot, une correction par le modèle de langage (rapide, environ 0,7 s) ;
+ * 3. si la correction échoue ou ne répond pas, une retranscription précise du même son (secours local) ;
+ *    enfin, la dernière version est traitée pour de bon (manque noté, réponse de conversation).
  */
 export async function understandVoice(text: string, id: number | undefined, d: VoicePipelineDeps): Promise<{ result: Classification; text: string; route: VoiceRoute }> {
   let result = await d.handle(text, false);
   if (!result.unclear) return { result, text, route: 'directe' };
+  if (d.correct) {
+    const corrected = await d.correct(text).catch(() => null);
+    if (corrected && norm(corrected) !== norm(text)) {
+      result = await d.handle(corrected, false);
+      if (!result.unclear) return { result, text: corrected, route: 'correction' };
+    }
+  }
   let latest = text;
   if (id !== undefined && d.refine) {
-    const refined = await d.refine(id);
+    const refined = await d.refine(id).catch(() => null);
     if (refined && norm(refined) !== norm(text)) {
       latest = refined;
       result = await d.handle(refined, false);
       if (!result.unclear) return { result, text: refined, route: 'retranscription' };
-    }
-  }
-  if (d.correct) {
-    const corrected = await d.correct(latest);
-    if (corrected && norm(corrected) !== norm(latest)) {
-      result = await d.handle(corrected, false);
-      if (!result.unclear) return { result, text: corrected, route: 'correction' };
     }
   }
   result = await d.handle(latest, true);
