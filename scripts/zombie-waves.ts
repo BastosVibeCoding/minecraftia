@@ -211,6 +211,8 @@ const PASSIVES: Passive[] = [
   { key: 'stabilite', short: 'Stabilité', label: '-10 % de recul', color: 'dark_green', price: 6, max: 5, attribute: ['generic.knockback_resistance', (l) => 0.1 * l] },
   { key: 'allonge', short: 'Allonge', label: '+0,5 bloc de portée', color: 'yellow', price: 8, max: 4, attribute: ['player.entity_interaction_range', (l) => 3 + 0.5 * l] },
   { key: 'saut', short: 'Saut', label: '+1/2 bloc de saut', color: 'white', price: 8, max: 3, attribute: ['generic.jump_strength', (l) => 0.42 + 0.1 * l] },
+  { key: 'vol', short: 'Vol de vie', label: '+5 % de vol de vie', color: 'dark_purple', price: 15, max: 4 },
+  { key: 'critique', short: 'Critique', label: '+10 % de coups critiques', color: 'gold', price: 12, max: 5 },
   { key: 'fortune', short: 'Fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
 ];
 
@@ -303,6 +305,10 @@ async function main(): Promise<void> {
   await rcon.run('gamerule doImmediateRespawn true');
   await rcon.run('scoreboard objectives add morts deathCount');
   for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
+  // dégâts infligés (en dixièmes de point de vie) : base du vol de vie et des coups critiques
+  await rcon.run('scoreboard objectives add degats minecraft.custom:minecraft.damage_dealt');
+  const dealt = new Map<string, number>();
+  const stolen = new Map<string, number>();
   const waiting = new Set<string>();
   /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
   const kills = new Map<string, number>();
@@ -333,6 +339,25 @@ async function main(): Promise<void> {
             await rcon.run(`title ${name} title {"text":""}`);
           }
           if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * p.price}`);
+        }
+        // vol de vie et coups critiques, d'après les dégâts infligés depuis le dernier passage
+        const d = await score(name, 'degats');
+        const lastDealt = dealt.get(name);
+        dealt.set(name, d);
+        const hit = lastDealt === undefined ? 0 : Math.max(0, d - lastDealt) / 10;
+        if (hit > 0) {
+          let heal = (stolen.get(name) ?? 0) + hit * 0.05 * (levels.get('vol') ?? 0);
+          for (let k = 0; heal >= 4 && k < 5; k++) {
+            await rcon.run(`effect give ${name} minecraft:instant_health 1 0 true`);
+            heal -= 4;
+          }
+          stolen.set(name, heal);
+          if (Math.random() < 0.1 * (levels.get('critique') ?? 0)) {
+            const bonus = Math.max(2, Math.round(hit / 2));
+            await rcon.run(`execute at ${name} as @e[tag=vague,distance=..5,limit=1,sort=nearest] run damage @s ${bonus} minecraft:player_attack by ${name}`);
+            await rcon.run(`execute at ${name} as @e[tag=vague,distance=..5,limit=1,sort=nearest] at @s run particle minecraft:crit ~ ~1 ~ 0.4 0.6 0.4 0.2 30`);
+            await rcon.run(`execute at ${name} run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1 1`);
+          }
         }
         // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
         const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}"}]`))?.[1] ?? 0);
