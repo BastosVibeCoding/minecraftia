@@ -96,3 +96,20 @@ describe("conversation plus naturelle (demande du joueur, 2026-10-10)", () => {
     expect(isSmallTalk('coupe du bois')).toBe(false);
   });
 });
+
+describe("attaquer n'importe qui sur ordre de son joueur (demande du joueur, 2026-10-10)", () => {
+  it("un autre bot ou un joueur par son pseudo, un villageois par « PNJ », jamais soi-même", async () => {
+    const { isAttackTarget } = await import('../src/skills/library.js');
+    const alex = { name: 'player', type: 'player', username: 'Alex' };
+    const bilbo = { name: 'player', type: 'player', username: 'Bilbo' };
+    const lea = { name: 'player', type: 'player', username: 'Lea' };
+    expect(isAttackTarget(alex, ['alex'], 'Lea', 'Bilbo')).toBe(true);
+    expect(isAttackTarget(lea, ['Léa'], 'Lea', 'Bilbo')).toBe(false);
+    expect(isAttackTarget({ name: 'villager', type: 'mob' }, ['PNJ'], 'Lea', 'Bilbo')).toBe(true);
+    // « attaque les joueurs » : tout le monde sauf son propre joueur, qui reste attaquable s'il est nommé
+    expect(isAttackTarget(alex, ['joueurs'], 'Lea', 'Bilbo')).toBe(true);
+    expect(isAttackTarget(bilbo, ['player'], 'Lea', 'Bilbo')).toBe(false);
+    expect(isAttackTarget(bilbo, ['Bilbo'], 'Lea', 'Bilbo')).toBe(true);
+    expect(isAttackTarget({ name: 'cow', type: 'animal' }, ['zombie'], 'Lea', 'Bilbo')).toBe(false);
+  });
+});

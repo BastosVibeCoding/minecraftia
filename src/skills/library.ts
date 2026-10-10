@@ -372,10 +372,28 @@ export const mobNameFr = (targets: string[]) => MOB_FR[targets[0] ?? ''] ?? (tar
 const ATTACK_RADIUS = 32;
 const MAX_KILLS = 8;
 
+const plainName = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+const TARGET_ALIASES: Record<string, string> = { pnj: 'villager', pnjs: 'villager', villageois: 'villager', joueur: 'player', joueurs: 'player', bot: 'player', bots: 'player' };
+
+/**
+ * Cible d'une attaque : un mob par son nom, ou un joueur (humain ou bot) par son pseudo.
+ * « player » vise n'importe quel joueur sauf le sien ; jamais soi-même.
+ */
+export function isAttackTarget(e: { name?: string; type?: string; username?: string }, targets: string[], self: string, owner: string | undefined): boolean {
+  const wanted = targets.map((t) => TARGET_ALIASES[plainName(t)] ?? plainName(t));
+  if (e.type === 'player' || e.name === 'player') {
+    const who = plainName(e.username ?? '');
+    if (!who || who === plainName(self)) return false;
+    return wanted.includes(who) || (wanted.includes('player') && who !== plainName(owner ?? ''));
+  }
+  return wanted.includes(e.name ?? '');
+}
+
 const attack = {
   name: 'attack',
   domain: 'combat' as Domain,
-  description: 'attack {targets: string[] (noms de mobs, ou ["hostile"]), engageDistance: 2-3.5, retreatHp: 0-20, useShield} — combattre la cible la plus proche',
+  description:
+    'attack {targets: string[] (noms de mobs, ["hostile"], pseudo exact d’un joueur ou d’un bot comme ["Alex"], ou ["player"]), engageDistance: 2-3.5, retreatHp: 0-20, useShield} — combattre la cible la plus proche',
   params: z.object({
     targets: z.array(z.string().min(1)).min(1).max(5),
     engageDistance: z.number().min(2).max(3.5).default(3),
@@ -385,7 +403,7 @@ const attack = {
   timeoutMs: () => 120_000, // recherche de la cible comprise
   async run(ctx: SkillContext, p: { targets: string[]; engageDistance: number; retreatHp: number; useShield: boolean }, signal: AbortSignal): Promise<ActionRunOutput> {
     const { bot } = ctx;
-    const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : p.targets.includes(e.name ?? ''));
+    const wanted = (e: Entity) => (p.targets.includes('hostile') ? isHostile(e) : isAttackTarget(e, p.targets, bot.username, ctx.followPlayer));
     // seulement ce qu'il voit : pas de cible repérée à travers un mur
     const nextTarget = () => bot.nearestEntity((e) => e !== bot.entity && wanted(e) && e.position.distanceTo(bot.entity.position) < ATTACK_RADIUS && canSee(bot, e));
     // aucune cible en vue (« tue les vaches ») : on part la chercher, comme pour une récolte
