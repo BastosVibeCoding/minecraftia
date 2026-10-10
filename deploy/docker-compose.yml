@@ -16,6 +16,7 @@ services:
       # serveur hors-ligne et public : seuls les joueurs de la whitelist entrent (ajout par RCON : whitelist add <pseudo>)
       ENABLE_WHITELIST: "TRUE"
       ENFORCE_WHITELIST: "TRUE"
+      SPAWN_PROTECTION: "0"   # tout le monde (bots compris) peut construire près du spawn
       MEMORY: "10G"
       USE_AIKAR_FLAGS: "TRUE"
       # performances + voix + télémétrie pour les bots + skins (FabricTailor)
