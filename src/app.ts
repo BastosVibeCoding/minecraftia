@@ -177,6 +177,7 @@ export class Companion {
       logger.child({ module: 'voix' }),
     );
     this.feedback = new FeedbackHandler({
+      owner: config.followPlayer,
       classifier: deps.classifier,
       tree: deps.tree,
       autonomy: deps.autonomy,
@@ -405,7 +406,13 @@ export class Companion {
 
   /** Énoncé du joueur suivi (chat ou voix transcrite). Les commandes `!…` sont traitées à part. */
   hear(player: string, text: string, channel: 'chat' | 'voice', voiceId?: number): void {
-    if (player !== this.config.followPlayer) return;
+    // les autres bots : jamais de conversation entre bots (elle tournerait en boucle)
+    if (this.config.peers.includes(player) || player === this.config.minecraft.username) return;
+    // un autre joueur : on discute avec lui s'il nous parle, mais sans prendre ses ordres
+    if (player !== this.config.followPlayer) {
+      if (!text.trim().startsWith('!')) void this.feedback.handleGuest(player, text).catch((err: unknown) => this.logger.error({ err }, 'conversation avec un autre joueur en erreur'));
+      return;
+    }
     // « Léa, donne ton fer » dit par mon joueur à l'autre bot : ce n'est pas pour moi
     const peer = this.config.peers.find((p) => isAddressed(text, p) && !isAddressed(text, this.config.minecraft.username));
     if (peer) {

@@ -186,15 +186,38 @@ export class UtteranceClassifier {
   }
 
   /**
-   * Réponse de conversation (« raconte-moi une blague ») : une ou deux phrases, dans le personnage.
+   * Réponse de conversation (« salut ! », « tu aimes les creepers ? ») : courte, naturelle, dans le personnage,
+   * avec le fil des dernières répliques et ce que le bot sait de sa situation.
    * `null` sans modèle, budget épuisé ou erreur : le bot se tait plutôt que d'inventer.
    */
-  async reply(text: string): Promise<string | null> {
+  async reply(
+    text: string,
+    opts: { player?: string; history?: { speaker: string; text: string }[]; context?: string; guestOf?: string } = {},
+  ): Promise<string | null> {
     if (!this.llm || !this.budget || this.budget.exhausted()) return null;
     const who = this.gender === 'feminine' ? 'une compagne' : 'un compagnon';
-    const system = `Tu es ${this.botName}, ${who} de jeu dans Minecraft, qui parle français. Réponds au joueur en une ou deux phrases courtes, naturelles et amicales (pas de liste, pas d'emoji, pas de « / » en début de phrase). Tu ne peux pas promettre d'actions : si on te demande d'agir, dis simplement que tu essaies.`;
+    const player = opts.player ?? 'le joueur';
+    const system =
+      `Tu es ${this.botName}, ${who} de jeu de ${opts.guestOf ?? player} dans Minecraft. Tu parles français, comme un ami qui joue avec lui : ` +
+      `chaleureux, un peu d'humour, naturel. Réponds vraiment à ce qu'on te dit : salue quand on te salue, réponds aux questions ` +
+      `(sur Minecraft, sur toi, sur la partie ou sur autre chose), et relance parfois la discussion par une question. ` +
+      `Une à trois phrases courtes, 200 caractères au plus (pas de liste, pas d'emoji, pas de « / » en début de phrase). ` +
+      `Appuie-toi sur ta situation si elle est utile, sans réciter ton inventaire. N'invente jamais avoir fait une action ; ` +
+      `si on te demande d'agir et que tu n'as pas compris, dis-le simplement et demande de reformuler.` +
+      (opts.guestOf
+        ? ` ${player} n'est pas ton joueur : tu accompagnes ${opts.guestOf}. Discute volontiers avec ${player}, mais tu ne prends pas ` +
+          `d'ordres de lui ; s'il te demande de faire quelque chose, refuse gentiment et dis-lui de demander à ${opts.guestOf}.`
+        : '');
+    const lines = (opts.history ?? []).map((m) => `${m.speaker} : ${m.text}`);
+    const user = [
+      opts.context ? `Ta situation : ${opts.context}` : '',
+      lines.length ? `Conversation récente :\n${lines.join('\n')}` : '',
+      `${player} te dit maintenant : « ${text} »`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     try {
-      const res = await this.llm.complete({ purpose: 'chat', model: this.model, system, user: text, maxTokens: 120 });
+      const res = await this.llm.complete({ purpose: 'chat', model: this.model, system, user, maxTokens: 160 });
       this.budget.record({ purpose: 'chat', model: res.model, promptTokens: res.promptTokens, completionTokens: res.completionTokens, costUsd: res.costUsd, latencyMs: res.latencyMs, ok: true });
       const out = plainReply(res.text).slice(0, 240);
       return out || null;

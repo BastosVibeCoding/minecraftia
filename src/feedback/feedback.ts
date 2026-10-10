@@ -35,6 +35,8 @@ export interface FeedbackDeps {
   /** Phrases adressées au bot mais non comprises → manques. */
   gaps?: GapRecorder;
   botName?: string;
+  /** Le joueur que ce bot accompagne (le seul dont il prend les ordres). */
+  owner?: string;
   /** Inventaire actuel du bot, pour répondre aux questions (« t'as du bois ? »). */
   inventory?: () => Record<string, number> | null;
   /** Dernier objet récolté par le bot (pour « donne » tout court). */
@@ -63,8 +65,20 @@ function withoutVocativeKeepCase(text: string, botName: string): string {
 
 /** Au-delà, un « bien » ou un « non » ne vise plus la dernière décision. */
 const FEEDBACK_WINDOW_MS = 120_000;
-/** Intervalle minimal entre deux réponses de conversation (pas de bavardage en rafale). */
-const CHAT_INTERVAL_MS = 15_000;
+/** Intervalle minimal entre deux réponses de conversation (pas de rafale si le joueur enchaîne). */
+const CHAT_INTERVAL_MS = 2_000;
+/** Après une réponse du bot, la phrase suivante du joueur lui est adressée même sans son nom. */
+const FOLLOW_UP_MS = 45_000;
+/** Au-delà de ce silence, la conversation est oubliée (on repart de zéro). */
+const CONVERSATION_FORGET_MS = 10 * 60_000;
+/** Nombre de répliques gardées pour donner le fil de la conversation au modèle. */
+const CONVERSATION_TURNS = 8;
+
+/** « salut », « bonne nuit », « ça va ? » : politesse courte, répondue même sans le nom du bot. */
+export function isSmallTalk(core: string): boolean {
+  const t = core.trim();
+  return t.split(/\s+/).length <= 6 && /^(salut|bonjour|bonsoir|coucou|hello|hey|yo|wesh|re|bonne (nuit|soiree|journee)|a (plus|demain|tout a l'heure|toute)|au revoir|ciao|bye|ca va|comment (ca va|tu vas|vas tu)|quoi de neuf)\b/.test(t);
+}
 /** Délai pour répondre à « c'est bien la maison ? ». */
 const HOME_ANSWER_MS = 120_000;
 /** Délai pour répondre à « je mine quoi ? » ; ensuite la question est oubliée. */
@@ -79,6 +93,8 @@ export class FeedbackHandler {
   /** Ordre vague en attente de précision (« va miner » → « je mine quoi ? »). */
   private pendingOrder: { text: string; until: number } | null = null;
   private lastChatAt = -Infinity;
+  /** Fil de la conversation (répliques du joueur et du bot), pour des réponses qui se suivent. */
+  private conversation: { speaker: string; to?: string; text: string; at: number }[] = [];
   /** Dernière phrase qui parlait d'un objet (« t'as combien de fer ? »). */
   private lastMention: { text: string; at: number } | null = null;
   /** Question « c'est bien la maison ? » en attente de oui / non. */
@@ -143,6 +159,7 @@ export class FeedbackHandler {
     // appelée par son seul nom (« Léa ? ») : elle répond, sans rien décider
     if (d.botName && isAddressed(text, d.botName) && withoutVocative(text, d.botName).replace(/[^a-z0-9]/g, '') === '') {
       d.say('Oui ?');
+      this.remember(player, text, 'Oui ?');
       return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
     }
     const inv = d.inventory?.();
@@ -173,6 +190,7 @@ export class FeedbackHandler {
     const answer = (wh ? answerWhereQuestion(text, wh) : null) ?? (pr ? answerProgressQuestion(text, pr) : null) ?? (st ? answerStatusQuestion(text, st) : null) ?? (inv ? answerInventoryQuestion(text, inv) : null);
     if (answer) {
       d.say(answer);
+      this.remember(player, text, answer);
       d.logger.info({ channel }, `question du joueur : « ${text} » → ${answer}`);
       return { label: 'chatter', confidence: 0.9, classifier: 'rules' };
     }
@@ -217,20 +235,86 @@ export class FeedbackHandler {
         } else d.loop()?.order(text);
         break;
       }
-      case 'chatter':
-        if (d.botName && isAddressed(text, d.botName)) {
-          if (opts.final === false) return { ...c, unclear: true };
-          d.gaps?.misunderstood(text);
-          // on lui parle : il répond, sans agir (au plus une fois toutes les 15 s)
-          if (d.clock.now() - this.lastChatAt >= CHAT_INTERVAL_MS) {
-            this.lastChatAt = d.clock.now();
-            const answer = await d.classifier.reply(text);
-            if (answer) d.say(answer);
-          }
+      case 'chatter': {
+        const addressed = d.botName ? isAddressed(text, d.botName) : false;
+        const chat = isQuestion(text) || isSmallTalk(core);
+        // on lui parle (son nom, une suite de conversation, ou une politesse) : il répond, sans agir
+        if (!addressed && !this.followingUp(player) && !isSmallTalk(core)) break;
+        if (!chat) {
+          // peut-être un ordre mal entendu : la voix retente d'abord (correction, retranscription)
+          if (addressed && opts.final === false) return { ...c, unclear: true };
+          if (addressed) d.gaps?.misunderstood(text);
         }
+        await this.converse(player, text, false, this.situation(inv, st, pr, wh));
         break;
+      }
     }
     return c;
+  }
+
+  /**
+   * Un autre joueur que le sien lui parle : il discute volontiers (s'il est nommé, ou pour la suite
+   * d'une conversation avec ce joueur), mais n'obéit pas : aucun ordre, aucun retour sur ses actions.
+   */
+  async handleGuest(player: string, text: string): Promise<void> {
+    const d = this.deps;
+    if (!d.botName || (!isAddressed(text, d.botName) && !this.followingUp(player))) return;
+    if (withoutVocative(text, d.botName).replace(/[^a-z0-9]/g, '') === '') {
+      d.say('Oui ?');
+      this.remember(player, text, 'Oui ?');
+      return;
+    }
+    d.logger.info({ player }, `un autre joueur me parle : « ${text} »`);
+    await this.converse(player, text, true, this.situation(d.inventory?.(), d.status?.(), d.progress?.(), d.where?.()));
+  }
+
+  /** Le bot vient de répondre à ce joueur : sa phrase suivante lui est adressée, même sans son nom. */
+  private followingUp(player: string): boolean {
+    const last = this.conversation.findLast((m) => m.to !== undefined);
+    return last !== undefined && last.to === player && this.deps.clock.now() - last.at <= FOLLOW_UP_MS;
+  }
+
+  /** Réponse de conversation, avec le fil des dernières répliques et la situation du bot. */
+  private async converse(player: string, text: string, guest: boolean, context: string): Promise<void> {
+    const d = this.deps;
+    const now = d.clock.now();
+    if (now - this.lastChatAt < CHAT_INTERVAL_MS) return;
+    this.lastChatAt = now;
+    this.conversation = this.conversation.filter((m) => now - m.at <= CONVERSATION_FORGET_MS).slice(-CONVERSATION_TURNS);
+    const history = this.conversation.map(({ speaker, text: t }) => ({ speaker, text: t }));
+    const reply = await d.classifier.reply(text, { player, history, context, ...(guest ? { guestOf: d.owner ?? 'ton joueur' } : {}) });
+    if (reply) {
+      this.remember(player, text, reply);
+      d.say(reply);
+    } else this.conversation.push({ speaker: player, text, at: now });
+  }
+
+  /** Note une réplique d'un joueur et la réponse du bot dans le fil de la conversation. */
+  private remember(player: string, said: string, reply: string): void {
+    const now = this.deps.clock.now();
+    this.conversation.push({ speaker: player, text: said, at: now }, { speaker: this.deps.botName ?? 'moi', to: player, text: reply, at: now });
+  }
+
+  /** Ce que le bot sait de sa situation, en une ligne, pour une conversation qui colle au jeu. */
+  private situation(
+    inv: Record<string, number> | null | undefined,
+    st: { health: number; food: number } | null | undefined,
+    pr: { current: string | null; lastOutcome: string | null } | undefined,
+    wh: { toPlayer: number | null; toHome: number | null } | null | undefined,
+  ): string {
+    const parts: string[] = [];
+    if (pr?.current) parts.push(`tu es en train de : ${pr.current}`);
+    else if (pr?.lastOutcome) parts.push(`ta dernière action : ${pr.lastOutcome}`);
+    if (st) parts.push(`vie ${Math.round(st.health)}/20, faim ${Math.round(st.food)}/20`);
+    if (wh?.toPlayer !== null && wh?.toPlayer !== undefined) parts.push(`à ${Math.round(wh.toPlayer)} blocs du joueur`);
+    if (wh?.toHome !== null && wh?.toHome !== undefined) parts.push(`à ${Math.round(wh.toHome)} blocs de la maison`);
+    const items = Object.entries(inv ?? {})
+      .filter(([, n]) => n > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([k, n]) => `${n} ${k}`);
+    if (items.length) parts.push(`inventaire : ${items.join(', ')}`);
+    return parts.join(' ; ');
   }
 
   private recentDecision(): DecisionRecord | null {
