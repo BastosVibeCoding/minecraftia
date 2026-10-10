@@ -211,6 +211,8 @@ async function main(): Promise<void> {
       await rcon.run('bossbar set minecraft:vague players @a');
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
+      // les monstres égarés (à plus de 70 blocs du Roi) reviennent devant la porte
+      await rcon.run(`execute at ${KING} run tp @e[tag=vague,distance=70..] 0 -60 35`);
       // le jour, les monstres ne brûlent pas
       await rcon.run('effect give @e[tag=vague] minecraft:fire_resistance infinite 0 true');
       for (const slot of SLOTS) await rcon.run(`item modify entity @a ${slot} ${UNBREAKABLE}`);
