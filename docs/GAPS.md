@@ -56,7 +56,7 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 | 2026-10-05 | Léa | « reprends tes affaires au sol » | Compétence `pickup {radius?}` : marche sur chaque objet tombé, du plus proche au plus loin ; verbe « reprends ». « fish of the chicken » : transcription ratée, ignoré |
 | 2026-10-05 | Alex | « Léa, donne ton fer » exécuté par Alex | `BOT_PEERS` : phrase adressée à l'autre bot ignorée (sauf si le bot est aussi appelé par son nom) |
 | 2026-10-05 | Léa | « va mettre le fer au four » → pas de combustible ; « Léa prend le charbon » incompris | Four : combustible et objet à cuire pris dans les coffres proches, sinon demande au joueur ; verbe « prend » |
-| 2026-10-05 | Alex | « attaque Léa » | Ignoré volontairement : les bots n'attaquent ni les joueurs ni l'autre bot |
+| 2026-10-05 | Alex | « attaque Léa » | Repris le 2026-10-10 à la demande des joueurs : sur ordre de son joueur, un bot attaque un joueur ou un bot nommé, « les joueurs » (sauf le sien), un villageois (« PNJ ») ; jamais lui-même |
 | 2026-10-05 | Alex | « récupère le fer dans les trois fours » → le four est vide (2×) | `furnace_take` passe par tous les fours à portée (24 blocs), pas seulement le plus proche |
 | 2026-10-05 | joueurs | « donne » devrait viser le dernier objet évoqué | « donne », « donne-le », « donne-les-moi » → dernier objet évoqué (question, ordre) ou récolté, le plus récent ; « donne tout » reste tout |
 | 2026-10-05 | Alex | non relevés : « donne » (pas de all), « récolte le fer dans le four et mets-le dans le coffre » (pas de raw_iron, 2×) | Le registre ignorait les échecs « précondition » : désormais relevés pour tout ordre. `give all` (tout sauf équipement/nourriture), compétence `furnace_take`, ordres en plusieurs étapes (`splitOrder` : « et/puis » + verbe) exécutés à la suite avec le résultat précédent en contexte |
@@ -87,4 +87,6 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06, 6 éléments (reste là, blocs fabriqués pour construire, four libre, cuisson à la maison, étapes « et fait », retour à la maison en creusant).
 
-1. Voix : retranscription précise puis correction si incomprise
+1. Voix : correction par le modèle de langage d'abord, retranscription précise (turbo) en secours
+2. Conversation : politesses et suites sans le nom, fil des répliques et situation du bot ; discuter avec les autres joueurs sans prendre leurs ordres
+3. Attaquer un joueur ou un bot par son pseudo, « les joueurs », un villageois (« PNJ »)
