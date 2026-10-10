@@ -174,7 +174,7 @@ interface Passive {
 const PASSIVES: Passive[] = [
   { key: 'vie', label: '+1 cœur', color: 'red', price: 10, max: 10, attribute: ['generic.max_health', (l) => 20 + 2 * l] },
   { key: 'force', label: '+1 dégât', color: 'dark_red', price: 12, max: 5, attribute: ['generic.attack_damage', (l) => 1 + l] },
-  { key: 'armure', label: "+1 point d'armure", color: 'gray', price: 10, max: 10, attribute: ['generic.armor', (l) => l] },
+  { key: 'armure', label: '+1 point d’armure', color: 'gray', price: 10, max: 10, attribute: ['generic.armor', (l) => l] },
   { key: 'vitesse', label: '+6 % de vitesse', color: 'aqua', price: 8, max: 5, attribute: ['generic.movement_speed', (l) => 0.1 * (1 + 0.06 * l)] },
   { key: 'stabilite', label: '-10 % de recul', color: 'dark_green', price: 6, max: 5, attribute: ['generic.knockback_resistance', (l) => 0.1 * l] },
   { key: 'allonge', label: '+0,5 bloc de portée', color: 'yellow', price: 8, max: 4, attribute: ['player.entity_interaction_range', (l) => 3 + 0.5 * l] },
