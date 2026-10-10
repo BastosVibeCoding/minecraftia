@@ -85,9 +85,4 @@ Relevés avec `bash scripts/gaps-check.sh` (table `skill_gaps` de chaque bot).
 
 ## En attente de déploiement
 
-Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-06, 6 éléments (reste là, blocs fabriqués pour construire, four libre, cuisson à la maison, étapes « et fait », retour à la maison en creusant).
-
-1. Voix : correction par le modèle de langage d'abord, retranscription précise (turbo) en secours
-2. Conversation : politesses et suites sans le nom, fil des répliques et situation du bot ; discuter avec les autres joueurs sans prendre leurs ordres
-3. Attaquer un joueur ou un bot par son pseudo, « les joueurs », un villageois (« PNJ »)
-4. Laure, troisième compagne (suit Plagyat), et prononciation des noms à voix haute (Plagyat se dit « Plajiat »)
+Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite si un joueur tape `!deploy` dans le chat. Dernier déploiement : 2026-10-10, 4 éléments (voix : correction puis turbo ; conversation naturelle et avec les autres joueurs ; attaque des joueurs et bots ; Laure et prononciation des noms), avec nouvelle carte et Alex renommée Alexia.
