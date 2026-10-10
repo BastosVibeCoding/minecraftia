@@ -54,17 +54,17 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
   const sapper = zombieLike && !boss && !giant && i % 4 === 2;
   const charged = creeper && e >= 6 && i % 12 === 11 ? 'powered:1b,' : '';
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
-  const health = Math.round((boss ? 120 + 20 * n : giant ? 40 + 8 * n : ravager ? 80 + 8 * n : 18 + 3 * n) * (1 + (p - 1) / 4));
-  const metal = e >= 6 ? 'iron' : e >= 3 ? 'chainmail' : 'leather';
+  const health = boss ? 80 + 12 * n : giant ? 30 + 5 * n : ravager ? 60 + 5 * n : 16 + 2 * n;
+  const metal = e >= 9 ? 'iron' : e >= 5 ? 'chainmail' : 'leather';
   const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` : '';
-  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
+  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 5 ? `HandItems:[{id:"minecraft:${e >= 9 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
   const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
   const name = boss ? 'Zombie Géant' : giant ? 'Géant' : ravager ? 'Bélier' : '';
   const attrs = [
     scale ? `{id:"minecraft:generic.scale",base:${scale}}` : '',
     `{id:"minecraft:generic.max_health",base:${health}}`,
     '{id:"minecraft:generic.follow_range",base:64}',
-    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${(boss ? 6 : 4) + Math.floor(n / 2)}}` : '',
+    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${(boss ? 5 : 3) + Math.floor(n / 3)}}` : '',
     zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
   return (
