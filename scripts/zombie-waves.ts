@@ -4,7 +4,7 @@
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
- * Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand sur le toit du donjon.
+ * Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand sur le toit du donjon.
  * Tout passe par RCON (aucun bot dans la partie).
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
@@ -18,6 +18,11 @@ const SPAWNS: [number, number][] = [
   [-30, 50], [0, 55], [30, 50], [-50, 30], [50, 30], [-45, -10], [45, -10], [0, -45],
 ];
 const KING = '@e[tag=roi,limit=1]';
+/** Équipement incassable et réparé : seulement les objets qui ont une durabilité (flèches et blocs intacts). */
+const UNBREAKABLE =
+  '{"function":"minecraft:filtered","item_filter":{"predicates":{"minecraft:damage":{}}},' +
+  '"modifier":{"function":"minecraft:set_components","components":{"minecraft:unbreakable":{},"minecraft:damage":0}}}';
+const SLOTS = ['armor.head', 'armor.chest', 'armor.legs', 'armor.feet', 'weapon.offhand', ...Array.from({ length: 9 }, (_, i) => `hotbar.${i}`), ...Array.from({ length: 27 }, (_, i) => `inventory.${i}`)];
 const PAUSE_S = 20;
 /** Attente avant de revenir en jeu après une mort. */
 const RESPAWN_S = 5;
@@ -201,6 +206,7 @@ async function main(): Promise<void> {
       await rcon.run('bossbar set minecraft:vague players @a');
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
+      for (const slot of SLOTS) await rcon.run(`item modify entity @a ${slot} ${UNBREAKABLE}`);
       await rcon.run(`execute at ${KING} run team join chateau @e[tag=vague,type=!creeper,distance=..12]`);
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
