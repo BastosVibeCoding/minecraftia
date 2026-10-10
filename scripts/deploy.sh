@@ -18,5 +18,5 @@ for f in deploy/mc-config/*.json; do
   "${SSH[@]}" "mkdir -p /opt/minecraft/data/config && cat > /opt/minecraft/data/config/$(basename "$f")" < "$f"
 done
 
-echo "→ construction et relance"
-"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build ${*:-voice minecraftia lea laure} 2>&1 | tail -5"
+echo "→ construction et relance (bots et voix seulement : --no-deps ne touche jamais au serveur Minecraft)"
+"${SSH[@]}" "cd /opt/minecraft && docker compose up -d --build --no-deps ${*:-voice minecraftia lea laure} 2>&1 | tail -5"
