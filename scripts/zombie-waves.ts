@@ -6,6 +6,7 @@
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
  * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
  * Passifs (vie, force, armure…) achetés au Maître des passifs, gardés jusqu'à la mort du Roi.
+ * Tourelles achetables, posées sur les remparts, qui tirent sur le monstre le plus proche.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -145,6 +146,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[type=minecraft:item]');
   await rcon.run('kill @e[type=minecraft:iron_golem]');
   await rcon.run('kill @e[type=minecraft:snow_golem]');
+  await rcon.run('kill @e[tag=tourelle]');
   // passifs remis à zéro : ils ne servent que pendant la partie en cours (Bénédiction du Roi comprise)
   for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard players reset * p_${p.key}`);
   await rcon.run(
@@ -229,6 +231,12 @@ const scroll = (p: Passive) =>
   `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}"},` +
   `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 
+/** Emplacements des tourelles sur le chemin de ronde (y = -50), dans l'ordre où elles sont posées. */
+const TURRET_SPOTS: [number, number][] = [[-4, 19], [4, 19], [-8, 19], [8, 19], [-19, 8], [19, 8], [-19, -8], [19, -8], [-8, -19], [8, -19]];
+const TURRET_RANGE = 22;
+const TURRET_DAMAGE = 5;
+const TURRET: Passive = { key: 'tourelle', short: 'Tourelle', label: 'Tourelle (posée sur les remparts)', color: 'aqua', price: 12, max: TURRET_SPOTS.length };
+
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
   // le Maître des passifs, à côté des marchands
@@ -253,8 +261,8 @@ async function setUpShop(rcon: Rcon): Promise<void> {
         'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
     );
   }
-  for (const a of SHOP) {
-    const sell = `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
+  for (const a of [...SHOP, { price: TURRET.price, item: 'tourelle' }]) {
+    const sell = a.item === 'tourelle' ? scroll(TURRET) : `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
     await rcon.run(
       `execute as @e[tag=marchand] run data modify entity @s Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
@@ -361,6 +369,20 @@ async function main(): Promise<void> {
             await rcon.run(`execute at ${name} as @e[tag=vague,distance=..5,limit=1,sort=nearest] at @s run particle minecraft:crit ~ ~1 ~ 0.4 0.6 0.4 0.2 30`);
             await rcon.run(`execute at ${name} run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1 1`);
           }
+        }
+        // tourelles achetées : posées sur les emplacements libres des remparts (au-delà, remboursées)
+        const turrets = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${TURRET.key}"}]`))?.[1] ?? 0);
+        for (let t = 0; t < turrets; t++) {
+          const placed = number(await rcon.run('execute if entity @e[tag=tourelle]'));
+          const spot = TURRET_SPOTS[placed];
+          if (!spot) {
+            await rcon.run(`give ${name} minecraft:emerald ${TURRET.price}`);
+            continue;
+          }
+          const [tx, tz] = spot;
+          await rcon.run(`setblock ${tx} -50 ${tz} minecraft:dispenser[facing=up]`);
+          await rcon.run(`summon minecraft:marker ${tx + 0.5} -49 ${tz + 0.5} {Tags:["tourelle"]}`);
+          await rcon.run(`title @a actionbar {"text":"${name} a posé une tourelle (${placed + 1}/${TURRET_SPOTS.length})","color":"aqua"}`);
         }
         // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
         const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}"}]`))?.[1] ?? 0);
@@ -493,6 +515,11 @@ async function main(): Promise<void> {
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 unless block ^ ^ ^1 minecraft:air run data merge entity @s {ignited:1b}');
+      // les tourelles tirent sur le monstre le plus proche
+      const near = `@e[tag=vague,distance=..${TURRET_RANGE},limit=1,sort=nearest]`;
+      await rcon.run(`execute as @e[tag=tourelle] at @s run damage ${near} ${TURRET_DAMAGE} minecraft:arrow`);
+      await rcon.run(`execute as @e[tag=tourelle] at @s as ${near} at @s run particle minecraft:crit ~ ~1 ~ 0.3 0.5 0.3 0.1 12`);
+      await rcon.run(`execute as @e[tag=tourelle] at @s if entity @e[tag=vague,distance=..${TURRET_RANGE}] run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 0.6 1.2`);
       // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
       await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
       await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:resistance 5 1 true');
