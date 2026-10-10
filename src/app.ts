@@ -32,7 +32,7 @@ import type { Budget } from './decider/budget.js';
 import { HeardAudioExtractor } from './voice/audioIn.js';
 import { VoiceClient } from './voice/voiceClient.js';
 import { VoiceLink } from './voice/voiceLink.js';
-import { ChatSpeaker, CompositeSpeaker, VoiceSpeaker, type Speaker } from './tts/speaker.js';
+import { ChatSpeaker, CompositeSpeaker, pronounce, VoiceSpeaker, type Speaker } from './tts/speaker.js';
 import type { BehaviorTree } from './tree/tree.js';
 import type { Config } from './config/schema.js';
 import { EventBus } from './core/bus.js';
@@ -167,7 +167,7 @@ export class Companion {
       new ChatSpeaker((text) => this.session?.bot.chat(text)),
       voiceClient
         ? new VoiceSpeaker({
-            synth: (text) => voiceClient.synth(text, config.voice.ttsVoice),
+            synth: (text) => voiceClient.synth(pronounce(text, config.voice.pronounce), config.voice.ttsVoice),
             play: (frames) => link.play(frames),
             get available() {
               return voiceClient.connected && link.connected;

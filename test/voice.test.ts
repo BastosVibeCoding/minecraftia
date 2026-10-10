@@ -127,3 +127,14 @@ describe('voix du bot', () => {
     expect(chat).toContain('D\'accord');
   });
 });
+
+describe("prononciation des noms à voix haute (Plagyat se dit « Plajiat »)", () => {
+  it("remplace le nom entier, quelle que soit la casse, sans toucher aux autres mots", async () => {
+    const { pronounce } = await import('../src/tts/speaker.js');
+    const names = { Plagyat: 'Plajiat' };
+    expect(pronounce("Salut Plagyat, ça va ?", names)).toBe('Salut Plajiat, ça va ?');
+    expect(pronounce('plagyat !', names)).toBe('Plajiat !');
+    expect(pronounce('Plagyats et APlagyat', names)).toBe('Plagyats et APlagyat');
+    expect(pronounce('Rien à changer', {})).toBe('Rien à changer');
+  });
+});

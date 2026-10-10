@@ -68,6 +68,18 @@ export const ConfigSchema = z.object({
     linkPort: intFromEnv(8765),
     /** Voix de synthèse propre au bot (ex. fr-FR-DeniseNeural) ; vide = voix par défaut du service. */
     ttsVoice: z.string().optional(),
+    /** Prononciation des noms à voix haute (« Plagyat=Plajiat,Autre=Otre ») ; le chat garde l'orthographe. */
+    pronounce: z
+      .string()
+      .optional()
+      .transform((s) =>
+        Object.fromEntries(
+          (s ?? '')
+            .split(',')
+            .map((p) => p.split('=').map((x) => x.trim()))
+            .filter((p): p is [string, string] => p.length === 2 && Boolean(p[0]) && Boolean(p[1])),
+        ),
+      ),
   }),
   log: z.object({
     level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),

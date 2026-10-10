@@ -63,6 +63,22 @@ services:
       - voice
     restart: unless-stopped
 
+  # troisième compagne : suit Plagyat (/opt/minecraftia-laure)
+  laure:
+    build: /opt/minecraftia/app
+    container_name: laure
+    env_file: /opt/minecraftia-laure/.env
+    environment:
+      MC_HOST: "minecraft"
+      MC_PORT: "25565"
+      DATA_DIR: "/app/data"
+    volumes:
+      - /opt/minecraftia-laure/data:/app/data
+    depends_on:
+      - minecraft
+      - voice
+    restart: unless-stopped
+
   # service vocal : transcription (faster-whisper + Silero VAD) et synthèse (Edge TTS), réseau interne
   voice:
     build: /opt/minecraftia/app/voice

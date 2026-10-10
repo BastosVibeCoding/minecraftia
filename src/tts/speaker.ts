@@ -16,6 +16,16 @@ export class ChatSpeaker implements Speaker {
   }
 }
 
+/** Remplace les noms par leur prononciation (mot entier, sans tenir compte de la casse) avant la synthèse. */
+export function pronounce(text: string, names: Record<string, string>): string {
+  let out = text;
+  for (const [written, spoken] of Object.entries(names)) {
+    const escaped = written.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`(?<![\\p{L}\\d])${escaped}(?![\\p{L}\\d])`, 'giu'), spoken);
+  }
+  return out;
+}
+
 export interface SynthAndPlay {
   synth(text: string): Promise<string[]>;
   play(frames: string[]): Promise<void>;

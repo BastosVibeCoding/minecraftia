@@ -90,3 +90,4 @@ Règle : déployer (bots seulement) au-delà de 5 éléments, ou tout de suite s
 1. Voix : correction par le modèle de langage d'abord, retranscription précise (turbo) en secours
 2. Conversation : politesses et suites sans le nom, fil des répliques et situation du bot ; discuter avec les autres joueurs sans prendre leurs ordres
 3. Attaquer un joueur ou un bot par son pseudo, « les joueurs », un villageois (« PNJ »)
+4. Laure, troisième compagne (suit Plagyat), et prononciation des noms à voix haute (Plagyat se dit « Plajiat »)

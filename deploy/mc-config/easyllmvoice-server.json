@@ -1,6 +1,7 @@
 {
   "endpoints": [
     { "id": "minecraftia", "playerName": "Alex", "host": "minecraftia", "port": 8765, "enabled": true },
-    { "id": "lea", "playerName": "Lea", "host": "lea", "port": 8765, "enabled": true }
+    { "id": "lea", "playerName": "Lea", "host": "lea", "port": 8765, "enabled": true },
+    { "id": "laure", "playerName": "Laure", "host": "laure", "port": 8765, "enabled": true }
   ]
 }
