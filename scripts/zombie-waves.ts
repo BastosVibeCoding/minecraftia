@@ -56,7 +56,7 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
   const health = Math.round((boss ? 120 + 20 * n : giant ? 40 + 8 * n : ravager ? 80 + 8 * n : 18 + 3 * n) * (1 + (p - 1) / 4));
   const metal = e >= 6 ? 'iron' : e >= 3 ? 'chainmail' : 'leather';
-  const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
+  const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` : '';
   const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
   const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
   const name = boss ? 'Zombie Géant' : giant ? 'Géant' : ravager ? 'Bélier' : '';
@@ -206,6 +206,8 @@ async function main(): Promise<void> {
       await rcon.run('bossbar set minecraft:vague players @a');
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
+      // le jour, les monstres ne brûlent pas
+      await rcon.run('effect give @e[tag=vague] minecraft:fire_resistance infinite 0 true');
       for (const slot of SLOTS) await rcon.run(`item modify entity @a ${slot} ${UNBREAKABLE}`);
       await rcon.run(`execute at ${KING} run team join chateau @e[tag=vague,type=!creeper,distance=..12]`);
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
