@@ -5,7 +5,7 @@
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
  * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
- * Passifs permanents (vie, force, armure…) achetés au Maître des passifs, gardés d'une partie à l'autre.
+ * Passifs (vie, force, armure…) achetés au Maître des passifs, gardés jusqu'à la mort du Roi.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -144,11 +144,14 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('forceload remove -32 -32 32 32');
   await rcon.run('kill @e[type=minecraft:item]');
   await rcon.run('kill @e[type=minecraft:iron_golem]');
+  await rcon.run('kill @e[type=minecraft:snow_golem]');
+  // passifs remis à zéro : ils ne servent que pendant la partie en cours (Bénédiction du Roi comprise)
+  for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard players reset * p_${p.key}`);
   await rcon.run(
     "summon minecraft:villager 0 -60 -3 {CustomName:'\"Le Roi\"',CustomNameVisible:1b,NoAI:1b,PersistenceRequired:1b,Tags:[\"roi\"],Glowing:1b," +
       'Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Health:150f,attributes:[{id:"minecraft:generic.max_health",base:150}]}',
   );
-  // la Bénédiction du Roi (passif d'équipe) reste d'une partie à l'autre
+  // vie maximale du Roi selon la Bénédiction (remise à zéro juste avant : le Roi repart à 150)
   const blessing = Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #equipe p_${BLESSING.key}`))?.[1] ?? 0);
   await rcon.run(`attribute ${KING} minecraft:generic.max_health base set ${kingHealth(blessing)}`);
   await rcon.run(`data modify entity ${KING} Health set value ${kingHealth(blessing)}f`);
@@ -190,7 +193,7 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
 
 /**
  * Passifs permanents, vendus en parchemins par le Maître des passifs : un parchemin acheté est consommé
- * aussitôt et monte le niveau du passif (score `p_<clé>`), gardé d'une partie à l'autre, même après la mort du Roi.
+ * aussitôt et monte le niveau du passif (score `p_<clé>`), gardé jusqu'à la fin de la partie (mort du Roi).
  */
 interface Passive {
   key: string;
@@ -216,7 +219,7 @@ const PASSIVES: Passive[] = [
   { key: 'fortune', short: 'Fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
 ];
 
-/** Bénédiction du Roi : passif d'équipe (score de « #equipe »), +25 de vie maximale pour le Roi par niveau. */
+/** Bénédiction du Roi : passif d'équipe (score de « #equipe »), +25 de vie maximale pour le Roi par niveau, jusqu'à la fin de la partie. */
 const BLESSING: Passive = { key: 'roi', short: 'Roi', label: '+25 vie max du Roi', color: 'gold', price: 15, max: 10 };
 const KING_BASE_HEALTH = 150;
 const kingHealth = (level: number) => KING_BASE_HEALTH + 25 * level;
