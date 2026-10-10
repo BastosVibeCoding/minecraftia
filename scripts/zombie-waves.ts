@@ -7,7 +7,8 @@
  * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
  * Passifs (vie, force, armure…) achetés au Maître des passifs, gardés jusqu'à la mort du Roi.
  * Tourelles à poser où l'on veut ; réparation et améliorations du château ; boss uniques (pillards, Roi des zombies,
- * Wither à la vague 20) ; événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
+ * Wither à la vague 20, puis mode Infini) ; tourelles de quatre types améliorables ; le Roi parle ; marché noir ;
+ * événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -120,6 +121,33 @@ const LOOT = [
   'firework_rocket 32',
 ];
 
+/** Répliques du Roi dans le chat, selon ce qui se passe. */
+const KING_LINES = {
+  vague: ['Défendez-moi, mes braves !', 'Ils arrivent… courage !', 'Encore eux ?! Repoussez-les !', 'Pour le royaume !', 'Tenez les murs, j’ai confiance en vous !'],
+  boss: ['Par ma couronne, quel monstre !', 'Ce colosse va écraser mon château !', 'Visez la tête, mes chevaliers !'],
+  blesse: ['Aïe ! Ils me grignotent !', 'Hé ! Quelqu’un pourrait m’aider ?', 'Ma couronne est toute cabossée…'],
+  danger: ['Au secours ! Je ne tiendrai pas longtemps !', 'Ils sont dans la salle du trône !'],
+  critique: ['À l’aide ! Je vais tomber !!', 'Mes chevaliers… je vous en supplie…'],
+  victoire: ['Bravo mes chevaliers !', 'Victoire ! Mais restez sur vos gardes.', 'Magnifique ! Le royaume vous remercie.', 'Ha ! Ils ont pris la fuite !'],
+  marche: ['Hmm, ce marchand masqué ne m’inspire pas confiance… mais ses prix…', 'Un marchand masqué dans la cour ? Faites vite, il ne restera pas.'],
+  infini: ['Vous êtes des légendes ! Mais ils ne s’arrêteront jamais…', 'Plus de boss final… seulement l’infini. Tenez bon !'],
+  mort: ['Je… vous… ai… aimés…', 'Mon royaume… est… tombé…'],
+};
+const pick = (lines: string[]) => lines[Math.floor(Math.random() * lines.length)]!;
+
+/** Marché noir : objets rares à prix fort, chez un marchand masqué qui apparaît pendant certaines pauses. */
+const BLACK_MARKET: { price: number; item: string; components?: string }[] = [
+  { price: 35, item: 'elytra' },
+  { price: 30, item: 'totem_of_undying' },
+  { price: 45, item: 'netherite_chestplate', components: '"minecraft:enchantments":{levels:{"minecraft:protection":3}}' },
+  { price: 30, item: 'netherite_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":3}}' },
+  { price: 35, item: 'trident', components: '"minecraft:enchantments":{levels:{"minecraft:loyalty":3,"minecraft:impaling":5}}' },
+  { price: 40, item: 'mace', components: '"minecraft:enchantments":{levels:{"minecraft:density":5,"minecraft:wind_burst":2}}' },
+  { price: 30, item: 'enchanted_golden_apple' },
+];
+/** Chance qu'un marchand masqué apparaisse pendant une pause. */
+const BLACK_MARKET_CHANCE = 0.35;
+
 /** Équipement de départ, redonné à chaque nouvelle partie. */
 const KIT = [
   'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots',
@@ -149,6 +177,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[type=minecraft:iron_golem]');
   await rcon.run('kill @e[type=minecraft:snow_golem]');
   await rcon.run('kill @e[tag=tourelle]');
+  await rcon.run('kill @e[tag=marchenoir]');
   // passifs remis à zéro : ils ne servent que pendant la partie en cours (Bénédiction du Roi comprise)
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard players reset * p_${p.key}`);
   await rcon.run(
@@ -171,6 +200,35 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
 
+/** Types de tourelles : étiquette, nom, couleur, prix, bloc en guise de tête. */
+interface TurretKind {
+  tag: string;
+  name: string;
+  color: string;
+  price: number;
+  head: string;
+}
+const TURRET_KINDS: TurretKind[] = [
+  { tag: 'fleche', name: 'Tourelle', color: 'aqua', price: 12, head: 'dispenser' },
+  { tag: 'glace', name: 'Tourelle de glace', color: 'blue', price: 14, head: 'blue_ice' },
+  { tag: 'feu', name: 'Tourelle de feu', color: 'red', price: 14, head: 'magma_block' },
+  { tag: 'canon', name: 'Canon', color: 'dark_gray', price: 18, head: 'tnt' },
+];
+/** Dégâts par type et par niveau (1 à 3). */
+const TURRET_DAMAGE: Record<string, [number, number, number]> = { fleche: [5, 8, 12], glace: [3, 4, 6], feu: [4, 6, 9], canon: [4, 6, 9] };
+/** Emplacements d'un support d'armure tous verrouillés : on ne peut rien lui prendre ni lui mettre. */
+const LOCKED_SLOTS = 4144959;
+const turretComponents = (k: TurretKind) =>
+  `"minecraft:custom_name":'{"text":"${k.name}","color":"${k.color}","italic":false}',"minecraft:entity_data":{id:"minecraft:armor_stand",` +
+  `Tags:["tourelle","${k.tag}"],Invulnerable:1b,NoBasePlate:1b,DisabledSlots:${LOCKED_SLOTS},CustomName:'"${k.name}"',CustomNameVisible:1b,` +
+  `ArmorItems:[{},{},{},{id:"minecraft:${k.head}",count:1}]}`;
+/** Sélecteur d'un type (les tourelles posées avant les types, étiquette « tourelle » seule, tirent des flèches). */
+const kindSelector = (k: TurretKind) => (k.tag === 'fleche' ? 'tag=!glace,tag=!feu,tag=!canon' : `tag=${k.tag}`);
+/** Parchemin d'amélioration de tourelle : à garder sur soi en s'approchant d'une tourelle (3 niveaux). */
+const TURRET_UPGRADE = { key: 'ameliotourelle', label: 'Amélioration de tourelle (approchez-vous d’une tourelle)', color: 'light_purple' };
+const scrollComponents = (p: { key: string; label: string; color: string }) =>
+  `"minecraft:custom_data":{passif:"${p.key}"},"minecraft:custom_name":'{"text":"${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b`;
+
 /** Articles du marchand (prix en émeraudes) ; `components` au format NBT des objets. */
 const SHOP: { price: number; item: string; count?: number; components?: string }[] = [
   { price: 1, item: 'flint_and_steel' },
@@ -184,12 +242,9 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 5, item: 'lava_bucket' },
   { price: 8, item: 'snow_golem_spawn_egg' },
   { price: 2, item: 'firework_rocket', count: 16, components: '"minecraft:fireworks":{flight_duration:2b}' },
-  // tourelle : un support d'armure à poser où l'on veut (tête de distributeur), qui tire sur les monstres
-  {
-    price: 12,
-    item: 'armor_stand',
-    components: `"minecraft:custom_name":'{"text":"Tourelle","color":"aqua","italic":false}',"minecraft:entity_data":{id:"minecraft:armor_stand",Tags:["tourelle"],Invulnerable:1b,NoBasePlate:1b,CustomName:'"Tourelle"',CustomNameVisible:1b,ArmorItems:[{},{},{},{id:"minecraft:dispenser",count:1}]}`,
-  },
+  // tourelles : supports d'armure verrouillés à poser où l'on veut, qui tirent sur les monstres
+  ...TURRET_KINDS.map((k) => ({ price: k.price, item: 'armor_stand', components: turretComponents(k) })),
+  { price: 10, item: 'paper', components: scrollComponents(TURRET_UPGRADE) },
   { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 14, item: 'diamond_leggings', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
@@ -240,8 +295,6 @@ const scroll = (p: Passive) =>
   `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}"},` +
   `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 
-const TURRET_RANGE = 22;
-const TURRET_DAMAGE = 5;
 
 /** Améliorations d'équipe, vendues en parchemins par les marchands, valables jusqu'à la fin de la partie. */
 const REPAIR: Passive = { key: 'reparation', short: 'Réparation', label: 'Réparation des murs', color: 'green', price: 10, max: 99 };
@@ -321,6 +374,7 @@ async function main(): Promise<void> {
   if (!password) throw new Error('RCON_PASSWORD absent');
   const rcon = new Rcon();
   await rcon.connect(rconHost, Number(process.env.RCON_PORT ?? 25575), password);
+  const kingSays = (line: string) => rcon.run(`tellraw @a [{"text":"<Le Roi> ","color":"gold"},{"text":"${line}","color":"yellow"}]`);
   const say = (title: string, subtitle = '') =>
     rcon.run(`title @a subtitle {"text":"${subtitle}","color":"gray"}`).then(() => rcon.run(`title @a title {"text":"${title}","color":"gold"}`));
 
@@ -418,6 +472,23 @@ async function main(): Promise<void> {
             await rcon.run(`execute at ${name} run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1 1`);
           }
         }
+        // amélioration de tourelle : le parchemin sert quand on se tient à 3 blocs d'une tourelle pas au maximum
+        const scrollItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_UPGRADE.key}"}]`;
+        if (/Found/.test(await rcon.run(`clear ${name} ${scrollItem} 0`)) && /passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=tourelle,tag=!lvl3,distance=..3]`))) {
+          await rcon.run(`clear ${name} ${scrollItem} 1`);
+          await rcon.run(`execute at ${name} run tag @e[tag=tourelle,tag=!lvl3,distance=..3,limit=1,sort=nearest] add cible`);
+          await rcon.run('tag @e[tag=cible,tag=lvl2] add lvl3');
+          await rcon.run('tag @e[tag=cible,tag=lvl3] remove lvl2');
+          await rcon.run('tag @e[tag=cible,tag=!lvl2,tag=!lvl3] add lvl2');
+          for (const kind of TURRET_KINDS) {
+            for (const [lvl, stars] of [[2, '★★'], [3, '★★★']] as const) {
+              await rcon.run(`execute as @e[tag=cible,${kindSelector(kind)},tag=lvl${lvl}] run data merge entity @s {CustomName:'{"text":"${kind.name} ${stars}","color":"${kind.color}"}'}`);
+            }
+          }
+          await rcon.run('execute at @e[tag=cible] run particle minecraft:totem_of_undying ~ ~1.5 ~ 0.3 0.5 0.3 0.3 40');
+          await rcon.run('tag @e[tag=cible] remove cible');
+          await rcon.run(`title ${name} actionbar {"text":"Tourelle améliorée !","color":"light_purple"}`);
+        }
         // améliorations d'équipe : parchemin consommé, effet sur le château pour toute la partie
         for (const u of [REPAIR, ...UPGRADES]) {
           const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${u.key}"}]`))?.[1] ?? 0);
@@ -506,7 +577,13 @@ async function main(): Promise<void> {
     const total = Math.round((4 + 3 * n) * p);
     const theme = waveTheme(n);
     const boss = n % (p > 1 ? 3 : 5) === 0;
-    await say(`Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
+    await rcon.run('kill @e[tag=marchenoir]');
+    if (n === 21) {
+      await say('Mode Infini !', 'Les vagues ne s’arrêteront plus : battez le record');
+      await kingSays(pick(KING_LINES.infini));
+    }
+    await kingSays(pick(boss || n % 10 === 0 || n % 15 === 0 || n === 20 ? KING_LINES.boss : KING_LINES.vague));
+    await say(n > 20 ? `Vague ${n} (Infini)` : `Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
     for (let i = 0; i < total; i++) {
       const [x, z] = SPAWNS[i % SPAWNS.length]!;
@@ -556,6 +633,8 @@ async function main(): Promise<void> {
     await rcon.run(`bossbar set minecraft:vague max ${total + extra}`);
     let kingCalled = false;
     let eventDone = false;
+    /** Seuils de vie du Roi déjà commentés pendant cette vague. */
+    const kingWarned = new Set<string>();
     const started = Date.now();
     let glowing = false;
     let counterAttack = false;
@@ -564,6 +643,7 @@ async function main(): Promise<void> {
       if (!(await kingAlive())) {
         await rcon.run('kill @e[tag=vague]');
         await rcon.run('bossbar set minecraft:vague name {"text":"Le Roi est mort","color":"dark_red"}');
+        await kingSays(pick(KING_LINES.mort));
         const held = n - 1;
         const record = await score('#meilleur', 'record');
         if (held > record) await rcon.run(`scoreboard players set #meilleur record ${held}`);
@@ -599,8 +679,6 @@ async function main(): Promise<void> {
       await rcon.run('team join chateau @a');
       // les monstres égarés (à plus de 70 blocs du Roi) reviennent devant la porte
       await rcon.run(`execute at ${KING} run tp @e[tag=vague,distance=70..] 0 -60 35`);
-      // le jour, les monstres ne brûlent pas
-      await rcon.run('effect give @e[tag=vague] minecraft:fire_resistance infinite 0 true');
       for (const slot of SLOTS) await rcon.run(`item modify entity @a ${slot} ${UNBREAKABLE}`);
       await rcon.run(`execute at ${KING} run team join chateau @e[tag=vague,type=!creeper,distance=..12]`);
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
@@ -636,15 +714,48 @@ async function main(): Promise<void> {
           await say('Ruée !', 'Les monstres accélèrent');
         }
       }
-      // les tourelles tirent sur le monstre le plus proche
-      const near = `@e[tag=vague,distance=..${TURRET_RANGE},limit=1,sort=nearest]`;
-      await rcon.run(`execute as @e[tag=tourelle] at @s run damage ${near} ${TURRET_DAMAGE} minecraft:arrow`);
-      await rcon.run(`execute as @e[tag=tourelle] at @s as ${near} at @s run particle minecraft:crit ~ ~1 ~ 0.3 0.5 0.3 0.1 12`);
-      await rcon.run(`execute as @e[tag=tourelle] at @s if entity @e[tag=vague,distance=..${TURRET_RANGE}] run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 0.6 1.2`);
+      // les tourelles tirent sur le monstre le plus proche, selon leur type et leur niveau
+      for (const level of [1, 2, 3]) {
+        const range = 22 + 6 * (level - 1);
+        const levelSel = level === 1 ? 'tag=!lvl2,tag=!lvl3' : `tag=lvl${level}`;
+        const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
+        for (const kind of TURRET_KINDS) {
+          const turrets = `@e[tag=tourelle,${kindSelector(kind)},${levelSel}]`;
+          const damage = TURRET_DAMAGE[kind.tag]![level - 1];
+          if (kind.tag === 'canon') {
+            // explosion légère : touche tous les monstres à 3 blocs de la cible, sans casser de blocs
+            await rcon.run(`execute as ${turrets} at @s at ${near} as @e[tag=vague,distance=..3] run damage @s ${damage} minecraft:explosion`);
+            await rcon.run(`execute as ${turrets} at @s at ${near} run particle minecraft:explosion ~ ~1 ~ 1 0.5 1 0 3`);
+            await rcon.run(`execute as ${turrets} at @s if entity ${near} run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 0.5 1.4`);
+            continue;
+          }
+          await rcon.run(`execute as ${turrets} at @s run damage ${near} ${damage} minecraft:arrow`);
+          if (kind.tag === 'glace') await rcon.run(`execute as ${turrets} at @s as ${near} run effect give @s minecraft:slowness 3 ${level} true`);
+          // feu, et flèches enflammées au niveau 3
+          if (kind.tag === 'feu' || level === 3) await rcon.run(`execute as ${turrets} at @s as ${near} run data merge entity @s {Fire:120s}`);
+          const particle = kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
+          await rcon.run(`execute as ${turrets} at @s as ${near} at @s run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 12`);
+          await rcon.run(`execute as ${turrets} at @s if entity ${near} run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 0.6 1.2`);
+        }
+      }
+      await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
       // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
       await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
       await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:resistance 5 1 true');
       await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:regeneration 5 0 true');
+      // le Roi commente sa vie (75 %, 50 %, 25 %)
+      {
+        const hp = number(await rcon.run(`data get entity ${KING} Health`));
+        const max = Number(/is (-?[0-9.]+)/.exec(await rcon.run(`attribute ${KING} minecraft:generic.max_health get`))?.[1] ?? KING_BASE_HEALTH);
+        for (const [key, ratio] of [['critique', 0.25], ['danger', 0.5], ['blesse', 0.75]] as const) {
+          if (hp > 0 && hp < ratio * max && !kingWarned.has(key)) {
+            for (const k of ['critique', 'danger', 'blesse']) if (k === key || kingWarned.has(key)) kingWarned.add(k);
+            kingWarned.add(key);
+            await kingSays(pick(KING_LINES[key]));
+            break;
+          }
+        }
+      }
       // une fois par vague, quand sa vie passe sous 30 %, le Roi repousse les monstres autour de lui
       if (!counterAttack) {
         const hp = number(await rcon.run(`data get entity ${KING} Health`));
@@ -688,6 +799,22 @@ async function main(): Promise<void> {
         await rcon.run(`item replace block 0 -60 15 container.${11 + k} with minecraft:${id} ${count}`);
       }
       await rcon.run('title @a actionbar {"text":"Un coffre de butin est apparu dans la cour !","color":"light_purple"}');
+    }
+    await kingSays(pick(KING_LINES.victoire));
+    if (Math.random() < BLACK_MARKET_CHANCE) {
+      await rcon.run(
+        `summon minecraft:wandering_trader 0 -60 15 {CustomName:'{"text":"Marchand masqué","color":"dark_purple"}',CustomNameVisible:1b,` +
+          'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,DespawnDelay:0,Tags:["marchenoir"],Rotation:[180f,0f],Offers:{Recipes:[]}}',
+      );
+      for (const a of BLACK_MARKET) {
+        const sell = `{id:"minecraft:${a.item}",count:1${a.components ? `,components:{${a.components}}` : ''}}`;
+        await rcon.run(
+          `execute as @e[tag=marchenoir] run data modify entity @s Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
+            'maxUses:1,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+        );
+      }
+      await rcon.run('title @a actionbar {"text":"Un marchand masqué est dans la cour… jusqu’à la prochaine vague !","color":"dark_purple"}');
+      await kingSays(pick(KING_LINES.marche));
     }
     await say(`Vague ${n} repoussée !`, `Prochaine vague dans ${PAUSE_S} secondes`);
     for (let s = PAUSE_S; s > 0; s -= 5) {
