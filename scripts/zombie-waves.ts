@@ -97,15 +97,18 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[tag=marchand]');
-  await rcon.run(
-    "summon minecraft:villager 2.5 -60 -2.5 {CustomName:'\"Marchand\"',CustomNameVisible:1b," +
-      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
-      'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
-  );
+  // deux marchands, de part et d'autre du trône, pour ne pas faire la queue
+  for (const x of [2.5, -1.5]) {
+    await rcon.run(
+      `summon minecraft:villager ${x} -60 -2.5 {CustomName:'"Marchand"',CustomNameVisible:1b,` +
+        'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
+        'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
+    );
+  }
   for (const a of SHOP) {
     const sell = `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
     await rcon.run(
-      `data modify entity @e[tag=marchand,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
+      `data modify entity @e[tag=marchand] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
     );
   }
@@ -127,6 +130,8 @@ async function main(): Promise<void> {
   await rcon.run('bossbar set minecraft:roi players @a');
   await rcon.run('scoreboard objectives add tues minecraft.custom:minecraft.mob_kills "Zombies tués"');
   await rcon.run('scoreboard objectives setdisplay sidebar tues');
+  // pas de messages de commandes dans le chat (les nôtres comme celles des admins)
+  for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
   // équipe « château » : un monstre de l'équipe ignore les joueurs (alliés) et vise le Roi ; on peut toujours le frapper
   await rcon.run('team add chateau');
