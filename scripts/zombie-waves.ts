@@ -10,9 +10,14 @@
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { Rcon } from './rcon.js';
 
-const [rconHost = 'localhost', firstDelay = '60', firstWave = '1', power = '1'] = process.argv.slice(2);
+const [rconHost = 'localhost', firstDelay = '60', resumeWave = '1', power = '1'] = process.argv.slice(2);
+/** Marque laissée dans le conteneur après une défaite : au redémarrage, nouvelle partie depuis la vague 1. */
+const GAME_OVER_MARK = '/tmp/partie-finie';
+const firstWave = existsSync(GAME_OVER_MARK) ? '1' : resumeWave;
+rmSync(GAME_OVER_MARK, { force: true });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Points d'apparition hors des murs, surtout côté porte (sud, z positif), sol à y = -60. */
@@ -276,6 +281,7 @@ async function main(): Promise<void> {
         await say('Le Roi est mort !', `Vous avez tenu ${n - 1} vague${n - 1 > 1 ? 's' : ''}`);
         console.log(`partie terminée à la vague ${n}`);
         // nouvelle partie dans 30 s : le conteneur redémarre le script (--restart), qui remet tout à zéro
+        writeFileSync(GAME_OVER_MARK, String(n));
         await sleep(25_000);
         await say('Nouvelle partie !', 'Le château est remis à neuf');
         await sleep(5_000);
