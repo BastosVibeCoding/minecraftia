@@ -46,7 +46,13 @@ function number(reply: string): number {
  * (assez petits pour passer la porte) dès la vague 2, vindicateurs dès la 3, un ravageur dès la 6,
  * et un boss géant (trop grand pour la porte : à abattre depuis les remparts) toutes les 5 vagues.
  */
+/** Thème de la vague : toutes les 4 vagues des araignées (elles escaladent), toutes les 7 des squelettes archers. */
+function waveTheme(n: number): 'normale' | 'araignées' | 'squelettes' {
+  return n % 7 === 0 ? 'squelettes' : n % 4 === 0 ? 'araignées' : 'normale';
+}
+
 function mobCommand(n: number, i: number, x: number, z: number, p: number, id: string): { command: string; name: string; health: number } {
+  const theme = waveTheme(n);
   // e : vague « effective », plus avancée quand la partie est plus dure
   const e = n + (p - 1);
   const boss = n % (p > 1 ? 3 : 5) === 0 && i === 0;
@@ -56,18 +62,23 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number, id: s
   const vindicator = !giant && !ravager && n >= (p > 1 ? 2 : 3) && i % 5 === 4;
   // creepers : ils font sauter les murs (chargés quand la partie avance)
   const creeper = !giant && !ravager && !vindicator && !boss && e >= 3 && i % 6 === 5;
-  const type = creeper ? 'creeper' : ravager ? 'ravager' : vindicator ? 'vindicator' : e >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
+  let type = creeper ? 'creeper' : ravager ? 'ravager' : vindicator ? 'vindicator' : e >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
+  // vagues à thème : les zombies (hors boss) deviennent araignées ou squelettes archers
+  if (!boss && theme !== 'normale' && (type === 'zombie' || type === 'husk')) {
+    type = theme === 'araignées' ? (i % 4 === 3 && !giant ? 'cave_spider' : 'spider') : i % 3 === 1 ? 'stray' : 'skeleton';
+  }
   const zombieLike = type === 'zombie' || type === 'husk';
+  const archer = type === 'skeleton' || type === 'stray';
   // sapeurs : un zombie sur quatre creuse les murs de pierre (voir la boucle principale)
   const sapper = zombieLike && !boss && !giant && i % 4 === 2;
   const charged = creeper && e >= 6 && i % 12 === 11 ? 'powered:1b,' : '';
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
   const health = boss ? 100 + 15 * n : giant ? 36 + 6 * n : ravager ? 70 + 6 * n : 18 + 3 * n;
   const metal = e >= 9 ? 'iron' : e >= 5 ? 'chainmail' : 'leather';
-  const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` : '';
-  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 5 ? `HandItems:[{id:"minecraft:${e >= 9 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
+  const armor = (zombieLike || archer) && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` : '';
+  const weapon = archer ? 'HandItems:[{id:"minecraft:bow",count:1},{}],' : vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 5 ? `HandItems:[{id:"minecraft:${e >= 9 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
   const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
-  const name = boss ? 'Zombie Géant' : giant ? 'Géant' : ravager ? 'Bélier' : '';
+  const name = boss ? 'Zombie Géant' : giant ? (archer ? 'Archer géant' : type === 'spider' ? 'Araignée géante' : 'Géant') : ravager ? 'Bélier' : '';
   const attrs = [
     scale ? `{id:"minecraft:generic.scale",base:${scale}}` : '',
     `{id:"minecraft:generic.max_health",base:${health}}`,
@@ -93,6 +104,18 @@ function healthBar(name: string, hp: number, max: number): string {
   ];
   return `[${parts.join(',')}]`;
 }
+
+/** Butin du coffre qui apparaît toutes les 5 vagues (4 objets tirés au hasard). */
+const LOOT = [
+  'elytra', 'totem_of_undying', 'ender_pearl 8', 'golden_apple 5', 'enchanted_golden_apple',
+  'trident[enchantments={levels:{"minecraft:loyalty":3,"minecraft:impaling":3}}]',
+  'enchanted_book[stored_enchantments={levels:{"minecraft:sharpness":5}}]',
+  'enchanted_book[stored_enchantments={levels:{"minecraft:protection":4}}]',
+  'diamond_chestplate[enchantments={levels:{"minecraft:protection":4}}]',
+  'crossbow[enchantments={levels:{"minecraft:piercing":4,"minecraft:quick_charge":3}}]',
+  'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]',
+  'emerald 20',
+];
 
 /** Équipement de départ, redonné à chaque nouvelle partie. */
 const KIT = [
@@ -125,6 +148,10 @@ async function newGame(rcon: Rcon): Promise<void> {
     "summon minecraft:villager 0 -60 -3 {CustomName:'\"Le Roi\"',CustomNameVisible:1b,NoAI:1b,PersistenceRequired:1b,Tags:[\"roi\"],Glowing:1b," +
       'Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Health:150f,attributes:[{id:"minecraft:generic.max_health",base:150}]}',
   );
+  // la Bénédiction du Roi (passif d'équipe) reste d'une partie à l'autre
+  const blessing = Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #equipe p_${BLESSING.key}`))?.[1] ?? 0);
+  await rcon.run(`attribute ${KING} minecraft:generic.max_health base set ${kingHealth(blessing)}`);
+  await rcon.run(`data modify entity ${KING} Health set value ${kingHealth(blessing)}f`);
   await rcon.run('scoreboard players reset * tues');
   await rcon.run('scoreboard players reset * morts');
   await rcon.run('clear @a');
@@ -144,8 +171,11 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 3, item: 'cooked_beef', count: 16 },
   { price: 4, item: 'golden_apple', count: 2 },
   { price: 4, item: 'shield', components: '"minecraft:enchantments":{levels:{"minecraft:unbreaking":3}}' },
-  { price: 6, item: 'splash_potion', count: 3, components: '"minecraft:potion_contents":{potion:"minecraft:strong_healing"}' },
+  { price: 2, item: 'splash_potion', components: '"minecraft:potion_contents":{potion:"minecraft:strong_healing"}' },
   { price: 6, item: 'tnt', count: 8 },
+  { price: 3, item: 'cobweb', count: 8 },
+  { price: 5, item: 'lava_bucket' },
+  { price: 8, item: 'snow_golem_spawn_egg' },
   { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 14, item: 'diamond_leggings', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
@@ -165,6 +195,8 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
 interface Passive {
   key: string;
   label: string;
+  /** Nom court pour l'affichage permanent. */
+  short: string;
   color: string;
   price: number;
   max: number;
@@ -172,14 +204,20 @@ interface Passive {
   attribute?: [string, (level: number) => number];
 }
 const PASSIVES: Passive[] = [
-  { key: 'vie', label: '+1 cœur', color: 'red', price: 10, max: 10, attribute: ['generic.max_health', (l) => 20 + 2 * l] },
-  { key: 'force', label: '+1 dégât', color: 'dark_red', price: 12, max: 5, attribute: ['generic.attack_damage', (l) => 1 + l] },
-  { key: 'armure', label: '+1 point d’armure', color: 'gray', price: 10, max: 10, attribute: ['generic.armor', (l) => l] },
-  { key: 'vitesse', label: '+6 % de vitesse', color: 'aqua', price: 8, max: 5, attribute: ['generic.movement_speed', (l) => 0.1 * (1 + 0.06 * l)] },
-  { key: 'stabilite', label: '-10 % de recul', color: 'dark_green', price: 6, max: 5, attribute: ['generic.knockback_resistance', (l) => 0.1 * l] },
-  { key: 'allonge', label: '+0,5 bloc de portée', color: 'yellow', price: 8, max: 4, attribute: ['player.entity_interaction_range', (l) => 3 + 0.5 * l] },
-  { key: 'fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
+  { key: 'vie', short: '❤ Vie', label: '+1 cœur', color: 'red', price: 10, max: 10, attribute: ['generic.max_health', (l) => 20 + 2 * l] },
+  { key: 'force', short: '⚔ Force', label: '+1 dégât', color: 'dark_red', price: 12, max: 5, attribute: ['generic.attack_damage', (l) => 1 + l] },
+  { key: 'armure', short: 'Armure', label: '+1 point d’armure', color: 'gray', price: 10, max: 10, attribute: ['generic.armor', (l) => l] },
+  { key: 'vitesse', short: 'Vitesse', label: '+6 % de vitesse', color: 'aqua', price: 8, max: 5, attribute: ['generic.movement_speed', (l) => 0.1 * (1 + 0.06 * l)] },
+  { key: 'stabilite', short: 'Stabilité', label: '-10 % de recul', color: 'dark_green', price: 6, max: 5, attribute: ['generic.knockback_resistance', (l) => 0.1 * l] },
+  { key: 'allonge', short: 'Allonge', label: '+0,5 bloc de portée', color: 'yellow', price: 8, max: 4, attribute: ['player.entity_interaction_range', (l) => 3 + 0.5 * l] },
+  { key: 'saut', short: 'Saut', label: '+1/2 bloc de saut', color: 'white', price: 8, max: 3, attribute: ['generic.jump_strength', (l) => 0.42 + 0.1 * l] },
+  { key: 'fortune', short: 'Fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
 ];
+
+/** Bénédiction du Roi : passif d'équipe (score de « #equipe »), +25 de vie maximale pour le Roi par niveau. */
+const BLESSING: Passive = { key: 'roi', short: 'Roi', label: '+25 vie max du Roi', color: 'gold', price: 15, max: 10 };
+const KING_BASE_HEALTH = 150;
+const kingHealth = (level: number) => KING_BASE_HEALTH + 25 * level;
 
 /** Parchemin d'un passif (objet unique, reconnu par son étiquette `passif`). */
 const scroll = (p: Passive) =>
@@ -195,7 +233,7 @@ async function setUpShop(rcon: Rcon): Promise<void> {
       'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
       'Tags:["passifs"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
   );
-  for (const p of PASSIVES) {
+  for (const p of [...PASSIVES, BLESSING]) {
     await rcon.run(
       `data modify entity @e[tag=passifs,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${p.price}},sell:${scroll(p)},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
@@ -255,6 +293,8 @@ async function main(): Promise<void> {
   const kingAlive = async (): Promise<boolean> => {
     const reply = await rcon.run(`data get entity ${KING} Health`);
     if (!/data: /.test(reply)) return false;
+    const max = Number(/is (-?[0-9.]+)/.exec(await rcon.run(`attribute ${KING} minecraft:generic.max_health get`))?.[1] ?? KING_BASE_HEALTH);
+    await rcon.run(`bossbar set minecraft:roi max ${Math.round(max)}`);
     await rcon.run(`bossbar set minecraft:roi value ${Math.max(0, Math.round(number(reply)))}`);
     return true;
   };
@@ -262,7 +302,7 @@ async function main(): Promise<void> {
   // réapparition après 5 secondes : spectateur avec compte à rebours, puis retour en survie dans la cour
   await rcon.run('gamerule doImmediateRespawn true');
   await rcon.run('scoreboard objectives add morts deathCount');
-  for (const p of PASSIVES) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
+  for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   const waiting = new Set<string>();
   /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
   const kills = new Map<string, number>();
@@ -288,9 +328,34 @@ async function main(): Promise<void> {
           if (gained > 0) {
             levels.set(p.key, level + gained);
             await rcon.run(`scoreboard players set ${name} p_${p.key} ${level + gained}`);
-            await rcon.run(`title ${name} actionbar {"text":"Passif ${p.label} : niveau ${level + gained}/${p.max}","color":"${p.color}"}`);
+            await rcon.run(`title ${name} times 5 40 10`);
+            await rcon.run(`title ${name} subtitle {"text":"Passif ${p.label} : niveau ${level + gained}/${p.max}","color":"${p.color}"}`);
+            await rcon.run(`title ${name} title {"text":""}`);
           }
           if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * p.price}`);
+        }
+        // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
+        const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}"}]`))?.[1] ?? 0);
+        if (blessed > 0) {
+          const level = await score('#equipe', `p_${BLESSING.key}`);
+          const gained = Math.min(blessed, BLESSING.max - level);
+          if (gained > 0) {
+            await rcon.run(`scoreboard players set #equipe p_${BLESSING.key} ${level + gained}`);
+            await rcon.run(`attribute ${KING} minecraft:generic.max_health base set ${kingHealth(level + gained)}`);
+            await rcon.run(`effect give ${KING} minecraft:instant_health 1 3 true`);
+            await rcon.run('title @a times 5 40 10');
+            await rcon.run(`title @a subtitle {"text":"${name} bénit le Roi : niveau ${level + gained}/${BLESSING.max}","color":"gold"}`);
+            await rcon.run('title @a title {"text":""}');
+          }
+          if (blessed > gained) await rcon.run(`give ${name} minecraft:emerald ${(blessed - gained) * BLESSING.price}`);
+        }
+        // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
+        if (!waiting.has(name)) {
+          const owned = PASSIVES.filter((p) => (levels.get(p.key) ?? 0) > 0);
+          const parts = owned.length
+            ? owned.map((p, i) => `{"text":"${i ? ' · ' : ''}${p.short} ${levels.get(p.key)}","color":"${p.color}"}`)
+            : ['{"text":"Aucun passif : voyez le Maître des passifs","color":"gray"}'];
+          await rcon.run(`title ${name} actionbar [${parts.join(',')}]`);
         }
         // passifs appliqués à chaque passage (les valeurs de base repartent à zéro quand on meurt)
         for (const p of PASSIVES) {
@@ -314,7 +379,9 @@ async function main(): Promise<void> {
     })();
   }, 1000);
 
-  await say('Défendez le Roi !', `Vague ${firstWave} dans ${firstDelay} secondes`);
+  await rcon.run('scoreboard objectives add record dummy');
+  const best = await score('#meilleur', 'record');
+  await say('Défendez le Roi !', `Vague ${firstWave} dans ${firstDelay} secondes${best ? ` · record : vague ${best}` : ''}`);
   for (let s = Number(firstDelay); s > 0; s -= 5) {
     await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${firstWave} dans ${s} s","color":"red"}`);
     await sleep(5000);
@@ -326,7 +393,9 @@ async function main(): Promise<void> {
   for (let n = Number(firstWave); ; n++) {
     const p = Math.max(1, Number(power));
     const total = Math.round((4 + 3 * n) * p);
-    await say(`Vague ${n}`, n % (p > 1 ? 3 : 5) === 0 ? 'Un Zombie Géant approche…' : `${total} monstres`);
+    const theme = waveTheme(n);
+    const boss = n % (p > 1 ? 3 : 5) === 0;
+    await say(`Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
     for (let i = 0; i < total; i++) {
       const [x, z] = SPAWNS[i % SPAWNS.length]!;
@@ -336,14 +405,34 @@ async function main(): Promise<void> {
       tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health });
       if (i % 4 === 3) await sleep(1000);
     }
+    if (boss) {
+      const id = `m${nextMob++}`;
+      const hp = 60 + 5 * n;
+      await rcon.run(
+        `summon minecraft:evoker 0 -60 50 {Tags:["vague","${id}"],PersistenceRequired:1b,CustomName:'${healthBar('Nécromancien', hp, hp)}',CustomNameVisible:1b,` +
+          `Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.follow_range",base:64}]}`,
+      );
+      tracked.set(id, { name: 'Nécromancien', max: hp, shown: hp });
+      await rcon.run(`bossbar set minecraft:vague max ${total + 1}`);
+    }
     const started = Date.now();
     let glowing = false;
+    let counterAttack = false;
     for (;;) {
       await sleep(2000);
       if (!(await kingAlive())) {
         await rcon.run('kill @e[tag=vague]');
         await rcon.run('bossbar set minecraft:vague name {"text":"Le Roi est mort","color":"dark_red"}');
-        await say('Le Roi est mort !', `Vous avez tenu ${n - 1} vague${n - 1 > 1 ? 's' : ''}`);
+        const held = n - 1;
+        const record = await score('#meilleur', 'record');
+        if (held > record) await rcon.run(`scoreboard players set #meilleur record ${held}`);
+        await say('Le Roi est mort !', `Vous avez tenu ${held} vague${held > 1 ? 's' : ''}${held > record ? ' : nouveau record !' : ` (record : ${record})`}`);
+        // classement des tueurs de la partie
+        const players = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+        const ranking = await Promise.all(players.map(async (name) => ({ name, kills: await score(name, 'tues') })));
+        ranking.sort((a, b) => b.kills - a.kills);
+        const lines = ranking.map((r, i) => `{"text":"\\n${i + 1}. ${r.name} : ${r.kills} monstre${r.kills > 1 ? 's' : ''}","color":"${i === 0 ? 'gold' : 'white'}"}`);
+        await rcon.run(`tellraw @a [{"text":"Classement de la partie","color":"yellow","bold":true}${lines.length ? ',' + lines.join(',') : ''}]`);
         console.log(`partie terminée à la vague ${n}`);
         // nouvelle partie dans 30 s : le conteneur redémarre le script (--restart), qui remet tout à zéro
         writeFileSync(GAME_OVER_MARK, String(n));
@@ -376,6 +465,22 @@ async function main(): Promise<void> {
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 unless block ^ ^ ^1 minecraft:air run data merge entity @s {ignited:1b}');
+      // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
+      await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
+      await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:resistance 5 1 true');
+      await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:regeneration 5 0 true');
+      // une fois par vague, quand sa vie passe sous 30 %, le Roi repousse les monstres autour de lui
+      if (!counterAttack) {
+        const hp = number(await rcon.run(`data get entity ${KING} Health`));
+        const max = Number(/is (-?[0-9.]+)/.exec(await rcon.run(`attribute ${KING} minecraft:generic.max_health get`))?.[1] ?? KING_BASE_HEALTH);
+        if (hp > 0 && hp < 0.3 * max) {
+          counterAttack = true;
+          await rcon.run(`execute at ${KING} as @e[tag=vague,distance=..8] at @s facing entity ${KING} feet rotated ~ 0 run tp @s ^ ^ ^-6`);
+          await rcon.run(`execute at ${KING} run particle minecraft:explosion_emitter ~ ~1 ~`);
+          await rcon.run(`execute at ${KING} run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 1 1`);
+          await rcon.run('title @a actionbar {"text":"Le Roi repousse les monstres !","color":"gold"}');
+        }
+      }
       // les sapeurs creusent un tunnel d'un bloc sur deux devant eux, dans la pierre et les briques
       await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:mineable/pickaxe');
       await rcon.run('bossbar set minecraft:roi players @a');
@@ -394,6 +499,15 @@ async function main(): Promise<void> {
     await rcon.run('give @a minecraft:golden_apple 1');
     await rcon.run('give @a minecraft:emerald 5');
     await rcon.run(`effect give ${KING} minecraft:instant_health 1 1 true`);
+    if (n % 5 === 0) {
+      await rcon.run('setblock 0 -60 15 minecraft:chest[facing=south]');
+      const picks = [...LOOT].sort(() => Math.random() - 0.5).slice(0, 4);
+      for (const [k, item] of picks.entries()) {
+        const [id, count = '1'] = item.split(' ');
+        await rcon.run(`item replace block 0 -60 15 container.${11 + k} with minecraft:${id} ${count}`);
+      }
+      await rcon.run('title @a actionbar {"text":"Un coffre de butin est apparu dans la cour !","color":"light_purple"}');
+    }
     await say(`Vague ${n} repoussée !`, `Prochaine vague dans ${PAUSE_S} secondes`);
     for (let s = PAUSE_S; s > 0; s -= 5) {
       await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${n + 1} dans ${s} s","color":"green"}`);
