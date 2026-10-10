@@ -4,7 +4,7 @@
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
- * Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand sur le toit du donjon.
+ * Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
@@ -94,11 +94,11 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 40, item: 'netherite_sword', components: '"minecraft:enchantments":{levels:{"minecraft:sharpness":5,"minecraft:fire_aspect":2,"minecraft:sweeping_edge":3}}' },
 ];
 
-/** Le marchand, sur le toit du donjon (hors de portée des zombies), avec les articles de la boutique. */
+/** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[tag=marchand]');
   await rcon.run(
-    "summon minecraft:villager 0 -47 -2 {CustomName:'\"Marchand\"',CustomNameVisible:1b," +
+    "summon minecraft:villager 2.5 -60 -2.5 {CustomName:'\"Marchand\"',CustomNameVisible:1b," +
       'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
       'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
   );
