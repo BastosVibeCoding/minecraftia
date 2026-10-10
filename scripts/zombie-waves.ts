@@ -5,6 +5,7 @@
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
  * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
+ * Passifs permanents (vie, force, armure…) achetés au Maître des passifs, gardés d'une partie à l'autre.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -157,8 +158,49 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 40, item: 'netherite_sword', components: '"minecraft:enchantments":{levels:{"minecraft:sharpness":5,"minecraft:fire_aspect":2,"minecraft:sweeping_edge":3}}' },
 ];
 
+/**
+ * Passifs permanents, vendus en parchemins par le Maître des passifs : un parchemin acheté est consommé
+ * aussitôt et monte le niveau du passif (score `p_<clé>`), gardé d'une partie à l'autre, même après la mort du Roi.
+ */
+interface Passive {
+  key: string;
+  label: string;
+  color: string;
+  price: number;
+  max: number;
+  /** Attribut du joueur et sa valeur de base au niveau donné ; absent pour la fortune (émeraudes en plus). */
+  attribute?: [string, (level: number) => number];
+}
+const PASSIVES: Passive[] = [
+  { key: 'vie', label: '+1 cœur', color: 'red', price: 10, max: 10, attribute: ['generic.max_health', (l) => 20 + 2 * l] },
+  { key: 'force', label: '+1 dégât', color: 'dark_red', price: 12, max: 5, attribute: ['generic.attack_damage', (l) => 1 + l] },
+  { key: 'armure', label: "+1 point d'armure", color: 'gray', price: 10, max: 10, attribute: ['generic.armor', (l) => l] },
+  { key: 'vitesse', label: '+6 % de vitesse', color: 'aqua', price: 8, max: 5, attribute: ['generic.movement_speed', (l) => 0.1 * (1 + 0.06 * l)] },
+  { key: 'stabilite', label: '-10 % de recul', color: 'dark_green', price: 6, max: 5, attribute: ['generic.knockback_resistance', (l) => 0.1 * l] },
+  { key: 'allonge', label: '+0,5 bloc de portée', color: 'yellow', price: 8, max: 4, attribute: ['player.entity_interaction_range', (l) => 3 + 0.5 * l] },
+  { key: 'fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
+];
+
+/** Parchemin d'un passif (objet unique, reconnu par son étiquette `passif`). */
+const scroll = (p: Passive) =>
+  `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}"},` +
+  `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
+
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
+  // le Maître des passifs, à côté des marchands
+  await rcon.run('kill @e[tag=passifs]');
+  await rcon.run(
+    `summon minecraft:villager 4.5 -60 -2.5 {CustomName:'{"text":"Maître des passifs","color":"light_purple"}',CustomNameVisible:1b,` +
+      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
+      'Tags:["passifs"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
+  );
+  for (const p of PASSIVES) {
+    await rcon.run(
+      `data modify entity @e[tag=passifs,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${p.price}},sell:${scroll(p)},` +
+        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+    );
+  }
   await rcon.run('kill @e[tag=marchand]');
   // deux marchands, de part et d'autre du trône, pour ne pas faire la queue
   for (const x of [2.5, -1.5]) {
@@ -220,6 +262,7 @@ async function main(): Promise<void> {
   // réapparition après 5 secondes : spectateur avec compte à rebours, puis retour en survie dans la cour
   await rcon.run('gamerule doImmediateRespawn true');
   await rcon.run('scoreboard objectives add morts deathCount');
+  for (const p of PASSIVES) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   const waiting = new Set<string>();
   /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
   const kills = new Map<string, number>();
@@ -232,7 +275,29 @@ async function main(): Promise<void> {
         const k = await score(name, 'tues');
         const before = kills.get(name);
         kills.set(name, k);
-        if (before !== undefined && k > before) await rcon.run(`give ${name} minecraft:emerald ${k - before}`);
+        const levels = new Map<string, number>();
+        for (const p of PASSIVES) levels.set(p.key, await score(name, `p_${p.key}`));
+        // pièces : une émeraude par monstre tué, plus le passif Fortune
+        if (before !== undefined && k > before) await rcon.run(`give ${name} minecraft:emerald ${(k - before) * (1 + (levels.get('fortune') ?? 0))}`);
+        // parchemins achetés : consommés, niveau monté (au-delà du maximum, remboursés)
+        for (const p of PASSIVES) {
+          const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${p.key}"}]`))?.[1] ?? 0);
+          if (bought === 0) continue;
+          const level = levels.get(p.key) ?? 0;
+          const gained = Math.min(bought, p.max - level);
+          if (gained > 0) {
+            levels.set(p.key, level + gained);
+            await rcon.run(`scoreboard players set ${name} p_${p.key} ${level + gained}`);
+            await rcon.run(`title ${name} actionbar {"text":"Passif ${p.label} : niveau ${level + gained}/${p.max}","color":"${p.color}"}`);
+          }
+          if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * p.price}`);
+        }
+        // passifs appliqués à chaque passage (les valeurs de base repartent à zéro quand on meurt)
+        for (const p of PASSIVES) {
+          if (!p.attribute) continue;
+          const [attribute, value] = p.attribute;
+          await rcon.run(`attribute ${name} minecraft:${attribute} base set ${value(levels.get(p.key) ?? 0)}`);
+        }
         if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
         waiting.add(name);
         await rcon.run(`scoreboard players set ${name} morts 0`);
