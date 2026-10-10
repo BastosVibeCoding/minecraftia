@@ -123,6 +123,9 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add tues minecraft.custom:minecraft.mob_kills "Zombies tués"');
   await rcon.run('scoreboard objectives setdisplay sidebar tues');
   await setUpShop(rcon);
+  // équipe « château » : un monstre de l'équipe ignore les joueurs (alliés) et vise le Roi ; on peut toujours le frapper
+  await rcon.run('team add chateau');
+  await rcon.run('team modify chateau friendlyFire true');
   // vie maximale (et non la vie actuelle : le script peut reprendre en cours de partie)
   const maxReply = await rcon.run(`attribute ${KING} minecraft:generic.max_health get`);
   const kingMax = Number(/is (-?[0-9.]+)/.exec(maxReply)?.[1] ?? 100);
@@ -196,6 +199,9 @@ async function main(): Promise<void> {
         return;
       }
       await rcon.run('bossbar set minecraft:vague players @a');
+      // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
+      await rcon.run('team join chateau @a');
+      await rcon.run(`execute at ${KING} run team join chateau @e[tag=vague,type=!creeper,distance=..12]`);
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 unless block ^ ^ ^1 minecraft:air run data merge entity @s {ignited:1b}');
