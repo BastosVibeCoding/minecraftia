@@ -3,11 +3,11 @@
  * défendent le Roi (un villageois immobile, étiqueté « roi »). Barre « Vague » (zombies restants),
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
  * Tout passe par RCON (aucun bot dans la partie).
- * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague]
+ * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
 import { Rcon } from './rcon.js';
 
-const [rconHost = 'localhost', firstDelay = '60', firstWave = '1'] = process.argv.slice(2);
+const [rconHost = 'localhost', firstDelay = '60', firstWave = '1', power = '1'] = process.argv.slice(2);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Points d'apparition hors des murs, surtout côté porte (sud, z positif), sol à y = -60. */
@@ -28,26 +28,29 @@ function number(reply: string): number {
  * (assez petits pour passer la porte) dès la vague 2, vindicateurs dès la 3, un ravageur dès la 6,
  * et un boss géant (trop grand pour la porte : à abattre depuis les remparts) toutes les 5 vagues.
  */
-function mobCommand(n: number, i: number, x: number, z: number): string {
-  const boss = n % 5 === 0 && i === 0;
-  const giant = !boss && n >= 2 && i >= 1 && i <= Math.floor(n / 2);
-  const ravager = n >= 6 && i === Math.floor(n / 2) + 1;
-  const vindicator = !giant && !ravager && n >= 3 && i % 5 === 4;
-  const type = ravager ? 'ravager' : vindicator ? 'vindicator' : n >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
+function mobCommand(n: number, i: number, x: number, z: number, p: number): string {
+  // e : vague « effective », plus avancée quand la partie est plus dure
+  const e = n + (p - 1) * 2;
+  const boss = n % (p > 1 ? 3 : 5) === 0 && i === 0;
+  const giants = p > 1 ? Math.floor((n * p) / 2) : n >= 2 ? Math.floor(n / 2) : 0;
+  const giant = !boss && i >= 1 && i <= giants;
+  const ravager = n >= (p > 1 ? 3 : 6) && i === giants + 1;
+  const vindicator = !giant && !ravager && n >= (p > 1 ? 2 : 3) && i % 5 === 4;
+  const type = ravager ? 'ravager' : vindicator ? 'vindicator' : e >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
   const zombieLike = type === 'zombie' || type === 'husk';
-  const baby = zombieLike && !boss && !giant && n >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
-  const health = boss ? 150 + 25 * n : giant ? 50 + 10 * n : ravager ? 100 + 10 * n : 20 + 4 * n;
-  const metal = n >= 6 ? 'iron' : n >= 3 ? 'chainmail' : 'leather';
-  const armor = zombieLike && n >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
-  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : zombieLike && n >= 3 ? `HandItems:[{id:"minecraft:${n >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
-  const scale = boss ? 4 : giant ? 1.9 : 0;
+  const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
+  const health = Math.round((boss ? 150 + 25 * n : giant ? 50 + 10 * n : ravager ? 100 + 10 * n : 20 + 4 * n) * (1 + (p - 1) / 2));
+  const metal = e >= 6 ? 'iron' : e >= 3 ? 'chainmail' : 'leather';
+  const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
+  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
+  const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
   const name = boss ? 'Zombie Géant' : giant ? 'Géant' : ravager ? 'Bélier' : '';
   const attrs = [
     scale ? `{id:"minecraft:generic.scale",base:${scale}}` : '',
     `{id:"minecraft:generic.max_health",base:${health}}`,
     '{id:"minecraft:generic.follow_range",base:64}',
-    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${6 + n}}` : '',
-    zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * n).toFixed(3)}}` : '',
+    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${6 + e}}` : '',
+    zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
   return (
     `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague"],PersistenceRequired:1b,${baby}` +
@@ -92,12 +95,13 @@ async function main(): Promise<void> {
   }
 
   for (let n = Number(firstWave); ; n++) {
-    const total = 4 + 3 * n;
-    await say(`Vague ${n}`, n % 5 === 0 ? 'Un Zombie Géant approche…' : `${total} monstres`);
+    const p = Math.max(1, Number(power));
+    const total = Math.round((4 + 3 * n) * p);
+    await say(`Vague ${n}`, n % (p > 1 ? 3 : 5) === 0 ? 'Un Zombie Géant approche…' : `${total} monstres`);
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
     for (let i = 0; i < total; i++) {
       const [x, z] = SPAWNS[i % SPAWNS.length]!;
-      await rcon.run(mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2));
+      await rcon.run(mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p));
       if (i % 4 === 3) await sleep(1000);
     }
     const started = Date.now();
