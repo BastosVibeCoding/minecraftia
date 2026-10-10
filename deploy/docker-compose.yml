@@ -88,7 +88,7 @@ services:
       WHISPER_THREADS: "4"
       # retranscription précise, seulement pour une phrase adressée au bot et incomprise
       WHISPER_PRECISE_MODEL: "large-v3-turbo"
-      EDGE_VOICE: "fr-FR-DeniseNeural"   # voix féminine (Alex)
+      EDGE_VOICE: "fr-FR-DeniseNeural"   # voix féminine (Alexia)
       TTS_ENGINE: "edge"
     volumes:
       - /opt/minecraftia/voice-data:/data
