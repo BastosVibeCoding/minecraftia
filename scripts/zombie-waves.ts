@@ -4,6 +4,7 @@
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
  * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
+ * Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand sur le toit du donjon.
  * Tout passe par RCON (aucun bot dans la partie).
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
@@ -68,6 +69,43 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
   );
 }
 
+/** Articles du marchand (prix en émeraudes) ; `components` au format NBT des objets. */
+const SHOP: { price: number; item: string; count?: number; components?: string }[] = [
+  { price: 2, item: 'arrow', count: 32 },
+  { price: 3, item: 'cooked_beef', count: 16 },
+  { price: 4, item: 'golden_apple', count: 2 },
+  { price: 4, item: 'shield', components: '"minecraft:enchantments":{levels:{"minecraft:unbreaking":3}}' },
+  { price: 6, item: 'splash_potion', count: 3, components: '"minecraft:potion_contents":{potion:"minecraft:strong_healing"}' },
+  { price: 6, item: 'tnt', count: 8 },
+  { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
+  { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
+  { price: 14, item: 'diamond_leggings', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
+  { price: 16, item: 'diamond_chestplate', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
+  { price: 12, item: 'bow', components: '"minecraft:enchantments":{levels:{"minecraft:power":4,"minecraft:punch":1,"minecraft:infinity":1}}' },
+  { price: 10, item: 'crossbow', components: '"minecraft:enchantments":{levels:{"minecraft:multishot":1,"minecraft:quick_charge":2}}' },
+  { price: 15, item: 'diamond_sword', components: '"minecraft:enchantments":{levels:{"minecraft:sharpness":3,"minecraft:sweeping_edge":2}}' },
+  { price: 20, item: 'iron_golem_spawn_egg' },
+  { price: 25, item: 'enchanted_golden_apple' },
+  { price: 40, item: 'netherite_sword', components: '"minecraft:enchantments":{levels:{"minecraft:sharpness":5,"minecraft:fire_aspect":2,"minecraft:sweeping_edge":3}}' },
+];
+
+/** Le marchand, sur le toit du donjon (hors de portée des zombies), avec les articles de la boutique. */
+async function setUpShop(rcon: Rcon): Promise<void> {
+  await rcon.run('kill @e[tag=marchand]');
+  await rcon.run(
+    "summon minecraft:villager 0 -47 -2 {CustomName:'\"Marchand\"',CustomNameVisible:1b," +
+      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
+      'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
+  );
+  for (const a of SHOP) {
+    const sell = `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
+    await rcon.run(
+      `data modify entity @e[tag=marchand,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
+        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const password = process.env.RCON_PASSWORD;
   if (!password) throw new Error('RCON_PASSWORD absent');
@@ -84,6 +122,7 @@ async function main(): Promise<void> {
   await rcon.run('bossbar set minecraft:roi players @a');
   await rcon.run('scoreboard objectives add tues minecraft.custom:minecraft.mob_kills "Zombies tués"');
   await rcon.run('scoreboard objectives setdisplay sidebar tues');
+  await setUpShop(rcon);
   // vie maximale (et non la vie actuelle : le script peut reprendre en cours de partie)
   const maxReply = await rcon.run(`attribute ${KING} minecraft:generic.max_health get`);
   const kingMax = Number(/is (-?[0-9.]+)/.exec(maxReply)?.[1] ?? 100);
@@ -101,10 +140,18 @@ async function main(): Promise<void> {
   await rcon.run('gamerule doImmediateRespawn true');
   await rcon.run('scoreboard objectives add morts deathCount');
   const waiting = new Set<string>();
+  /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
+  const kills = new Map<string, number>();
+  const score = async (name: string, objective: string) =>
+    Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get ${name} ${objective}`))?.[1] ?? 0);
   setInterval(() => {
     void (async () => {
       const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((s) => s.trim()).filter(Boolean);
       for (const name of online) {
+        const k = await score(name, 'tues');
+        const before = kills.get(name);
+        kills.set(name, k);
+        if (before !== undefined && k > before) await rcon.run(`give ${name} minecraft:emerald ${k - before}`);
         if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
         waiting.add(name);
         await rcon.run(`scoreboard players set ${name} morts 0`);
@@ -168,6 +215,7 @@ async function main(): Promise<void> {
     // récompense et répit : flèches, pomme dorée, un peu de vie pour le Roi
     await rcon.run('give @a minecraft:arrow 16');
     await rcon.run('give @a minecraft:golden_apple 1');
+    await rcon.run('give @a minecraft:emerald 5');
     await rcon.run(`effect give ${KING} minecraft:instant_health 1 1 true`);
     await say(`Vague ${n} repoussée !`, `Prochaine vague dans ${PAUSE_S} secondes`);
     for (let s = PAUSE_S; s > 0; s -= 5) {
