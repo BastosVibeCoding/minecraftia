@@ -6,7 +6,8 @@
  * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
  * Nouvelle partie (vague 1) : château remis à neuf, inventaires et scores remis à zéro, nouveau Roi.
  * Passifs (vie, force, armure…) achetés au Maître des passifs, gardés jusqu'à la mort du Roi.
- * Tourelles achetables, posées sur les remparts, qui tirent sur le monstre le plus proche.
+ * Tourelles à poser où l'on veut ; réparation et améliorations du château ; boss uniques (pillards, Roi des zombies,
+ * Wither à la vague 20) ; événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -116,6 +117,7 @@ const LOOT = [
   'crossbow[enchantments={levels:{"minecraft:piercing":4,"minecraft:quick_charge":3}}]',
   'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]',
   'emerald 20',
+  'firework_rocket 32',
 ];
 
 /** Équipement de départ, redonné à chaque nouvelle partie. */
@@ -139,7 +141,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
   await rcon.run('forceload add -32 -32 32 32');
   for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
-    await rcon.run(`clone ${x0 + MODEL_DX} -61 -32 ${x1 + MODEL_DX} -43 32 ${x0} -61 -32`);
+    await rcon.run(`clone ${x0 + MODEL_DX} -62 -32 ${x1 + MODEL_DX} -43 32 ${x0} -62 -32`);
   }
   await rcon.run(`forceload remove ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
   await rcon.run('forceload remove -32 -32 32 32');
@@ -148,7 +150,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[type=minecraft:snow_golem]');
   await rcon.run('kill @e[tag=tourelle]');
   // passifs remis à zéro : ils ne servent que pendant la partie en cours (Bénédiction du Roi comprise)
-  for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard players reset * p_${p.key}`);
+  for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard players reset * p_${p.key}`);
   await rcon.run(
     "summon minecraft:villager 0 -60 -3 {CustomName:'\"Le Roi\"',CustomNameVisible:1b,NoAI:1b,PersistenceRequired:1b,Tags:[\"roi\"],Glowing:1b," +
       'Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Health:150f,attributes:[{id:"minecraft:generic.max_health",base:150}]}',
@@ -181,6 +183,13 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 3, item: 'cobweb', count: 8 },
   { price: 5, item: 'lava_bucket' },
   { price: 8, item: 'snow_golem_spawn_egg' },
+  { price: 2, item: 'firework_rocket', count: 16, components: '"minecraft:fireworks":{flight_duration:2b}' },
+  // tourelle : un support d'armure à poser où l'on veut (tête de distributeur), qui tire sur les monstres
+  {
+    price: 12,
+    item: 'armor_stand',
+    components: `"minecraft:custom_name":'{"text":"Tourelle","color":"aqua","italic":false}',"minecraft:entity_data":{id:"minecraft:armor_stand",Tags:["tourelle"],Invulnerable:1b,NoBasePlate:1b,CustomName:'"Tourelle"',CustomNameVisible:1b,ArmorItems:[{},{},{},{id:"minecraft:dispenser",count:1}]}`,
+  },
   { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 14, item: 'diamond_leggings', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
@@ -231,11 +240,48 @@ const scroll = (p: Passive) =>
   `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}"},` +
   `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 
-/** Emplacements des tourelles sur le chemin de ronde (y = -50), dans l'ordre où elles sont posées. */
-const TURRET_SPOTS: [number, number][] = [[-4, 19], [4, 19], [-8, 19], [8, 19], [-19, 8], [19, 8], [-19, -8], [19, -8], [-8, -19], [8, -19]];
 const TURRET_RANGE = 22;
 const TURRET_DAMAGE = 5;
-const TURRET: Passive = { key: 'tourelle', short: 'Tourelle', label: 'Tourelle (posée sur les remparts)', color: 'aqua', price: 12, max: TURRET_SPOTS.length };
+
+/** Améliorations d'équipe, vendues en parchemins par les marchands, valables jusqu'à la fin de la partie. */
+const REPAIR: Passive = { key: 'reparation', short: 'Réparation', label: 'Réparation des murs', color: 'green', price: 10, max: 99 };
+const UPGRADES: Passive[] = [
+  { key: 'murs', short: 'Murs renforcés', label: 'Murs renforcés (sapeurs et creepers moins efficaces)', color: 'dark_gray', price: 25, max: 1 },
+  { key: 'douves', short: 'Douves', label: 'Douves autour du château', color: 'blue', price: 20, max: 1 },
+  { key: 'tours', short: "Tours d’archers", label: "Deux tours d’archers dans la cour", color: 'gold', price: 20, max: 1 },
+];
+
+/** Effet d'une amélioration du château (réparation : recopie des murs intacts, sans effacer les blocs posés). */
+async function applyUpgrade(rcon: Rcon, key: string): Promise<void> {
+  await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
+  await rcon.run('forceload add -32 -32 32 32');
+  if (key === 'reparation') {
+    for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
+      await rcon.run(`clone ${x0 + MODEL_DX} -60 -32 ${x1 + MODEL_DX} -43 32 ${x0} -60 -32 masked`);
+    }
+    const walls = Number(/has (-?\d+)/.exec(await rcon.run('scoreboard players get #equipe p_murs'))?.[1] ?? 0);
+    if (walls > 0) await applyUpgrade(rcon, 'murs');
+  } else if (key === 'murs') {
+    for (const [x0, x1] of [[-24, -1], [0, 24]] as const) {
+      await rcon.run(`fill ${x0} -61 -24 ${x1} -43 24 minecraft:deepslate_bricks replace #minecraft:stone_bricks`);
+    }
+  } else if (key === 'douves') {
+    for (const box of ['-26 -62 -26 26 -61 -23', '-26 -62 23 -3 -61 26', '3 -62 23 26 -61 26', '23 -62 -22 26 -61 22', '-26 -62 -22 -23 -61 22']) {
+      await rcon.run(`fill ${box} minecraft:water replace #minecraft:dirt`);
+    }
+  } else if (key === 'tours') {
+    for (const cx of [-12, 12]) {
+      const cz = 14;
+      await rcon.run(`fill ${cx - 2} -60 ${cz - 2} ${cx + 2} -48 ${cz + 2} minecraft:stone_bricks hollow`);
+      await rcon.run(`fill ${cx - 2} -47 ${cz - 2} ${cx + 2} -47 ${cz + 2} minecraft:stone_brick_wall hollow`);
+      await rcon.run(`fill ${cx} -60 ${cz + 1} ${cx} -48 ${cz + 1} minecraft:ladder[facing=north]`);
+      await rcon.run(`fill ${cx} -60 ${cz - 2} ${cx} -59 ${cz - 2} minecraft:air`);
+      await rcon.run(`setblock ${cx} -46 ${cz} minecraft:lantern`);
+    }
+  }
+  await rcon.run(`forceload remove ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
+  await rcon.run('forceload remove -32 -32 32 32');
+}
 
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
@@ -261,8 +307,8 @@ async function setUpShop(rcon: Rcon): Promise<void> {
         'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
     );
   }
-  for (const a of [...SHOP, { price: TURRET.price, item: 'tourelle' }]) {
-    const sell = a.item === 'tourelle' ? scroll(TURRET) : `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
+  for (const a of [...SHOP, ...[REPAIR, ...UPGRADES].map((u) => ({ price: u.price, item: '', upgrade: u }))]) {
+    const sell = 'upgrade' in a ? scroll(a.upgrade) : `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
     await rcon.run(
       `execute as @e[tag=marchand] run data modify entity @s Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${a.price}},sell:${sell},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
@@ -315,10 +361,12 @@ async function main(): Promise<void> {
   // réapparition après 5 secondes : spectateur avec compte à rebours, puis retour en survie dans la cour
   await rcon.run('gamerule doImmediateRespawn true');
   await rcon.run('scoreboard objectives add morts deathCount');
-  for (const p of [...PASSIVES, BLESSING]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
+  for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   // dégâts infligés (en dixièmes de point de vie) : base du vol de vie et des coups critiques
   await rcon.run('scoreboard objectives add degats minecraft.custom:minecraft.damage_dealt');
   const dealt = new Map<string, number>();
+  /** Monstres restants dans la vague (pour la flèche vers les derniers). */
+  let remaining = 0;
   const stolen = new Map<string, number>();
   const waiting = new Set<string>();
   /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
@@ -370,19 +418,20 @@ async function main(): Promise<void> {
             await rcon.run(`execute at ${name} run playsound minecraft:entity.player.attack.crit master @a ~ ~ ~ 1 1`);
           }
         }
-        // tourelles achetées : posées sur les emplacements libres des remparts (au-delà, remboursées)
-        const turrets = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${TURRET.key}"}]`))?.[1] ?? 0);
-        for (let t = 0; t < turrets; t++) {
-          const placed = number(await rcon.run('execute if entity @e[tag=tourelle]'));
-          const spot = TURRET_SPOTS[placed];
-          if (!spot) {
-            await rcon.run(`give ${name} minecraft:emerald ${TURRET.price}`);
-            continue;
+        // améliorations d'équipe : parchemin consommé, effet sur le château pour toute la partie
+        for (const u of [REPAIR, ...UPGRADES]) {
+          const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${u.key}"}]`))?.[1] ?? 0);
+          if (bought === 0) continue;
+          const level = await score('#equipe', `p_${u.key}`);
+          const gained = Math.min(bought, u.max - level);
+          if (gained > 0) {
+            if (u !== REPAIR) await rcon.run(`scoreboard players set #equipe p_${u.key} ${level + gained}`);
+            await applyUpgrade(rcon, u.key);
+            await rcon.run('title @a times 5 40 10');
+            await rcon.run(`title @a subtitle {"text":"${name} : ${u.label}","color":"${u.color}"}`);
+            await rcon.run('title @a title {"text":""}');
           }
-          const [tx, tz] = spot;
-          await rcon.run(`setblock ${tx} -50 ${tz} minecraft:dispenser[facing=up]`);
-          await rcon.run(`summon minecraft:marker ${tx + 0.5} -49 ${tz + 0.5} {Tags:["tourelle"]}`);
-          await rcon.run(`title @a actionbar {"text":"${name} a posé une tourelle (${placed + 1}/${TURRET_SPOTS.length})","color":"aqua"}`);
+          if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * u.price}`);
         }
         // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
         const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}"}]`))?.[1] ?? 0);
@@ -402,9 +451,21 @@ async function main(): Promise<void> {
         // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
         if (!waiting.has(name)) {
           const owned = PASSIVES.filter((p) => (levels.get(p.key) ?? 0) > 0);
-          const parts = owned.length
+          const parts: string[] = owned.length
             ? owned.map((p, i) => `{"text":"${i ? ' · ' : ''}${p.short} ${levels.get(p.key)}","color":"${p.color}"}`)
             : ['{"text":"Aucun passif : voyez le Maître des passifs","color":"gray"}'];
+          if (remaining > 0 && remaining <= 5) {
+            const me = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity ${name} Pos`));
+            const yaw = Number(/\[(-?[0-9.]+)f/.exec(await rcon.run(`data get entity ${name} Rotation`))?.[1] ?? 0);
+            const foe = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`execute at ${name} run data get entity @e[tag=vague,limit=1,sort=nearest] Pos`));
+            if (me && foe) {
+              const dx = Number(foe[1]) - Number(me[1]);
+              const dz = Number(foe[2]) - Number(me[2]);
+              const rel = ((((Math.atan2(-dx, dz) * 180) / Math.PI - yaw) % 360) + 540) % 360 - 180;
+              const arrow = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'][(Math.round(rel / 45) + 8) % 8];
+              parts.push(`{"text":"   Monstre : ${arrow} ${Math.round(Math.hypot(dx, dz))} blocs","color":"red","bold":true}`);
+            }
+          }
           await rcon.run(`title ${name} actionbar [${parts.join(',')}]`);
         }
         // passifs appliqués à chaque passage (les valeurs de base repartent à zéro quand on meurt)
@@ -463,8 +524,38 @@ async function main(): Promise<void> {
           `Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.follow_range",base:64}]}`,
       );
       tracked.set(id, { name: 'Nécromancien', max: hp, shown: hp });
-      await rcon.run(`bossbar set minecraft:vague max ${total + 1}`);
     }
+    // boss uniques : Chef des pillards (toutes les 10 vagues), Roi des zombies (toutes les 15), Wither affaibli (vague 20)
+    const extraBoss = async (command: string, name: string, hp: number, count: number) => {
+      const id = `m${nextMob++}`;
+      await rcon.run(command.replace('TAGS', `Tags:["vague","${id}"]`).replace('NAME', `CustomName:'${healthBar(name, hp, hp)}',CustomNameVisible:1b`));
+      tracked.set(id, { name, max: hp, shown: hp });
+      extra += count;
+    };
+    let extra = boss ? 1 : 0;
+    if (n % 10 === 0) {
+      const hp = 150 + 10 * n;
+      await extraBoss(
+        `summon minecraft:ravager 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.follow_range",base:64}],` +
+          'Passengers:[{id:"minecraft:pillager",Tags:["vague"],PersistenceRequired:1b,HandItems:[{id:"minecraft:crossbow",count:1},{}],attributes:[{id:"minecraft:generic.follow_range",base:64}]}]}',
+        'Chef des pillards', hp, 2,
+      );
+    }
+    if (n % 15 === 0) {
+      const hp = 200 + 10 * n;
+      await extraBoss(
+        `summon minecraft:zombie 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:${hp}f,ArmorItems:[{},{},{},{id:"minecraft:golden_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` +
+          `HandItems:[{id:"minecraft:golden_sword",count:1},{}],attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.scale",base:2.5},{id:"minecraft:generic.follow_range",base:64},{id:"minecraft:generic.attack_damage",base:8}]}`,
+        'Roi des zombies', hp, 1,
+      );
+    }
+    if (n === 20) {
+      await extraBoss('summon minecraft:wither 0 -45 50 {TAGS,NAME,PersistenceRequired:1b,Health:150f}', 'Wither affaibli', 150, 1);
+      await rcon.run('title @a actionbar {"text":"Le boss final : le Wither !","color":"dark_purple"}');
+    }
+    await rcon.run(`bossbar set minecraft:vague max ${total + extra}`);
+    let kingCalled = false;
+    let eventDone = false;
     const started = Date.now();
     let glowing = false;
     let counterAttack = false;
@@ -515,6 +606,36 @@ async function main(): Promise<void> {
       // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
       await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 unless block ^ ^ ^1 minecraft:air run data merge entity @s {ignited:1b}');
+      // à mi-vie, le Roi des zombies appelle ses sujets (une fois)
+      if (!kingCalled && n % 15 === 0) {
+        for (const [id, mob] of tracked) {
+          if (mob.name !== 'Roi des zombies' || mob.shown > mob.max / 2) continue;
+          kingCalled = true;
+          for (const [ox, oz] of [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [2, -2], [-2, 2]]) {
+            await rcon.run(`execute at @e[tag=${id},limit=1] run summon minecraft:zombie ~${ox} ~ ~${oz} {Tags:["vague"],PersistenceRequired:1b,attributes:[{id:"minecraft:generic.follow_range",base:64}]}`);
+          }
+          await rcon.run('title @a actionbar {"text":"Le Roi des zombies appelle ses sujets !","color":"dark_green"}');
+        }
+      }
+      // événement aléatoire, environ quatre vagues sur dix, au bout de 25 secondes
+      if (!eventDone && Date.now() - started > 25_000) {
+        eventDone = true;
+        const roll = Math.random();
+        if (roll < 0.1) {
+          await rcon.run('weather thunder 90');
+          await rcon.run('execute as @e[type=creeper,tag=vague] run data merge entity @s {powered:1b}');
+          await say('Orage !', 'Les creepers sont chargés');
+        } else if (roll < 0.2) {
+          await rcon.run('effect give @a minecraft:darkness 20 0 true');
+          await say('Brouillard !', 'On ne voit plus rien…');
+        } else if (roll < 0.3) {
+          await rcon.run('execute as @e[tag=vague,sort=random,limit=8] at @s run summon minecraft:tnt ~ ~15 ~ {fuse:45}');
+          await say('Pluie de météores !', 'Le ciel tombe sur les monstres');
+        } else if (roll < 0.4) {
+          await rcon.run('effect give @e[tag=vague] minecraft:speed 20 1 true');
+          await say('Ruée !', 'Les monstres accélèrent');
+        }
+      }
       // les tourelles tirent sur le monstre le plus proche
       const near = `@e[tag=vague,distance=..${TURRET_RANGE},limit=1,sort=nearest]`;
       await rcon.run(`execute as @e[tag=tourelle] at @s run damage ${near} ${TURRET_DAMAGE} minecraft:arrow`);
@@ -537,9 +658,12 @@ async function main(): Promise<void> {
         }
       }
       // les sapeurs creusent un tunnel d'un bloc sur deux devant eux, dans la pierre et les briques
-      await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:mineable/pickaxe');
+      await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:stone_bricks');
+      await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace minecraft:cobblestone');
+      if ((await score('#equipe', 'p_murs')) > 0) await rcon.run('execute as @e[type=creeper,tag=vague] run data merge entity @s {ExplosionRadius:2b}');
       await rcon.run('bossbar set minecraft:roi players @a');
       const left = number(await rcon.run('execute if entity @e[tag=vague]'));
+      remaining = left;
       await rcon.run(`bossbar set minecraft:vague value ${left}`);
       await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${n} : ${left} monstre${left > 1 ? 's' : ''} restant${left > 1 ? 's' : ''}","color":"red"}`);
       // au bout d'une minute, les retardataires brillent à travers les murs
@@ -554,6 +678,8 @@ async function main(): Promise<void> {
     await rcon.run('give @a minecraft:golden_apple 1');
     await rcon.run('give @a minecraft:emerald 5');
     await rcon.run(`effect give ${KING} minecraft:instant_health 1 1 true`);
+    await rcon.run('weather clear');
+    remaining = 0;
     if (n % 5 === 0) {
       await rcon.run('setblock 0 -60 15 minecraft:chest[facing=south]');
       const picks = [...LOOT].sort(() => Math.random() - 0.5).slice(0, 4);
