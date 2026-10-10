@@ -2,7 +2,8 @@
  * Défense du château : des vagues de zombies de plus en plus fortes attaquent le château ; les joueurs
  * défendent le Roi (un villageois immobile, étiqueté « roi »). Barre « Vague » (zombies restants),
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
- * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers les font sauter.
+ * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers marchent jusqu'aux murs et les font sauter.
+ * Réapparition des joueurs après 5 secondes (spectateur, puis retour dans la cour).
  * Tout passe par RCON (aucun bot dans la partie).
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
@@ -17,6 +18,8 @@ const SPAWNS: [number, number][] = [
 ];
 const KING = '@e[tag=roi,limit=1]';
 const PAUSE_S = 20;
+/** Attente avant de revenir en jeu après une mort. */
+const RESPAWN_S = 5;
 
 /** Nombre extrait d'une réponse « Test passed, count: N » ou « …: 87.5f » ; 0 si absent. */
 function number(reply: string): number {
@@ -31,7 +34,7 @@ function number(reply: string): number {
  */
 function mobCommand(n: number, i: number, x: number, z: number, p: number): string {
   // e : vague « effective », plus avancée quand la partie est plus dure
-  const e = n + (p - 1) * 2;
+  const e = n + (p - 1);
   const boss = n % (p > 1 ? 3 : 5) === 0 && i === 0;
   const giants = p > 1 ? Math.floor((n * p) / 2) : n >= 2 ? Math.floor(n / 2) : 0;
   const giant = !boss && i >= 1 && i <= giants;
@@ -45,7 +48,7 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
   const sapper = zombieLike && !boss && !giant && i % 4 === 2;
   const charged = creeper && e >= 6 && i % 12 === 11 ? 'powered:1b,' : '';
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
-  const health = Math.round((boss ? 150 + 25 * n : giant ? 50 + 10 * n : ravager ? 100 + 10 * n : 20 + 4 * n) * (1 + (p - 1) / 2));
+  const health = Math.round((boss ? 120 + 20 * n : giant ? 40 + 8 * n : ravager ? 80 + 8 * n : 18 + 3 * n) * (1 + (p - 1) / 4));
   const metal = e >= 6 ? 'iron' : e >= 3 ? 'chainmail' : 'leather';
   const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
   const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
@@ -55,7 +58,7 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
     scale ? `{id:"minecraft:generic.scale",base:${scale}}` : '',
     `{id:"minecraft:generic.max_health",base:${health}}`,
     '{id:"minecraft:generic.follow_range",base:64}',
-    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${6 + e}}` : '',
+    giant || boss ? `{id:"minecraft:generic.attack_damage",base:${(boss ? 6 : 4) + Math.floor(n / 2)}}` : '',
     zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
   return (
@@ -94,6 +97,30 @@ async function main(): Promise<void> {
     return true;
   };
 
+  // réapparition après 5 secondes : spectateur avec compte à rebours, puis retour en survie dans la cour
+  await rcon.run('gamerule doImmediateRespawn true');
+  await rcon.run('scoreboard objectives add morts deathCount');
+  const waiting = new Set<string>();
+  setInterval(() => {
+    void (async () => {
+      const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((s) => s.trim()).filter(Boolean);
+      for (const name of online) {
+        if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
+        waiting.add(name);
+        await rcon.run(`scoreboard players set ${name} morts 0`);
+        await rcon.run(`gamemode spectator ${name}`);
+        for (let s = RESPAWN_S; s > 0; s--) {
+          await rcon.run(`title ${name} actionbar {"text":"Réapparition dans ${s} s","color":"red"}`);
+          await sleep(1000);
+        }
+        await rcon.run(`tp ${name} 0 -60 12`);
+        await rcon.run(`gamemode survival ${name}`);
+        await rcon.run(`effect give ${name} minecraft:resistance 3 4 true`);
+        waiting.delete(name);
+      }
+    })();
+  }, 1000);
+
   await say('Défendez le Roi !', `Vague ${firstWave} dans ${firstDelay} secondes`);
   for (let s = Number(firstDelay); s > 0; s -= 5) {
     await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${firstWave} dans ${s} s","color":"red"}`);
@@ -122,6 +149,9 @@ async function main(): Promise<void> {
         return;
       }
       await rcon.run('bossbar set minecraft:vague players @a');
+      // les creepers marchent vers le château ; arrivés contre un mur, ils s'allument et font une brèche
+      await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 if block ^ ^ ^1 minecraft:air if block ^ ^1 ^1 minecraft:air run tp @s ^ ^ ^0.8');
+      await rcon.run('execute as @e[type=creeper,tag=vague] at @s facing 0 -60 0 rotated ~ 0 unless block ^ ^ ^1 minecraft:air run data merge entity @s {ignited:1b}');
       // les sapeurs creusent un tunnel d'un bloc sur deux devant eux, dans la pierre et les briques
       await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:mineable/pickaxe');
       await rcon.run('bossbar set minecraft:roi players @a');
