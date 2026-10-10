@@ -2,6 +2,7 @@
  * Défense du château : des vagues de zombies de plus en plus fortes attaquent le château ; les joueurs
  * défendent le Roi (un villageois immobile, étiqueté « roi »). Barre « Vague » (zombies restants),
  * barre « Vie du Roi », tableau des zombies tués. La partie s'arrête quand le Roi meurt.
+ * Les sapeurs (zombies à pioche) creusent les murs de pierre ; les creepers les font sauter.
  * Tout passe par RCON (aucun bot dans la partie).
  * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
  */
@@ -36,13 +37,18 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
   const giant = !boss && i >= 1 && i <= giants;
   const ravager = n >= (p > 1 ? 3 : 6) && i === giants + 1;
   const vindicator = !giant && !ravager && n >= (p > 1 ? 2 : 3) && i % 5 === 4;
-  const type = ravager ? 'ravager' : vindicator ? 'vindicator' : e >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
+  // creepers : ils font sauter les murs (chargés quand la partie avance)
+  const creeper = !giant && !ravager && !vindicator && !boss && e >= 3 && i % 6 === 5;
+  const type = creeper ? 'creeper' : ravager ? 'ravager' : vindicator ? 'vindicator' : e >= 5 && i % 3 === 1 && !giant ? 'husk' : 'zombie';
   const zombieLike = type === 'zombie' || type === 'husk';
+  // sapeurs : un zombie sur quatre creuse les murs de pierre (voir la boucle principale)
+  const sapper = zombieLike && !boss && !giant && i % 4 === 2;
+  const charged = creeper && e >= 6 && i % 12 === 11 ? 'powered:1b,' : '';
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
   const health = Math.round((boss ? 150 + 25 * n : giant ? 50 + 10 * n : ravager ? 100 + 10 * n : 20 + 4 * n) * (1 + (p - 1) / 2));
   const metal = e >= 6 ? 'iron' : e >= 3 ? 'chainmail' : 'leather';
   const armor = zombieLike && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
-  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
+  const weapon = vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 3 ? `HandItems:[{id:"minecraft:${e >= 7 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
   const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
   const name = boss ? 'Zombie Géant' : giant ? 'Géant' : ravager ? 'Bélier' : '';
   const attrs = [
@@ -53,7 +59,7 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number): stri
     zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
   return (
-    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague"],PersistenceRequired:1b,${baby}` +
+    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague"${sapper ? ',"sapeur"' : ''}],PersistenceRequired:1b,${baby}${charged}` +
     `${name ? `CustomName:'"${name}"',CustomNameVisible:1b,` : ''}${armor}${weapon}` +
     `ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],Health:${health}f,attributes:[${attrs.join(',')}]}`
   );
@@ -116,6 +122,8 @@ async function main(): Promise<void> {
         return;
       }
       await rcon.run('bossbar set minecraft:vague players @a');
+      // les sapeurs creusent un tunnel d'un bloc sur deux devant eux, dans la pierre et les briques
+      await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:mineable/pickaxe');
       await rcon.run('bossbar set minecraft:roi players @a');
       const left = number(await rcon.run('execute if entity @e[tag=vague]'));
       await rcon.run(`bossbar set minecraft:vague value ${left}`);
