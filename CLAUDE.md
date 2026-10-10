@@ -46,6 +46,8 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
   Source des skins : `deploy/skins/`. Vérifier dans le playerdata (`fabrictailor:skin_data`).
 - Whitelist en offline-mode : `whitelist add` met l'UUID en ligne ; écrire l'UUID offline
   (md5 « OfflinePlayer:<nom> », v3) dans `whitelist.json` puis `whitelist reload`.
+- `docker compose up` recrée `mc-server` (joueurs éjectés) si son bloc du compose a changé, même en ne
+  nommant qu'un bot : `deploy.sh` passe `--no-deps` ; un changement du serveur se fait à part, joueurs prévenus.
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 
