@@ -165,6 +165,8 @@ export class UtteranceClassifier {
     private readonly model: string,
     private readonly botName = 'Alex',
     private readonly gender: 'feminine' | 'masculine' = 'feminine',
+    /** Trait de caractère propre au bot, ajouté aux réponses de conversation. */
+    private readonly personality?: string,
   ) {}
 
   /**
@@ -204,6 +206,7 @@ export class UtteranceClassifier {
       `Une à trois phrases courtes, 200 caractères au plus (pas de liste, pas d'emoji, pas de « / » en début de phrase). ` +
       `Appuie-toi sur ta situation si elle est utile, sans réciter ton inventaire. N'invente jamais avoir fait une action ; ` +
       `si on te demande d'agir et que tu n'as pas compris, dis-le simplement et demande de reformuler.` +
+      (this.personality ? ` Ton caractère : ${this.personality}` : '') +
       (opts.guestOf
         ? ` ${player} n'est pas ton joueur : tu accompagnes ${opts.guestOf}. Discute volontiers avec ${player}, mais tu ne prends pas ` +
           `d'ordres de lui ; s'il te demande de faire quelque chose, refuse gentiment et dis-lui de demander à ${opts.guestOf}.`

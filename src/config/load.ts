@@ -33,6 +33,7 @@ export function fromEnv(env: Env): Record<string, unknown> {
     peers: env.BOT_PEERS ? env.BOT_PEERS.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     strategy: env.STRATEGY,
     gender: env.BOT_GENDER,
+    personality: env.BOT_PERSONALITY,
     buildInitiative: env.BOT_BUILD_INITIATIVE === undefined ? undefined : env.BOT_BUILD_INITIATIVE === 'true',
     homeRadius: env.BOT_HOME_RADIUS === undefined ? undefined : Number(env.BOT_HOME_RADIUS),
     llmChain: env.LLM_CHAIN,

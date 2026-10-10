@@ -16,6 +16,8 @@ export const ConfigSchema = z.object({
   peers: z.array(z.string().min(1)).default([]),
   /** Genre grammatical du personnage (sa façon de parler d'elle ou de lui-même). Son nom est `minecraft.username`. */
   gender: z.enum(['feminine', 'masculine']).default('feminine'),
+  /** Trait de caractère ajouté à la conversation (ex. « tu as un faible pour Plagyat ») ; vide = aucun. */
+  personality: z.string().max(400).optional(),
   /**
    * Construire de sa propre initiative. Non par défaut : un bot ne peut pas deviner où le joueur veut
    * ses blocs ; il construit seulement sur demande.

@@ -113,3 +113,19 @@ describe("attaquer n'importe qui sur ordre de son joueur (demande du joueur, 202
     expect(isAttackTarget({ name: 'cow', type: 'animal' }, ['zombie'], 'Lea', 'Bilbo')).toBe(false);
   });
 });
+
+describe("trait de caractère propre au bot (Laure a un faible pour Plagyat, 2026-10-10)", () => {
+  it("le trait est ajouté à la consigne de conversation, et absent sans réglage", async () => {
+    const seen: string[] = [];
+    const clock = new ManualClock(Date.UTC(2026, 9, 10, 12));
+    const store = await Store.open(':memory:', new HashingEmbedder(), clock);
+    const llm: LlmClient = {
+      complete: async (req) => (seen.push(req.system), { text: 'ok', model: req.model, promptTokens: 1, completionTokens: 1, costUsd: 0, latencyMs: 1 }),
+    };
+    const budget = new Budget(store.db, clock, 1);
+    await new UtteranceClassifier(llm, budget, 'fast', 'Laure', 'feminine', 'tu as un faible pour Plagyat').reply('salut', { player: 'Plagyat' });
+    await new UtteranceClassifier(llm, budget, 'fast', 'Lea', 'feminine').reply('salut', { player: 'Juicy' });
+    expect(seen[0]).toContain('Ton caractère : tu as un faible pour Plagyat');
+    expect(seen[1]).not.toContain('Ton caractère');
+  });
+});
