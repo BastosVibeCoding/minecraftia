@@ -18,7 +18,8 @@
  * Les joueurs lancent chaque vague en marchant sur la plaque dorée de la cour.
  * Prestige permanent (+1 émeraude par monstre par niveau) chez le Maître du prestige ; victimes des tourelles
  * comptées pour leur poseur (une émeraude toutes les deux).
- * Chaque niveau de passif coûte plus cher que le précédent (un parchemin par niveau).
+ * Chaque niveau de passif coûte plus cher que le précédent ; chaque joueur a son Maître des passifs, qui ne montre
+ * que ses prochains niveaux. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -474,10 +475,12 @@ const scroll = (p: Passive) =>
   `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 /** Prix du niveau `level` d'un passif : +50 % du prix de départ à chaque niveau. */
 const passivePrice = (p: Passive, level: number) => Math.round(p.price * (1 + 0.5 * (level - 1)));
+/** Places des Maîtres des passifs personnels dans la salle du trône (un par joueur connecté). */
+const PASSIVE_NPC_SLOTS = ['4.5 -60 -2.5', '4.5 -60 1.5', '-3.5 -60 1.5', '2.5 -60 1.5'];
 /** Parchemin d'un niveau précis d'un passif (valable seulement pour passer à ce niveau). */
 const levelScroll = (p: Passive, level: number) =>
   `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}",niveau:${level}},` +
-  `"minecraft:custom_name":'{"text":"Passif : ${p.label} (niveau ${level})","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
+  `"minecraft:custom_name":'{"text":"${p.label} (niveau ${level}/${p.max})","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 
 
 /** Améliorations d'équipe, vendues en parchemins par les marchands, valables jusqu'à la fin de la partie. */
@@ -556,21 +559,8 @@ async function setUpShop(rcon: Rcon): Promise<void> {
       );
     }
   }
-  // le Maître des passifs, à côté des marchands
+  // les Maîtres des passifs sont personnels (un par joueur, créés et tenus à jour par la boucle des joueurs)
   await rcon.run('kill @e[tag=passifs]');
-  await rcon.run(
-    `summon minecraft:villager 4.5 -60 -2.5 {CustomName:'{"text":"Maître des passifs","color":"light_purple"}',CustomNameVisible:1b,` +
-      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
-      'Tags:["passifs"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
-  );
-  for (const p of [...PASSIVES, BLESSING]) {
-    for (let level = 1; level <= p.max; level++) {
-      await rcon.run(
-        `data modify entity @e[tag=passifs,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${passivePrice(p, level)}},sell:${levelScroll(p, level)},` +
-          'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
-      );
-    }
-  }
   await rcon.run('kill @e[tag=marchand]');
   // deux marchands, de part et d'autre du trône, pour ne pas faire la queue
   for (const x of [2.5, -1.5]) {
@@ -751,6 +741,8 @@ async function main(): Promise<void> {
   const roleLevels = new Map<string, number>();
   /** Dernière progression montrée dans la barre d'expérience, par joueur. */
   const xpShown = new Map<string, string>();
+  /** Niveaux affichés par le Maître des passifs de chaque joueur (offres refaites quand ils changent). */
+  const passiveShop = new Map<string, string>();
   // dégâts infligés (en dixièmes de point de vie) : base du vol de vie et des coups critiques
   await rcon.run('scoreboard objectives add degats minecraft.custom:minecraft.damage_dealt');
   const dealt = new Map<string, number>();
@@ -819,10 +811,8 @@ async function main(): Promise<void> {
             await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre, pour toujours","color":"gold"}`);
             await rcon.run(`title ${name} title {"text":"★"}`);
             await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
-            if (bought > 1) await rcon.run(`give ${name} minecraft:emerald ${(bought - 1) * price}`);
           } else {
-            await rcon.run(`give ${name} minecraft:emerald ${bought * price}`);
-            await rcon.run(`title ${name} actionbar {"text":"Prestige ${level} : il faut d’abord le niveau ${level - 1 < 1 ? 1 : level - 1} (remboursé)","color":"gray"}`);
+            await rcon.run(`title ${name} actionbar {"text":"Prestige ${level} : il fallait d’abord le niveau ${level - 1 < 1 ? 1 : level - 1} (étoile perdue)","color":"gray"}`);
           }
         }
         // parchemins achetés : consommés, niveau monté (au-delà du maximum, remboursés)
@@ -841,9 +831,8 @@ async function main(): Promise<void> {
               await rcon.run(`title ${name} subtitle {"text":"Passif ${p.label} : niveau ${lvl}/${p.max}","color":"${p.color}"}`);
               await rcon.run(`title ${name} title {"text":""}`);
             } else {
-              await rcon.run(`title ${name} actionbar {"text":"Ce parchemin est pour le niveau ${lvl} : vous êtes niveau ${level} (remboursé)","color":"gray"}`);
+              await rcon.run(`title ${name} actionbar {"text":"Ce parchemin était pour le niveau ${lvl} : vous êtes niveau ${level} (perdu)","color":"gray"}`);
             }
-            if (bought > valid) await rcon.run(`give ${name} minecraft:emerald ${(bought - valid) * passivePrice(p, lvl)}`);
           }
         }
         // vol de vie et coups critiques, d'après les dégâts infligés depuis le dernier passage
@@ -935,7 +924,6 @@ async function main(): Promise<void> {
             await rcon.run(`title @a subtitle {"text":"${name} : ${u.label}","color":"${u.color}"}`);
             await rcon.run('title @a title {"text":""}');
           }
-          if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * u.price}`);
         }
         // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
         for (let lvl = 1; lvl <= BLESSING.max && /Found/.test(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data~{passif:"${BLESSING.key}"}] 0`)); lvl++) {
@@ -951,7 +939,33 @@ async function main(): Promise<void> {
             await rcon.run(`title @a subtitle {"text":"${name} bénit le Roi : niveau ${level + gained}/${BLESSING.max}","color":"gold"}`);
             await rcon.run('title @a title {"text":""}');
           }
-          if (blessed > gained) await rcon.run(`give ${name} minecraft:emerald ${(blessed - gained) * passivePrice(BLESSING, lvl)}`);
+        }
+        // Maître des passifs personnel : seulement le prochain niveau de chaque passif, à son prix
+        {
+          const npc = `@e[tag=passifs_${name},limit=1]`;
+          const slot = PASSIVE_NPC_SLOTS[online.indexOf(name) % PASSIVE_NPC_SLOTS.length]!;
+          if (!/passed/.test(await rcon.run(`execute if entity ${npc}`))) {
+            await rcon.run(
+              `summon minecraft:villager ${slot} {CustomName:'{"text":"Passifs de ${name}","color":"light_purple"}',CustomNameVisible:1b,` +
+                `NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,Tags:["passifs","passifs_${name}"],Rotation:[0f,0f],` +
+                'VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
+            );
+            passiveShop.delete(name);
+          }
+          const blessingLevel = await score('#equipe', `p_${BLESSING.key}`);
+          const signature = [...PASSIVES.map((p) => levels.get(p.key) ?? 0), blessingLevel].join(',');
+          if (passiveShop.get(name) !== signature) {
+            passiveShop.set(name, signature);
+            await rcon.run(`data modify entity ${npc} Offers.Recipes set value []`);
+            const next: [Passive, number][] = [...PASSIVES.map((p): [Passive, number] => [p, (levels.get(p.key) ?? 0) + 1]), [BLESSING, blessingLevel + 1]];
+            for (const [p, level] of next) {
+              if (level > p.max) continue;
+              await rcon.run(
+                `data modify entity ${npc} Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${passivePrice(p, level)}},sell:${levelScroll(p, level)},` +
+                  'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+              );
+            }
+          }
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
         const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
