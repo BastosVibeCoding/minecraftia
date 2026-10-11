@@ -15,6 +15,9 @@
  * Nouveaux monstres (Breeze, Bogged, sorcière, blaze, squelette wither, brute, zoglin, Illusionniste, Warden, shulkers),
  * monstres d'élite, Bélier, tour de siège, assaut par le nord, nuit de sang.
  * Les joueurs lancent chaque vague en marchant sur la plaque dorée de la cour.
+ * Prestige permanent (+1 émeraude par monstre par niveau) chez le Maître du prestige ; victimes des tourelles
+ * comptées pour leur poseur (une émeraude toutes les deux).
+ * Chaque niveau de passif coûte plus cher que le précédent (un parchemin par niveau).
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -439,8 +442,15 @@ const PASSIVES: Passive[] = [
   { key: 'saut', short: 'Saut', label: '+1/2 bloc de saut', color: 'white', price: 8, max: 3, attribute: ['generic.jump_strength', (l) => 0.42 + 0.1 * l] },
   { key: 'vol', short: 'Vol de vie', label: '+5 % de vol de vie', color: 'dark_purple', price: 15, max: 4 },
   { key: 'critique', short: 'Critique', label: '+10 % de coups critiques', color: 'gold', price: 12, max: 5 },
-  { key: 'fortune', short: 'Fortune', label: '+1 émeraude par monstre', color: 'green', price: 15, max: 3 },
 ];
+
+/**
+ * Prestige : +1 émeraude par monstre tué de sa main, par niveau. Vendu par le Maître du prestige, de plus en plus cher,
+ * et permanent : il reste après la mort du Roi et d'une partie à l'autre (score `prestige`, jamais remis à zéro).
+ */
+const PRESTIGE_PRICES = [40, 80, 120, 160, 200];
+/** Victimes des tourelles : une émeraude toutes les deux pour le poseur. */
+const TURRET_KILLS_PER_EMERALD = 2;
 
 /** Bénédiction du Roi : passif d'équipe (score de « #equipe »), +25 de vie maximale pour le Roi par niveau, jusqu'à la fin de la partie. */
 const BLESSING: Passive = { key: 'roi', short: 'Roi', label: '+25 vie max du Roi', color: 'gold', price: 15, max: 10 };
@@ -451,6 +461,12 @@ const kingHealth = (level: number) => game.difficulty.kingHp + 25 * level;
 const scroll = (p: Passive) =>
   `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}"},` +
   `"minecraft:custom_name":'{"text":"Passif : ${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
+/** Prix du niveau `level` d'un passif : +50 % du prix de départ à chaque niveau. */
+const passivePrice = (p: Passive, level: number) => Math.round(p.price * (1 + 0.5 * (level - 1)));
+/** Parchemin d'un niveau précis d'un passif (valable seulement pour passer à ce niveau). */
+const levelScroll = (p: Passive, level: number) =>
+  `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{passif:"${p.key}",niveau:${level}},` +
+  `"minecraft:custom_name":'{"text":"Passif : ${p.label} (niveau ${level})","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
 
 
 /** Améliorations d'équipe, vendues en parchemins par les marchands, valables jusqu'à la fin de la partie. */
@@ -494,6 +510,23 @@ async function applyUpgrade(rcon: Rcon, key: string): Promise<void> {
 
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
+  // le Maître du prestige, dans la salle du trône : niveaux de prestige permanents
+  await rcon.run('kill @e[tag=prestige]');
+  await rcon.run(
+    `summon minecraft:villager -3.5 -60 -2.5 {CustomName:'{"text":"Maître du prestige","color":"gold"}',CustomNameVisible:1b,` +
+      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
+      'Tags:["prestige"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:librarian",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
+  );
+  for (const [i, price] of PRESTIGE_PRICES.entries()) {
+    const level = i + 1;
+    const sell =
+      `{id:"minecraft:nether_star",count:1,components:{"minecraft:custom_data":{prestige:${level}},` +
+      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre (permanent)","color":"gold","italic":false}'}}`;
+    await rcon.run(
+      `data modify entity @e[tag=prestige,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${price}},sell:${sell},` +
+        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+    );
+  }
   // le Maître des rôles, dans la cour devant le donjon : un ticket contre un rôle
   await rcon.run('kill @e[tag=roles]');
   await rcon.run(
@@ -518,10 +551,12 @@ async function setUpShop(rcon: Rcon): Promise<void> {
       'Tags:["passifs"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
   );
   for (const p of [...PASSIVES, BLESSING]) {
-    await rcon.run(
-      `data modify entity @e[tag=passifs,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${p.price}},sell:${scroll(p)},` +
-        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
-    );
+    for (let level = 1; level <= p.max; level++) {
+      await rcon.run(
+        `data modify entity @e[tag=passifs,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${passivePrice(p, level)}},sell:${levelScroll(p, level)},` +
+          'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+      );
+    }
   }
   await rcon.run('kill @e[tag=marchand]');
   // deux marchands, de part et d'autre du trône, pour ne pas faire la queue
@@ -683,6 +718,10 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add morts deathCount');
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   await rcon.run('scoreboard objectives add role dummy');
+  await rcon.run('scoreboard objectives add prestige dummy');
+  /** Victimes des tourelles en attente de paiement, par propriétaire, et reste (une émeraude toutes les deux). */
+  const turretKills = new Map<string, number>();
+  const turretBank = new Map<string, number>();
   await rcon.run('scoreboard objectives add capacite minecraft.used:minecraft.carrot_on_a_stick');
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
   const abilityUsed = new Set<string>();
@@ -727,22 +766,55 @@ async function main(): Promise<void> {
         const levels = new Map<string, number>();
         for (const p of PASSIVES) levels.set(p.key, await score(name, `p_${p.key}`));
         levels.set('role', await score(name, 'role'));
-        // pièces : une émeraude par monstre tué, plus le passif Fortune
-        if (before !== undefined && k > before) await rcon.run(`give ${name} minecraft:emerald ${(k - before) * (1 + (levels.get('fortune') ?? 0))}`);
+        // pièces : victimes de sa main × (1 + prestige) ; victimes de ses tourelles, une émeraude toutes les deux
+        const prestige = await score(name, 'prestige');
+        levels.set('prestige', prestige);
+        if (before !== undefined && k > before) {
+          const byTurret = Math.min(k - before, turretKills.get(name) ?? 0);
+          turretKills.set(name, (turretKills.get(name) ?? 0) - byTurret);
+          const bank = (turretBank.get(name) ?? 0) + byTurret;
+          turretBank.set(name, bank % TURRET_KILLS_PER_EMERALD);
+          const emeralds = (k - before - byTurret) * (1 + prestige) + Math.floor(bank / TURRET_KILLS_PER_EMERALD);
+          if (emeralds > 0) await rcon.run(`give ${name} minecraft:emerald ${emeralds}`);
+        }
+        // prestige acheté : l'étoile n'est valable que pour le niveau suivant (sinon remboursée)
+        for (const [i, price] of PRESTIGE_PRICES.entries()) {
+          const level = i + 1;
+          const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:nether_star[minecraft:custom_data={prestige:${level}}]`))?.[1] ?? 0);
+          if (bought === 0) continue;
+          if (level === (levels.get('prestige') ?? 0) + 1) {
+            levels.set('prestige', level);
+            await rcon.run(`scoreboard players set ${name} prestige ${level}`);
+            await rcon.run(`title ${name} times 5 40 10`);
+            await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre, pour toujours","color":"gold"}`);
+            await rcon.run(`title ${name} title {"text":"★"}`);
+            await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
+            if (bought > 1) await rcon.run(`give ${name} minecraft:emerald ${(bought - 1) * price}`);
+          } else {
+            await rcon.run(`give ${name} minecraft:emerald ${bought * price}`);
+            await rcon.run(`title ${name} actionbar {"text":"Prestige ${level} : il faut d’abord le niveau ${level - 1 < 1 ? 1 : level - 1} (remboursé)","color":"gray"}`);
+          }
+        }
         // parchemins achetés : consommés, niveau monté (au-delà du maximum, remboursés)
         for (const p of PASSIVES) {
-          const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${p.key}"}]`))?.[1] ?? 0);
-          if (bought === 0) continue;
-          const level = levels.get(p.key) ?? 0;
-          const gained = Math.min(bought, p.max - level);
-          if (gained > 0) {
-            levels.set(p.key, level + gained);
-            await rcon.run(`scoreboard players set ${name} p_${p.key} ${level + gained}`);
-            await rcon.run(`title ${name} times 5 40 10`);
-            await rcon.run(`title ${name} subtitle {"text":"Passif ${p.label} : niveau ${level + gained}/${p.max}","color":"${p.color}"}`);
-            await rcon.run(`title ${name} title {"text":""}`);
+          // un seul test par passif tant qu'on n'a rien acheté
+          if (!/Found/.test(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data~{passif:"${p.key}"}] 0`))) continue;
+          for (let lvl = 1; lvl <= p.max; lvl++) {
+            const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${p.key}",niveau:${lvl}}]`))?.[1] ?? 0);
+            if (bought === 0) continue;
+            const level = levels.get(p.key) ?? 0;
+            const valid = lvl === level + 1 ? 1 : 0;
+            if (valid) {
+              levels.set(p.key, lvl);
+              await rcon.run(`scoreboard players set ${name} p_${p.key} ${lvl}`);
+              await rcon.run(`title ${name} times 5 40 10`);
+              await rcon.run(`title ${name} subtitle {"text":"Passif ${p.label} : niveau ${lvl}/${p.max}","color":"${p.color}"}`);
+              await rcon.run(`title ${name} title {"text":""}`);
+            } else {
+              await rcon.run(`title ${name} actionbar {"text":"Ce parchemin est pour le niveau ${lvl} : vous êtes niveau ${level} (remboursé)","color":"gray"}`);
+            }
+            if (bought > valid) await rcon.run(`give ${name} minecraft:emerald ${(bought - valid) * passivePrice(p, lvl)}`);
           }
-          if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * p.price}`);
         }
         // vol de vie et coups critiques, d'après les dégâts infligés depuis le dernier passage
         const d = await score(name, 'degats');
@@ -836,10 +908,11 @@ async function main(): Promise<void> {
           if (bought > gained) await rcon.run(`give ${name} minecraft:emerald ${(bought - gained) * u.price}`);
         }
         // Bénédiction du Roi : parchemin consommé, niveau de l'équipe monté, Roi renforcé et soigné
-        const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}"}]`))?.[1] ?? 0);
-        if (blessed > 0) {
+        for (let lvl = 1; lvl <= BLESSING.max && /Found/.test(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data~{passif:"${BLESSING.key}"}] 0`)); lvl++) {
+          const blessed = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={passif:"${BLESSING.key}",niveau:${lvl}}]`))?.[1] ?? 0);
+          if (blessed === 0) continue;
           const level = await score('#equipe', `p_${BLESSING.key}`);
-          const gained = Math.min(blessed, BLESSING.max - level);
+          const gained = lvl === level + 1 ? 1 : 0;
           if (gained > 0) {
             await rcon.run(`scoreboard players set #equipe p_${BLESSING.key} ${level + gained}`);
             await rcon.run(`attribute ${KING} minecraft:generic.max_health base set ${kingHealth(level + gained)}`);
@@ -848,7 +921,7 @@ async function main(): Promise<void> {
             await rcon.run(`title @a subtitle {"text":"${name} bénit le Roi : niveau ${level + gained}/${BLESSING.max}","color":"gold"}`);
             await rcon.run('title @a title {"text":""}');
           }
-          if (blessed > gained) await rcon.run(`give ${name} minecraft:emerald ${(blessed - gained) * BLESSING.price}`);
+          if (blessed > gained) await rcon.run(`give ${name} minecraft:emerald ${(blessed - gained) * passivePrice(BLESSING, lvl)}`);
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
         const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
@@ -871,6 +944,8 @@ async function main(): Promise<void> {
           const parts: string[] = owned.length
             ? owned.map((p, i) => `{"text":"${i ? ' · ' : ''}${p.short} ${levels.get(p.key)}","color":"${p.color}"}`)
             : ['{"text":"Aucun passif : voyez le Maître des passifs","color":"gray"}'];
+          const prestigeLevel = levels.get('prestige') ?? 0;
+          if (prestigeLevel > 0) parts.unshift(`{"text":"★ Prestige ${prestigeLevel} · ","color":"gold","bold":true}`);
           if (role) {
             const ready = abilityUsed.has(name) ? '' : ' ✦';
             const into = roleLevel >= ROLE_MAX_LEVEL ? ROLE_KILLS_PER_LEVEL : k % ROLE_KILLS_PER_LEVEL;
@@ -918,6 +993,9 @@ async function main(): Promise<void> {
   /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
   const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string }>();
   let nextMob = 0;
+  /** Tourelles suivies : numéro → propriétaire (le joueur qui l'a posée). */
+  const turrets = new Map<string, string | undefined>();
+  let nextTurret = 0;
   for (let n = Number(firstWave); ; n++) {
     const p = game.difficulty.power;
     const total = Math.round((4 + 3 * n) * p);
@@ -1130,29 +1208,53 @@ async function main(): Promise<void> {
           await say('Ruée !', 'Les monstres accélèrent');
         }
       }
-      // les tourelles tirent sur le monstre le plus proche, selon leur type et leur niveau
-      for (const level of [1, 2, 3]) {
-        const range = 22 + 6 * (level - 1);
-        const levelSel = level === 1 ? 'tag=!lvl2,tag=!lvl3' : `tag=lvl${level}`;
-        const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
-        for (const kind of TURRET_KINDS) {
-          const turrets = `@e[tag=tourelle,${kindSelector(kind)},${levelSel}]`;
-          const damage = TURRET_DAMAGE[kind.tag]![level - 1];
-          if (kind.tag === 'canon') {
-            // explosion légère : touche tous les monstres à 3 blocs de la cible, sans casser de blocs
-            await rcon.run(`execute as ${turrets} at @s at ${near} as @e[tag=vague,distance=..3] run damage @s ${damage} minecraft:explosion`);
-            await rcon.run(`execute as ${turrets} at @s at ${near} run particle minecraft:explosion ~ ~1 ~ 1 0.5 1 0 3`);
-            await rcon.run(`execute as ${turrets} at @s if entity ${near} run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 0.5 1.4`);
-            continue;
+      // tourelles nouvellement posées : un numéro, et le joueur à moins de 8 blocs en devient le propriétaire
+      const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+      for (let t = 0; t < 5; t++) {
+        await rcon.run('tag @e[tag=tourelle,tag=!suivie,limit=1] add nouvelle');
+        if (!/passed/.test(await rcon.run('execute if entity @e[tag=nouvelle]'))) break;
+        const id = `t${nextTurret++}`;
+        let owner: string | undefined;
+        for (const name of online) {
+          if (/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=nouvelle,distance=..8]`))) {
+            owner = name;
+            break;
           }
-          await rcon.run(`execute as ${turrets} at @s run damage ${near} ${damage} minecraft:arrow`);
-          if (kind.tag === 'glace') await rcon.run(`execute as ${turrets} at @s as ${near} run effect give @s minecraft:slowness 3 ${level} true`);
-          // feu, et flèches enflammées au niveau 3
-          if (kind.tag === 'feu' || level === 3) await rcon.run(`execute as ${turrets} at @s as ${near} run data merge entity @s {Fire:120s}`);
-          const particle = kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
-          await rcon.run(`execute as ${turrets} at @s as ${near} at @s run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 12`);
-          await rcon.run(`execute as ${turrets} at @s if entity ${near} run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 0.6 1.2`);
         }
+        await rcon.run(`tag @e[tag=nouvelle] add ${id}`);
+        await rcon.run('tag @e[tag=nouvelle] add suivie');
+        await rcon.run('tag @e[tag=nouvelle] remove nouvelle');
+        turrets.set(id, owner);
+      }
+      // tirs : chaque victime d'une tourelle compte pour son propriétaire (émeraudes, classement, rôle)
+      for (const [id, owner] of turrets) {
+        const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
+        if (!/data: /.test(tags)) {
+          turrets.delete(id);
+          continue;
+        }
+        const kind = TURRET_KINDS.find((k) => k.tag !== 'fleche' && tags.includes(`"${k.tag}"`)) ?? TURRET_KINDS[0]!;
+        const level = tags.includes('"lvl3"') ? 3 : tags.includes('"lvl2"') ? 2 : 1;
+        const range = 22 + 6 * (level - 1);
+        const me = `@e[tag=${id},limit=1]`;
+        const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
+        const by = owner && online.includes(owner) ? ` by ${owner}` : '';
+        const damage = TURRET_DAMAGE[kind.tag]![level - 1];
+        // cibles du tir (le canon touche tout ce qui est à 3 blocs de la cible) ; celles qui disparaissent sont ses victimes
+        if (kind.tag === 'canon') await rcon.run(`execute as ${me} at @s at ${near} run tag @e[tag=vague,distance=..3] add tir`);
+        else await rcon.run(`execute as ${me} at @s run tag ${near} add tir`);
+        const aimed = number(await rcon.run('execute if entity @e[tag=tir]'));
+        if (aimed === 0) continue;
+        await rcon.run(`execute as @e[tag=tir] run damage @s ${damage} minecraft:${kind.tag === 'canon' ? 'explosion' : 'arrow'}${by}`);
+        const killed = aimed - number(await rcon.run('execute if entity @e[tag=tir]'));
+        if (killed > 0 && by) turretKills.set(owner!, (turretKills.get(owner!) ?? 0) + killed);
+        if (kind.tag === 'glace') await rcon.run(`effect give @e[tag=tir] minecraft:slowness 3 ${level} true`);
+        // feu, et flèches enflammées au niveau 3
+        if (kind.tag === 'feu' || level === 3) await rcon.run('execute as @e[tag=tir] run data merge entity @s {Fire:120s}');
+        const particle = kind.tag === 'canon' ? 'explosion' : kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
+        await rcon.run(`execute at @e[tag=tir] run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 ${kind.tag === 'canon' ? 1 : 12}`);
+        await rcon.run(`execute at ${me} run playsound minecraft:${kind.tag === 'canon' ? 'entity.generic.explode' : 'entity.arrow.shoot'} master @a ~ ~ ~ 0.6 1.2`);
+        await rcon.run('tag @e[tag=tir] remove tir');
       }
       await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
       // aura des soigneurs : régénération des alliés proches, et du Roi s'il est à côté
