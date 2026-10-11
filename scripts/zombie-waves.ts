@@ -241,7 +241,7 @@ const ROLE_MAX_LEVEL = 5;
 /** Objet de capacité (canne à carotte : son utilisation est comptée par une statistique du jeu). */
 const abilityItem = (r: Role) =>
   `carrot_on_a_stick[custom_data={capacite:1b},unbreakable={},custom_name='{"text":"${r.ability} (clic droit)","color":"${r.color}","italic":false}']`;
-/** Commande d'apparition d'un loup de l'Invocateur, plus solide et plus fort à chaque niveau de rôle. */
+/** Commande d'apparition d'un loup de l'Invocateur, plus solide et plus fort à chaque niveau de rôle (valeurs tenues à jour ensuite). */
 const petCommand = (name: string, uuid: string, level: number, tags: string[]) => {
   const hp = 30 + 6 * level;
   return (
@@ -934,6 +934,9 @@ async function main(): Promise<void> {
           } else {
             const level = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
             const wanted = PET_BASE + Math.floor(level / 2);
+            // tous ses loups (meute et renforts) suivent son niveau : dégâts et vie maximale
+            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.attack_damage base set ${4 + level}`);
+            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.max_health base set ${30 + 6 * level}`);
             const pets = number(await rcon.run(`execute if entity @e[tag=pet_${name}]`));
             if (pets < wanted) {
               const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
