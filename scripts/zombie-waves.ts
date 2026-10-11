@@ -9,7 +9,8 @@
  * Tourelles à poser où l'on veut ; réparation et améliorations du château ; boss uniques (pillards, Roi des zombies,
  * Wither à la vague 20, puis mode Infini) ; tourelles de quatre types améliorables ; le Roi parle ; marché noir ;
  * événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
- * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur) chez le Maître des rôles.
+ * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur) chez le Maître des rôles ; ils montent
+ * de niveau avec les victimes et ont une capacité spéciale par vague (objet à utiliser d'un clic droit).
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -132,31 +133,49 @@ interface Role {
   name: string;
   color: string;
   bonus: Record<string, number>;
+  /** Bonus ajouté à chaque niveau du rôle (un niveau toutes les ROLE_KILLS_PER_LEVEL victimes). */
+  perLevel: Record<string, number>;
   kit: string[];
+  /** Capacité spéciale, une fois par vague (objet à utiliser d'un clic droit). */
+  ability: string;
 }
 const ROLES: Role[] = [
   {
     id: 1, key: 'chevalier', name: '⚔ Chevalier', color: 'red',
     bonus: { 'generic.max_health': 8, 'generic.armor': 4, 'generic.knockback_resistance': 0.3 },
+    perLevel: { 'generic.max_health': 2, 'generic.armor': 1 },
+    ability: 'Cri de guerre',
     kit: ['diamond_sword[enchantments={levels:{"minecraft:sharpness":3}},unbreakable={}]'],
   },
   {
     id: 2, key: 'archer', name: '🏹 Archer', color: 'green',
     bonus: { 'generic.movement_speed': 0.015, 'generic.jump_strength': 0.1 },
+    perLevel: { 'generic.max_health': 2, 'generic.movement_speed': 0.003, 'generic.jump_strength': 0.02 },
+    ability: 'Pluie de flèches',
     kit: ['bow[enchantments={levels:{"minecraft:power":5,"minecraft:flame":1,"minecraft:punch":1,"minecraft:infinity":1}},unbreakable={}]', 'spectral_arrow 64'],
   },
   {
     id: 3, key: 'ingenieur', name: '🔧 Ingénieur', color: 'aqua',
     bonus: {},
+    perLevel: { 'generic.max_health': 2 },
+    ability: 'Réparation',
     kit: ['cobblestone 64', 'cobblestone 64'],
   },
   {
     id: 4, key: 'soigneur', name: '✚ Soigneur', color: 'light_purple',
     bonus: {},
+    perLevel: { 'generic.max_health': 2 },
+    ability: 'Soin de groupe',
     kit: ['splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]',
       'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]'],
   },
 ];
+/** Victimes par niveau de rôle, et niveau maximal. */
+const ROLE_KILLS_PER_LEVEL = 15;
+const ROLE_MAX_LEVEL = 5;
+/** Objet de capacité (canne à carotte : son utilisation est comptée par une statistique du jeu). */
+const abilityItem = (r: Role) =>
+  `carrot_on_a_stick[custom_data={capacite:1b},unbreakable={},custom_name='{"text":"${r.ability} (clic droit)","color":"${r.color}","italic":false}']`;
 /** Ticket de rôle, donné à chaque joueur en début de partie ; c'est la monnaie du Maître des rôles. */
 const ROLE_TICKET = '{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{ticket:"role"},"minecraft:custom_name":\'{"text":"Ticket de rôle","color":"gold","italic":false}\',"minecraft:enchantment_glint_override":1b}}';
 const ROLE_TICKET_ITEM = 'paper[custom_data={ticket:"role"},custom_name=\'{"text":"Ticket de rôle","color":"gold","italic":false}\',enchantment_glint_override=true]';
@@ -352,16 +371,18 @@ const UPGRADES: Passive[] = [
   { key: 'tours', short: "Tours d’archers", label: "Deux tours d’archers dans la cour", color: 'gold', price: 20, max: 1 },
 ];
 
-/** Effet d'une amélioration du château (réparation : recopie des murs intacts, sans effacer les blocs posés). */
+/** Effet d'une amélioration du château (réparation : recopie des murs et du sol intacts, sans effacer les blocs posés). */
 async function applyUpgrade(rcon: Rcon, key: string): Promise<void> {
   await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
   await rcon.run('forceload add -32 -32 32 32');
   if (key === 'reparation') {
     for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
-      await rcon.run(`clone ${x0 + MODEL_DX} -60 -32 ${x1 + MODEL_DX} -43 32 ${x0} -60 -32 masked`);
+      await rcon.run(`clone ${x0 + MODEL_DX} -62 -32 ${x1 + MODEL_DX} -43 32 ${x0} -62 -32 masked`);
     }
-    const walls = Number(/has (-?\d+)/.exec(await rcon.run('scoreboard players get #equipe p_murs'))?.[1] ?? 0);
-    if (walls > 0) await applyUpgrade(rcon, 'murs');
+    // sol compris (cratères rebouchés) ; les améliorations achetées sont ensuite remises (douves en eau, murs renforcés)
+    for (const upgrade of ['murs', 'douves']) {
+      if (Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #equipe p_${upgrade}`))?.[1] ?? 0) > 0) await applyUpgrade(rcon, upgrade);
+    }
   } else if (key === 'murs') {
     for (const [x0, x1] of [[-24, -1], [0, 24]] as const) {
       await rcon.run(`fill ${x0} -61 -24 ${x1} -43 24 minecraft:deepslate_bricks replace #minecraft:stone_bricks`);
@@ -438,6 +459,32 @@ async function main(): Promise<void> {
   if (!password) throw new Error('RCON_PASSWORD absent');
   const rcon = new Rcon();
   await rcon.connect(rconHost, Number(process.env.RCON_PORT ?? 25575), password);
+  /** Capacité spéciale d'un rôle. */
+  const useAbility = async (r: Role, name: string) => {
+    await rcon.run(`tellraw @a {"text":"${name} : ${r.ability} !","color":"${r.color}","bold":true}`);
+    if (r.key === 'chevalier') {
+      await rcon.run('effect give @a minecraft:strength 10 1 true');
+      await rcon.run('effect give @a minecraft:resistance 10 0 true');
+      await rcon.run(`execute at ${name} run playsound minecraft:event.raid.horn master @a ~ ~ ~ 4 1`);
+      await rcon.run(`execute at ${name} run particle minecraft:angry_villager ~ ~2 ~ 1 0.5 1 0 20`);
+    } else if (r.key === 'archer') {
+      const zone = `execute at ${name} anchored eyes positioned ^ ^ ^15`;
+      await rcon.run(`${zone} as @e[tag=vague,distance=..7] run damage @s 10 minecraft:arrow by ${name}`);
+      for (const [ox, oz] of [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3], [2, 2], [-2, -2], [2, -2], [-2, 2]]) {
+        await rcon.run(`${zone} run summon minecraft:arrow ~${ox} ~12 ~${oz} {pickup:0b,Motion:[0.0,-2.0,0.0]}`);
+      }
+      await rcon.run(`execute at ${name} run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 2 0.6`);
+    } else if (r.key === 'ingenieur') {
+      await applyUpgrade(rcon, 'reparation');
+      await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
+    } else if (r.key === 'soigneur') {
+      await rcon.run('effect give @a minecraft:instant_health 1 3 true');
+      await rcon.run('effect give @a minecraft:regeneration 10 1 true');
+      await rcon.run(`effect give ${KING} minecraft:instant_health 1 3 true`);
+      await rcon.run('execute at @a run particle minecraft:heart ~ ~2 ~ 0.5 0.5 0.5 0 6');
+      await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master @a ~ ~ ~ 1 1.4`);
+    }
+  };
   const kingSays = (line: string) => rcon.run(`tellraw @a [{"text":"<Le Roi> ","color":"gold"},{"text":"${line}","color":"yellow"}]`);
   const say = (title: string, subtitle = '') =>
     rcon.run(`title @a subtitle {"text":"${subtitle}","color":"gray"}`).then(() => rcon.run(`title @a title {"text":"${title}","color":"gold"}`));
@@ -481,6 +528,11 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add morts deathCount');
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   await rcon.run('scoreboard objectives add role dummy');
+  await rcon.run('scoreboard objectives add capacite minecraft.used:minecraft.carrot_on_a_stick');
+  /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
+  const abilityUsed = new Set<string>();
+  /** Dernier niveau de rôle connu par joueur (annonce des montées de niveau). */
+  const roleLevels = new Map<string, number>();
   // dégâts infligés (en dixièmes de point de vie) : base du vol de vie et des coups critiques
   await rcon.run('scoreboard objectives add degats minecraft.custom:minecraft.damage_dealt');
   const dealt = new Map<string, number>();
@@ -544,10 +596,39 @@ async function main(): Promise<void> {
           await rcon.run(`scoreboard players set ${name} role ${r.id}`);
           const kit = r.key === 'ingenieur' ? [...r.kit, ...TURRET_KINDS.filter((k) => k.tag === 'fleche' || k.tag === 'canon').map((k) => `armor_stand[${turretItemArgs(k)}]`), `paper[${turretUpgradeItemArgs()}] 2`] : r.kit;
           for (const item of kit) await rcon.run(`give ${name} minecraft:${item}`);
+          await rcon.run(`clear ${name} minecraft:carrot_on_a_stick[minecraft:custom_data={capacite:1b}]`);
+          await rcon.run(`give ${name} minecraft:${abilityItem(r)}`);
           await rcon.run(`title ${name} times 5 40 10`);
           await rcon.run(`title ${name} subtitle {"text":"Vous êtes ${r.name}","color":"${r.color}"}`);
           await rcon.run(`title ${name} title {"text":""}`);
           await rcon.run(`tellraw @a {"text":"${name} devient ${r.name}","color":"${r.color}"}`);
+        }
+        // rôle : niveau d'après les victimes de la partie, objet de capacité, capacité utilisée
+        const myRoleId = await score(name, 'role');
+        const myRole = ROLES.find((r) => r.id === myRoleId);
+        if (myRole) {
+          const roleLevel = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
+          const known = roleLevels.get(name);
+          roleLevels.set(name, roleLevel);
+          if (known !== undefined && roleLevel > known) {
+            await rcon.run(`title ${name} times 5 40 10`);
+            await rcon.run(`title ${name} subtitle {"text":"${myRole.name} niveau ${roleLevel} !","color":"${myRole.color}"}`);
+            await rcon.run(`title ${name} title {"text":""}`);
+            await rcon.run(`execute at ${name} run playsound minecraft:entity.player.levelup master @a ~ ~ ~ 1 1`);
+            if (myRole.key === 'ingenieur') await rcon.run(`give ${name} minecraft:paper[${turretUpgradeItemArgs()}]`);
+          }
+          if (/No items/.test(await rcon.run(`clear ${name} minecraft:carrot_on_a_stick[minecraft:custom_data={capacite:1b}] 0`))) {
+            await rcon.run(`give ${name} minecraft:${abilityItem(myRole)}`);
+          }
+          if ((await score(name, 'capacite')) > 0) {
+            await rcon.run(`scoreboard players set ${name} capacite 0`);
+            if (abilityUsed.has(name)) {
+              await rcon.run(`title ${name} actionbar {"text":"${myRole.ability} : déjà utilisé, rechargé à la prochaine vague","color":"gray"}`);
+            } else {
+              abilityUsed.add(name);
+              await useAbility(myRole, name);
+            }
+          }
         }
         // amélioration de tourelle : le parchemin sert quand on se tient à 3 blocs d'une tourelle pas au maximum
         const scrollItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_UPGRADE.key}"}]`;
@@ -597,13 +678,18 @@ async function main(): Promise<void> {
           if (blessed > gained) await rcon.run(`give ${name} minecraft:emerald ${(blessed - gained) * BLESSING.price}`);
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
+        const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
+        const roleBonus = (attribute: string) => (role ? (role.bonus[attribute] ?? 0) + roleLevel * (role.perLevel[attribute] ?? 0) : 0);
         // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
         if (!waiting.has(name)) {
           const owned = PASSIVES.filter((p) => (levels.get(p.key) ?? 0) > 0);
           const parts: string[] = owned.length
             ? owned.map((p, i) => `{"text":"${i ? ' · ' : ''}${p.short} ${levels.get(p.key)}","color":"${p.color}"}`)
             : ['{"text":"Aucun passif : voyez le Maître des passifs","color":"gray"}'];
-          if (role) parts.unshift(`{"text":"${role.name}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
+          if (role) {
+            const ready = abilityUsed.has(name) ? '' : ' ✦';
+            parts.unshift(`{"text":"${role.name} niv.${roleLevel}${ready}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
+          }
           if (remaining > 0 && remaining <= 5) {
             const me = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity ${name} Pos`));
             const yaw = Number(/\[(-?[0-9.]+)f/.exec(await rcon.run(`data get entity ${name} Rotation`))?.[1] ?? 0);
@@ -622,7 +708,7 @@ async function main(): Promise<void> {
         for (const p of PASSIVES) {
           if (!p.attribute) continue;
           const [attribute, value] = p.attribute;
-          await rcon.run(`attribute ${name} minecraft:${attribute} base set ${value(levels.get(p.key) ?? 0) + (role?.bonus[attribute] ?? 0)}`);
+          await rcon.run(`attribute ${name} minecraft:${attribute} base set ${value(levels.get(p.key) ?? 0) + roleBonus(attribute)}`);
         }
         if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
         waiting.add(name);
@@ -657,6 +743,7 @@ async function main(): Promise<void> {
     const theme = waveTheme(n);
     const boss = n % (p > 1 ? 3 : 5) === 0;
     await rcon.run('kill @e[tag=marchenoir]');
+    abilityUsed.clear();
     if (n === 21) {
       await say('Mode Infini !', 'Les vagues ne s’arrêteront plus : battez le record');
       await kingSays(pick(KING_LINES.infini));
@@ -824,7 +911,11 @@ async function main(): Promise<void> {
       }
       await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
       // aura des soigneurs : régénération des alliés proches, et du Roi s'il est à côté
-      await rcon.run('execute at @a[scores={role=4}] run effect give @a[distance=..6] minecraft:regeneration 3 0 true');
+      for (let lvl = 0; lvl <= ROLE_MAX_LEVEL; lvl++) {
+        const min = lvl * ROLE_KILLS_PER_LEVEL;
+        const kills = lvl === ROLE_MAX_LEVEL ? `${min}..` : `${min}..${min + ROLE_KILLS_PER_LEVEL - 1}`;
+        await rcon.run(`execute at @a[scores={role=4,tues=${kills}}] run effect give @a[distance=..${6 + lvl}] minecraft:regeneration 3 0 true`);
+      }
       await rcon.run(`execute at @a[scores={role=4}] run effect give ${KING.replace(']', ',distance=..6]')} minecraft:regeneration 3 1 true`);
       // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
       await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
