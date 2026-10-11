@@ -48,11 +48,10 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
   (md5 « OfflinePlayer:<nom> », v3) dans `whitelist.json` puis `whitelist reload`.
 - `docker compose up` recrée `mc-server` (joueurs éjectés) si son bloc du compose a changé, même en ne
   nommant qu'un bot : `deploy.sh` passe `--no-deps` ; un changement du serveur se fait à part, joueurs prévenus.
-- RCON : les réponses se mélangent entre connexions simultanées (sortie de console partagée). Pendant qu'un script
-  RCON tourne (`scripts/zombie-waves.ts`, conteneur `vagues`), ne pas lancer de `rcon-cli` : une réponse égarée
-  (« Test passed ») fausse ses tests (hall sauté, plaque, etc.). Diagnostiquer par les journaux (`docker logs`).
-  État de la partie sans RCON : écouter `tcpdump -i br-2ae3a97209e2 -A 'tcp dst port 25575'` (texte de la barre de vague).
-  Mise à jour en gardant la progression : `/opt/minecraft/basculer-en-pause.sh` sur le VPS (attend la pause, reprend en mode N).
+- RCON : les réponses se mélangent entre connexions simultanées (sortie de console partagée). Le mini-jeu
+  « Défense du Roi » (projet séparé, dossier `Bureau/Defense du Roi`, conteneur `vagues`) pilote le même serveur
+  par RCON : tant qu'il tourne, ne pas lancer de `rcon-cli` (une réponse égarée fausse son script) et ne jamais
+  toucher au conteneur `vagues` depuis ce projet.
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 
