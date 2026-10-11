@@ -22,6 +22,7 @@
  * au catalogue personnel (livre et /trigger boutique), dans le chat, tous en même temps. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
  * Rôles jusqu'au niveau 20 (chaque niveau demande plus de victimes) et arbre de compétences par classe (/trigger arbre).
+ * Expéditions pendant la pause (salle au hasard, minerais, coffres, gardien ; pillards au château pendant ce temps).
  * Joueurs à terre (un allié accroupi les relève), ultimes (accroupi + clic droit, jauge de victimes), roulette de
  * l'Enchanteur, jetons de gloire des élites et des boss échangés contre des objets uniques.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
@@ -415,6 +416,94 @@ const DOWNED_S = 20;
 const REVIVE_TICKS = 3;
 /** Ultime : victimes pour le charger. */
 const ULT_COST = 25;
+/**
+ * Expédition, pendant la pause entre deux vagues : une salle loin de l'arène (minerais d'émeraude, coffres, monstres,
+ * un gardien), payée par joueur, plus rentable que son prix, et d'autant plus que la vague est avancée. Pendant ce
+ * temps, des pillards attaquent le Roi : seules les tourelles et ceux restés au château le défendent.
+ */
+const EXPE_PRICE = 50;
+const EXPE_S = 180;
+const EXPE_SIGNUP_S = 15;
+const EXPE_X = 10000;
+const EXPE_Z = 0;
+/** Intérieur de la salle : 48 × 32 blocs, de y -60 à -52 ; murs, sol et plafond autour, puis une coque de barrières. */
+const EXPE_W = 48;
+const EXPE_D = 32;
+const EXPE_MID = EXPE_Z + EXPE_D / 2;
+const EXPE_ZONE = `x=${EXPE_X - 2},y=-64,z=${EXPE_Z - 2},dx=${EXPE_W + 5},dy=16,dz=${EXPE_D + 5}`;
+const EXPE_FORCELOAD = `${EXPE_X - 1} ${EXPE_Z - 1} ${EXPE_X + EXPE_W + 2} ${EXPE_Z + EXPE_D + 2}`;
+/** Pioche prêtée pendant l'expédition (reprise au retour). */
+const EXPE_PICKAXE =
+  'iron_pickaxe[custom_data={expe:1b},enchantments={levels:{"minecraft:fortune":3,"minecraft:efficiency":4}},unbreakable={},' +
+  'custom_name=\'{"text":"Pioche d’expédition","color":"aqua","italic":false}\']';
+const EXPE_PICKAXE_MATCH = 'minecraft:iron_pickaxe[minecraft:custom_data={expe:1b}]';
+/** Fiole de savoir (coffres de l'expédition) : consommée dès qu'on la ramasse, elle fait progresser la classe. */
+const knowledgeNbt = (count: number) =>
+  `{id:"minecraft:experience_bottle",count:${count},components:{"minecraft:custom_data":{savoir:1b},"minecraft:custom_name":'{"text":"Fiole de savoir","color":"green","italic":false}'}}`;
+/** Progression de classe d'une fiole, selon la vague. */
+const knowledgeValue = (wave: number) => 3 + Math.floor(wave / 5);
+/** Butin et monstres grandissent avec la vague. */
+const expeditionScale = (wave: number) => 1 + 0.08 * (wave - 1);
+interface ExpeditionTheme {
+  name: string;
+  color: string;
+  shell: string;
+  floor: string[];
+  pillar: string;
+  lantern: string;
+  glow: string;
+  ore: string[];
+  deco: string[];
+  mobs: string[];
+  guardian: { type: string; name: string; gear: string; power: 'renforts' | 'onde' | 'feu' };
+}
+const EXPE_THEMES: ExpeditionTheme[] = [
+  {
+    name: 'Mine abandonnée', color: 'gold', shell: 'deepslate', floor: ['cobbled_deepslate', 'tuff', 'gravel', 'deepslate_tiles'],
+    pillar: 'stripped_spruce_log', lantern: 'lantern', glow: 'glowstone', ore: ['deepslate_emerald_ore', 'emerald_ore'], deco: ['cobweb'],
+    mobs: ['zombie', 'skeleton', 'cave_spider'],
+    guardian: { type: 'vindicator', name: 'Contremaître maudit', gear: 'HandItems:[{id:"minecraft:diamond_axe",count:1},{}],ArmorItems:[{},{},{},{id:"minecraft:iron_helmet",count:1}],', power: 'renforts' },
+  },
+  {
+    name: 'Crypte oubliée', color: 'gray', shell: 'stone_bricks', floor: ['mossy_stone_bricks', 'cracked_stone_bricks', 'cobblestone', 'mossy_cobblestone'],
+    pillar: 'chiseled_stone_bricks', lantern: 'soul_lantern', glow: 'verdant_froglight', ore: ['emerald_ore'], deco: ['cobweb', 'skeleton_skull'],
+    mobs: ['zombie', 'skeleton', 'stray', 'husk'],
+    guardian: { type: 'wither_skeleton', name: 'Seigneur de la crypte', gear: 'HandItems:[{id:"minecraft:netherite_sword",count:1},{}],ArmorItems:[{},{},{id:"minecraft:netherite_chestplate",count:1},{}],', power: 'onde' },
+  },
+  {
+    name: 'Forteresse du Nether', color: 'red', shell: 'nether_bricks', floor: ['blackstone', 'polished_blackstone_bricks', 'cracked_nether_bricks', 'basalt'],
+    pillar: 'red_nether_bricks', lantern: 'soul_lantern', glow: 'shroomlight', ore: ['emerald_ore'], deco: ['chain'],
+    mobs: ['wither_skeleton', 'blaze', 'husk'],
+    guardian: { type: 'piglin_brute', name: 'Brute du Nether', gear: 'HandItems:[{id:"minecraft:golden_axe",count:1},{}],', power: 'feu' },
+  },
+];
+const randomInt = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
+const choose = <T>(list: T[]): T => list[Math.floor(Math.random() * list.length)]!;
+/** Émeraudes en piles de 64 au plus (contenu de coffre). */
+const emeraldStacks = (count: number) => {
+  const stacks: string[] = [];
+  for (let left = count; left > 0; left -= 64) stacks.push(`{id:"minecraft:emerald",count:${Math.min(64, left)}}`);
+  return stacks;
+};
+/** Contenu d'un coffre ordinaire de l'expédition. */
+const chestLoot = (wave: number) => {
+  const items = emeraldStacks(Math.round(randomInt(12, 20) * expeditionScale(wave)));
+  if (Math.random() < 0.5) items.push(knowledgeNbt(randomInt(1, 2)));
+  if (Math.random() < 0.4) items.push(`{id:"minecraft:golden_apple",count:${randomInt(1, 2)}}`);
+  if (Math.random() < 0.3) items.push('{id:"minecraft:arrow",count:24}');
+  if (Math.random() < 0.15) items.push(TOKEN_NBT.replace('COUNT', '1'));
+  if (wave >= 10 && Math.random() < 0.25) items.push('{id:"minecraft:emerald_block",count:1}');
+  return items;
+};
+/** Coffre du gardien, pour `players` joueurs partis. */
+const guardianLoot = (wave: number, players: number) => {
+  const items = emeraldStacks(Math.round(25 * expeditionScale(wave)) * players);
+  items.push(TOKEN_NBT.replace('COUNT', String(players * (wave >= 10 ? 2 : 1))));
+  items.push(knowledgeNbt(2 * players));
+  items.push(`{id:"minecraft:golden_apple",count:${players}}`);
+  if (wave >= 15) items.push('{id:"minecraft:enchanted_golden_apple",count:1}');
+  return items;
+};
 
 /** Équipement de départ, redonné à chaque nouvelle partie. */
 const KIT = [
@@ -858,25 +947,66 @@ async function main(): Promise<void> {
   const waitForStart = async (wave: number, minSeconds: number, color: string) => {
     await rcon.run(`execute if block ${WAVE_START} minecraft:air run setblock ${WAVE_START} minecraft:light_weighted_pressure_plate`);
     const since = Date.now();
+    // nouvelle pause : une expédition possible
+    if (expedition.state === 'finie') expedition.state = 'libre';
+    pauseWave = wave;
+    await rcon.run(
+      `tellraw @a [{"text":"[⛏ Expédition] ","color":"aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger expedition"}},` +
+        `{"text":"Pendant la pause, partez chercher émeraudes et savoir (${EXPE_PRICE} émeraudes par joueur).","color":"gray"}]`,
+    );
+    /** Passages de suite sans Roi : on attend d'en avoir plusieurs (le Roi peut manquer le temps de charger sa zone). */
+    let kingMissing = 0;
     for (;;) {
       const ready = Date.now() - since >= minSeconds * 1000;
-      await rcon.run(
-        `bossbar set minecraft:vague name {"text":"${ready ? `Marchez sur la plaque dorée pour lancer la vague ${wave}` : `Vague ${wave} : pause…`}","color":"${color}"}`,
-      );
+      kingMissing = (await kingAlive()) ? 0 : kingMissing + 1;
+      if (kingMissing >= 3) await gameOver(wave);
+      await expeditionTick(wave);
+      const away = expedition.state === 'inscription' || expedition.state === 'en_cours';
+      const text = away ? await expeditionStatus() : ready ? `Marchez sur la plaque dorée pour lancer la vague ${wave}` : `Vague ${wave} : pause…`;
+      await rcon.run(`bossbar set minecraft:vague name {"text":"${text}","color":"${away ? 'aqua' : color}"}`);
       await rcon.run('bossbar set minecraft:vague players @a');
-      await kingAlive();
       // plaque enfoncée : n'importe quelle puissance sauf 0 (les états n'acceptent pas d'intervalle)
       const pressed =
         ready &&
         /passed/.test(await rcon.run(`execute if block ${WAVE_START} minecraft:light_weighted_pressure_plate`)) &&
         /passed/.test(await rcon.run(`execute unless block ${WAVE_START} minecraft:light_weighted_pressure_plate[power=0]`));
-      if (pressed) return;
+      if (pressed && !away) {
+        pauseWave = undefined;
+        return;
+      }
       await sleep(1000);
     }
   };
   const kingSays = (line: string) => rcon.run(`tellraw @a [{"text":"<Le Roi> ","color":"gold"},{"text":"${line}","color":"yellow"}]`);
   const say = (title: string, subtitle = '') =>
     rcon.run(`title @a subtitle {"text":"${subtitle}","color":"gray"}`).then(() => rcon.run(`title @a title {"text":"${title}","color":"gold"}`));
+  /** Le Roi est mort pendant la vague `n` (ou pendant la pause qui la précède) : bilan, puis nouvelle partie. */
+  const gameOver = async (n: number) => {
+    // expédition en cours : tout le monde revient au château
+    await rcon.run(`tp @a[${EXPE_ZONE}] 0 -60 12`);
+    await rcon.run('kill @e[tag=expe]');
+    await rcon.run('bossbar remove minecraft:expedition');
+    await rcon.run('kill @e[tag=vague]');
+    await rcon.run('bossbar set minecraft:vague name {"text":"Le Roi est mort","color":"dark_red"}');
+    await kingSays(pick(KING_LINES.mort));
+    const held = n - 1;
+    const record = await score('#meilleur', 'record');
+    if (held > record) await rcon.run(`scoreboard players set #meilleur record ${held}`);
+    await say('Le Roi est mort !', `Vous avez tenu ${held} vague${held > 1 ? 's' : ''}${held > record ? ' : nouveau record !' : ` (record : ${record})`}`);
+    // classement des tueurs de la partie
+    const players = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+    const ranking = await Promise.all(players.map(async (name) => ({ name, kills: await score(name, 'tues') })));
+    ranking.sort((a, b) => b.kills - a.kills);
+    const lines = ranking.map((r, i) => `{"text":"\\n${i + 1}. ${r.name} : ${r.kills} monstre${r.kills > 1 ? 's' : ''}","color":"${i === 0 ? 'gold' : 'white'}"}`);
+    await rcon.run(`tellraw @a [{"text":"Classement de la partie","color":"yellow","bold":true}${lines.length ? ',' + lines.join(',') : ''}]`);
+    console.log(`partie terminée à la vague ${n}`);
+    // nouvelle partie dans 30 s : le conteneur redémarre le script (--restart), qui remet tout à zéro
+    writeFileSync(GAME_OVER_MARK, String(n));
+    await sleep(25_000);
+    await say('Nouvelle partie !', 'Le château est remis à neuf');
+    await sleep(5_000);
+    process.exit(0);
+  };
 
   await rcon.run('bossbar add vague {"text":"Préparez-vous !","color":"red"}');
   await rcon.run('bossbar set minecraft:vague color red');
@@ -892,6 +1022,14 @@ async function main(): Promise<void> {
   await setUpShop(rcon);
   // les tourelles déjà posées (lancement précédent du script) seront reprises en main
   await rcon.run('tag @e[tag=tourelle] remove suivie');
+  // expédition interrompue par une relance du script : tout le monde au château, salle et pillards retirés
+  await rcon.run('scoreboard objectives add expedition trigger');
+  await rcon.run(`tp @a[${EXPE_ZONE}] 0 -60 12`);
+  await rcon.run('tag @a remove expe_membre');
+  await rcon.run('kill @e[tag=expe]');
+  await rcon.run('kill @e[tag=pillard]');
+  await rcon.run('bossbar remove minecraft:expedition');
+  await rcon.run(`forceload remove ${EXPE_FORCELOAD}`);
   await rcon.run('scoreboard objectives add partie dummy');
   if (firstWave === '1' && !resuming && !continuing) {
     await lobby(rcon);
@@ -986,6 +1124,25 @@ async function main(): Promise<void> {
   const waiting = new Set<string>();
   /** Monstres tués par joueur au dernier passage : chaque nouveau monstre tué rapporte une émeraude. */
   const kills = new Map<string, number>();
+  /** Progression de classe offerte par les fioles de savoir : comptée dans « tues » mais sans émeraudes. */
+  const xpBonus = new Map<string, number>();
+  /** Pause en cours (numéro de la vague attendue), seul moment où l'on peut partir en expédition. */
+  let pauseWave: number | undefined;
+  /** Expédition de la pause : inscrits (et leurs émeraudes au départ), minuteur, zone, gardien. */
+  const expedition = {
+    state: 'libre' as 'libre' | 'inscription' | 'en_cours' | 'finie',
+    members: new Map<string, number>(),
+    departAt: 0,
+    endsAt: 0,
+    theme: EXPE_THEMES[0]!,
+    wave: 1,
+    players: 1,
+    guardian: false,
+    guardianMax: 1,
+    guardianShown: 1,
+    lastPower: 0,
+    warned: false,
+  };
   const score = async (name: string, objective: string) =>
     Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get ${name} ${objective}`))?.[1] ?? 0);
   /** Un passage à la fois : sinon les commandes s'accumulent dans la file RCON et tout prend du retard. */
@@ -1025,12 +1182,15 @@ async function main(): Promise<void> {
         const prestige = await score(name, 'niv_prestige');
         levels.set('prestige', prestige);
         if (before !== undefined && k > before) {
-          ultCharge.set(name, Math.min(ULT_COST, (ultCharge.get(name) ?? 0) + (k - before)));
-          const byTurret = Math.min(k - before, turretKills.get(name) ?? 0);
+          const byKnowledge = Math.min(k - before, xpBonus.get(name) ?? 0);
+          xpBonus.set(name, (xpBonus.get(name) ?? 0) - byKnowledge);
+          const fought = k - before - byKnowledge;
+          ultCharge.set(name, Math.min(ULT_COST, (ultCharge.get(name) ?? 0) + fought));
+          const byTurret = Math.min(fought, turretKills.get(name) ?? 0);
           turretKills.set(name, (turretKills.get(name) ?? 0) - byTurret);
           const bank = (turretBank.get(name) ?? 0) + byTurret;
           turretBank.set(name, bank % TURRET_KILLS_PER_EMERALD);
-          const emeralds = (k - before - byTurret) * (1 + prestige) + Math.floor(bank / TURRET_KILLS_PER_EMERALD);
+          const emeralds = (fought - byTurret) * (1 + prestige) + Math.floor(bank / TURRET_KILLS_PER_EMERALD);
           if (emeralds > 0) await rcon.run(`give ${name} minecraft:emerald ${emeralds}`);
         }
         // /trigger prestige : 1 = voir son prestige et le prix, 2 = confirmer le passage au niveau suivant
@@ -1074,6 +1234,52 @@ async function main(): Promise<void> {
               await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie","color":"gold"}`);
               await rcon.run(`title ${name} title {"text":"★"}`);
               await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
+            }
+          }
+        }
+        // fioles de savoir (expédition) : consommées, elles font progresser la classe
+        const flasks = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:experience_bottle[minecraft:custom_data={savoir:1b}]`))?.[1] ?? 0);
+        if (flasks > 0) {
+          const gain = flasks * knowledgeValue(expedition.wave);
+          xpBonus.set(name, (xpBonus.get(name) ?? 0) + gain);
+          await rcon.run(`scoreboard players add ${name} tues ${gain}`);
+          await rcon.run(`tellraw ${name} {"text":"Fiole de savoir : +${gain} de progression de classe","color":"green"}`);
+          await rcon.run(`execute at ${name} run playsound minecraft:entity.player.levelup master ${name} ~ ~ ~ 0.6 1.4`);
+        }
+        // /trigger expedition : 1 = voir, 2 = s'inscrire (pendant la pause ; une expédition par pause)
+        await rcon.run(`scoreboard players enable ${name} expedition`);
+        const expeAsk = await score(name, 'expedition');
+        if (expeAsk > 0) {
+          await rcon.run(`scoreboard players set ${name} expedition 0`);
+          if (pauseWave === undefined || expedition.state === 'en_cours' || expedition.state === 'finie') {
+            await rcon.run(`tellraw ${name} {"text":"Pas d’expédition maintenant : une seule par pause, entre deux vagues.","color":"red"}`);
+          } else if (expedition.members.has(name)) {
+            await rcon.run(`tellraw ${name} {"text":"Vous êtes déjà inscrit à l’expédition.","color":"yellow"}`);
+          } else if (expeAsk === 1) {
+            await rcon.run(`tellraw ${name} [{"text":"⛏ Expédition avant la vague ${pauseWave} : ","color":"aqua","bold":true},{"text":"${EXPE_PRICE} émeraudes par joueur, seul ou à plusieurs.","color":"yellow"}]`);
+            await rcon.run(`tellraw ${name} {"text":"Une salle au hasard (mine, crypte, forteresse du Nether) : minerais d’émeraude (pioche prêtée), coffres, fioles de savoir, monstres, et un gardien qui garde le plus gros coffre. Le butin grandit avec la vague et le nombre de joueurs.","color":"gray"}`);
+            await rcon.run(`tellraw ${name} {"text":"Attention : ${EXPE_S / 60} minutes sur place ; des pillards attaquent le Roi pendant ce temps (tourelles et joueurs restés au château le défendent) ; mourir là-bas fait perdre la moitié du butin.","color":"red"}`);
+            await rcon.run(`tellraw ${name} {"text":"[ Partir en expédition ]","color":"aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger expedition set 2"},"hoverEvent":{"action":"show_text","contents":"${EXPE_PRICE} émeraudes"}}`);
+          } else {
+            const owned = Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
+            const paid = owned >= EXPE_PRICE ? Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${EXPE_PRICE}`))?.[1] ?? 0) : 0;
+            if (paid < EXPE_PRICE) {
+              if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+              await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : l’expédition coûte ${EXPE_PRICE}.","color":"red"}`);
+            } else if (expedition.state !== 'libre' && expedition.state !== 'inscription') {
+              await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+            } else {
+              expedition.members.set(name, 0);
+              if (expedition.state === 'libre') {
+                expedition.state = 'inscription';
+                expedition.departAt = Date.now() + EXPE_SIGNUP_S * 1000;
+                await rcon.run(
+                  `tellraw @a [{"text":"${name} part en expédition dans ${EXPE_SIGNUP_S} s ! ","color":"aqua"},` +
+                    `{"text":"[ Rejoindre : ${EXPE_PRICE} émeraudes ]","color":"aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger expedition set 2"}}]`,
+                );
+              } else {
+                await rcon.run(`tellraw @a {"text":"${name} rejoint l’expédition.","color":"aqua"}`);
+              }
             }
           }
         }
@@ -1371,6 +1577,10 @@ async function main(): Promise<void> {
                   `{"text":"${u.name} ","color":"gold"},{"text":"${u.cost} jetons","color":"aqua"}]`,
               );
             }
+            await rcon.run(
+              `tellraw ${name} [{"text":"[⛏ Expédition] ","color":"aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger expedition"}},` +
+                `{"text":"pendant la pause, ${EXPE_PRICE} émeraudes par joueur","color":"gray"}]`,
+            );
           }
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
@@ -1543,6 +1753,388 @@ async function main(): Promise<void> {
     })();
   }, 1000);
 
+  /** Tourelles : celles nouvellement posées sont adoptées, puis vie et tirs (pendant les vagues et les expéditions). */
+  const turretsTick = async () => {
+    // tourelles nouvellement posées : un numéro, et le joueur à moins de 8 blocs en devient le propriétaire
+    const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+    for (let t = 0; t < 5; t++) {
+      await rcon.run('tag @e[tag=tourelle,tag=!suivie,limit=1] add nouvelle');
+      if (!/passed/.test(await rcon.run('execute if entity @e[tag=nouvelle]'))) break;
+      const id = `t${RUN}_${nextTurret++}`;
+      // propriétaire d'origine (étiquette proprio_…) si la tourelle a déjà été suivie, sinon le joueur le plus proche
+      let owner = /"proprio_(\w+)"/.exec(await rcon.run('data get entity @e[tag=nouvelle,limit=1] Tags'))?.[1];
+      for (const name of owner ? [] : online) {
+        if (/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=nouvelle,distance=..8]`))) {
+          owner = name;
+          break;
+        }
+      }
+      await rcon.run(`tag @e[tag=nouvelle] add ${id}`);
+      if (owner) await rcon.run(`tag @e[tag=nouvelle] add proprio_${owner}`);
+      await rcon.run('tag @e[tag=nouvelle] add suivie');
+      await rcon.run('tag @e[tag=nouvelle] remove nouvelle');
+      turrets.set(id, { owner, hp: TURRET_HP[0]!, shown: -1, level: 1 });
+    }
+    // tirs : chaque victime d'une tourelle compte pour son propriétaire (émeraudes, classement, rôle)
+    for (const [id, turret] of turrets) {
+      const owner = turret.owner;
+      const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
+      if (!/data: /.test(tags)) {
+        turrets.delete(id);
+        continue;
+      }
+      const kind = TURRET_KINDS.find((k) => k.tag !== 'fleche' && tags.includes(`"${k.tag}"`)) ?? TURRET_KINDS[0]!;
+      const level = turretLevel(tags);
+      const range = 22 + 4 * (level - 1);
+      const me = `@e[tag=${id},limit=1]`;
+      const maxHp = Math.round(TURRET_HP[level - 1]! * (has(owner, 'blindage') ? 1.5 : 1));
+      // une amélioration remet la vie au maximum du nouveau niveau
+      if (level > turret.level) {
+        turret.level = level;
+        turret.hp = maxHp;
+      }
+      const attackers = number(await rcon.run(`execute at ${me} if entity @e[tag=vague,distance=..2]`));
+      // abîmée par les monstres au contact ; sinon, elle se répare très lentement (1 point toutes les 10 s)
+      turret.hp = attackers > 0 ? Math.max(0, turret.hp - attackers * TURRET_HIT) : Math.min(maxHp, turret.hp + TURRET_REGEN);
+      if (turret.hp === 0) {
+        await rcon.run(`execute at ${me} run particle minecraft:explosion ~ ~1 ~ 0.3 0.3 0.3 0 3`);
+        await rcon.run(`execute at ${me} run playsound minecraft:entity.item.break master @a ~ ~ ~ 1 0.6`);
+        await rcon.run(`kill ${me}`);
+        if (owner) {
+          await rcon.run(`title ${owner} actionbar {"text":"Une de vos tourelles a été détruite !","color":"red"}`);
+          await rcon.run(`scoreboard players remove ${owner} tourelles 1`);
+        }
+        turrets.delete(id);
+        continue;
+      }
+      if (Math.ceil(turret.hp) !== turret.shown) {
+        turret.shown = Math.ceil(turret.hp);
+        const stars = level > 1 ? ` ${'★'.repeat(level)}` : '';
+        await rcon.run(`data merge entity ${me} {CustomName:'${healthBar(`${kind.name}${stars}`, turret.hp, maxHp, kind.color)}'}`);
+      }
+      const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
+      const by = owner && online.includes(owner) ? ` by ${owner}` : '';
+      const damage = Math.round(TURRET_DAMAGE[kind.tag]![level - 1]! * (has(owner, 'calibre') ? 1.25 : 1) * (owner && (turretBoost.get(owner) ?? 0) > Date.now() ? 3 : 1));
+      // cibles du tir (le canon touche tout ce qui est à 3 blocs de la cible) ; celles qui disparaissent sont ses victimes
+      if (kind.tag === 'canon') await rcon.run(`execute as ${me} at @s at ${near} run tag @e[tag=vague,distance=..3] add tir`);
+      else await rcon.run(`execute as ${me} at @s run tag ${near} add tir`);
+      const aimed = number(await rcon.run('execute if entity @e[tag=tir]'));
+      if (aimed === 0) continue;
+      await rcon.run(`execute as @e[tag=tir] run damage @s ${damage} minecraft:${kind.tag === 'canon' ? 'explosion' : 'arrow'}${by}`);
+      const killed = aimed - number(await rcon.run('execute if entity @e[tag=tir]'));
+      if (killed > 0 && by) turretKills.set(owner!, (turretKills.get(owner!) ?? 0) + killed);
+      if (kind.tag === 'glace') await rcon.run(`effect give @e[tag=tir] minecraft:slowness 3 ${level} true`);
+      // feu, et flèches enflammées au niveau 3
+      if (kind.tag === 'feu' || level >= 3) await rcon.run('execute as @e[tag=tir] run data merge entity @s {Fire:120s}');
+      const particle = kind.tag === 'canon' ? 'explosion' : kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
+      await rcon.run(`execute at @e[tag=tir] run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 ${kind.tag === 'canon' ? 1 : 12}`);
+      await rcon.run(`execute at ${me} run playsound minecraft:${kind.tag === 'canon' ? 'entity.generic.explode' : 'entity.arrow.shoot'} master @a ~ ~ ~ 0.6 1.2`);
+      await rcon.run('tag @e[tag=tir] remove tir');
+    }
+    await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
+  };
+
+  /** Coffre rempli : chaque objet dans une case tirée au hasard. */
+  const fillChest = async (pos: string, items: string[]) => {
+    const slots = Array.from({ length: 27 }, (_, i) => i).sort(() => Math.random() - 0.5);
+    const list = items.slice(0, 27).map((item, i) => `{Slot:${slots[i]}b,${item.slice(1)}`);
+    await rcon.run(`setblock ${pos} minecraft:chest{Items:[${list.join(',')}]}`);
+  };
+  const emeraldsOf = async (name: string) => Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
+  const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const GUARDIAN = '@e[tag=expe_gardien,limit=1]';
+  const guardianChest = `${EXPE_X + EXPE_W - 1} -60 ${EXPE_MID}`;
+
+  /** Construit la salle d'expédition (thème, piliers, minerais, coffres, monstres, gardien) pour `players` joueurs. */
+  const buildExpedition = async (theme: ExpeditionTheme, wave: number, players: number) => {
+    const x0 = EXPE_X;
+    const z0 = EXPE_Z;
+    const x1 = EXPE_X + EXPE_W + 1;
+    const z1 = EXPE_Z + EXPE_D + 1;
+    // zone chargée en permanence pendant l'expédition (sinon blocs et monstres ne peuvent pas être posés)
+    await rcon.run(`forceload add ${EXPE_FORCELOAD}`);
+    for (let i = 0; i < 40; i++) {
+      let loaded = true;
+      for (const [cx, cz] of [[x0 - 1, z0 - 1], [x1 + 1, z0 - 1], [x0 - 1, z1 + 1], [x1 + 1, z1 + 1]]) {
+        if (!/passed/.test(await rcon.run(`execute if loaded ${cx} -60 ${cz}`))) loaded = false;
+      }
+      if (loaded) break;
+      await sleep(250);
+    }
+    await rcon.run(`kill @e[type=!player,${EXPE_ZONE}]`);
+    // coque de barrières (on ne sort pas en creusant), puis la salle : sol, murs et plafond du thème, intérieur vide
+    await rcon.run(`fill ${x0 - 1} -62 ${z0 - 1} ${x1 + 1} -50 ${z1 + 1} minecraft:barrier hollow`);
+    await rcon.run(`fill ${x0} -61 ${z0} ${x1} -51 ${z1} minecraft:${theme.shell} hollow`);
+    for (let i = 0; i < 14; i++) {
+      const w = randomInt(2, 6);
+      const d = randomInt(2, 5);
+      const px = randomInt(x0 + 1, x1 - 1 - w);
+      const pz = randomInt(z0 + 1, z1 - 1 - d);
+      await rcon.run(`fill ${px} -61 ${pz} ${px + w} -61 ${pz + d} minecraft:${choose(theme.floor)}`);
+    }
+    // salle du gardien au fond, sol distinct
+    await rcon.run(`fill ${x1 - 9} -61 ${z0 + 1} ${x1 - 1} -61 ${z1 - 1} minecraft:${theme.pillar}`);
+    // portail de retour contre le mur ouest : plaque à enfoncer pour rentrer plus tôt
+    await rcon.run(`fill ${x0} -60 ${EXPE_MID - 1} ${x0} -56 ${EXPE_MID + 1} minecraft:crying_obsidian`);
+    await rcon.run(`fill ${x0} -59 ${EXPE_MID} ${x0} -57 ${EXPE_MID} minecraft:purple_stained_glass`);
+    await rcon.run(`setblock ${x0 + 1} -60 ${EXPE_MID} minecraft:polished_blackstone_pressure_plate`);
+    // piliers (avec une lanterne suspendue), lumières au plafond
+    const blocked = new Set<string>();
+    const pillars: [number, number][] = [];
+    for (const rx of [10, 18, 26, 34]) {
+      for (const rz of [8, 16, 24]) {
+        const px = x0 + rx + randomInt(-1, 1);
+        const pz = z0 + rz + randomInt(-1, 1);
+        pillars.push([px, pz]);
+        for (let dx = -1; dx <= 2; dx++) for (let dz = -1; dz <= 2; dz++) blocked.add(`${px + dx},${pz + dz}`);
+        await rcon.run(`fill ${px} -60 ${pz} ${px + 1} -52 ${pz + 1} minecraft:${theme.pillar}`);
+        await rcon.run(`setblock ${px - 1} -52 ${pz} minecraft:${theme.lantern}[hanging=true]`);
+      }
+    }
+    for (let rx = 5; rx < EXPE_W; rx += 8) for (let rz = 4; rz < EXPE_D; rz += 8) await rcon.run(`setblock ${x0 + rx} -51 ${z0 + rz} minecraft:${theme.glow}`);
+    // minerais d'émeraude : dans les piliers et dans les murs, à hauteur de pioche
+    const scale = expeditionScale(wave);
+    const ores = Math.min(140, Math.round(10 * scale) * players);
+    for (let i = 0; i < ores; i++) {
+      const y = randomInt(-60, -56);
+      let pos: string;
+      if (i % 2 === 0) {
+        const [px, pz] = choose(pillars);
+        pos = `${px + randomInt(0, 1)} ${y} ${pz + randomInt(0, 1)}`;
+      } else {
+        const side = randomInt(0, 2);
+        pos = side === 0 ? `${x1} ${y} ${randomInt(z0 + 1, z1 - 1)}` : `${randomInt(x0 + 6, x1 - 1)} ${y} ${side === 1 ? z0 : z1}`;
+      }
+      await rcon.run(`setblock ${pos} minecraft:${choose(theme.ore)}`);
+    }
+    // coffres le long des murs nord et sud
+    for (let i = 0; i < 2 * players; i++) {
+      for (let tries = 0; tries < 20; tries++) {
+        const cx = randomInt(x0 + 8, x1 - 11);
+        const cz = i % 2 === 0 ? z0 + 1 : z1 - 1;
+        if (blocked.has(`${cx},${cz}`)) continue;
+        blocked.add(`${cx},${cz}`);
+        await fillChest(`${cx} -60 ${cz}`, chestLoot(wave));
+        break;
+      }
+    }
+    // décor
+    for (let i = 0; i < 12; i++) {
+      const block = choose(theme.deco);
+      const cx = randomInt(x0 + 6, x1 - 2);
+      const cz = randomInt(z0 + 1, z1 - 1);
+      if (blocked.has(`${cx},${cz}`)) continue;
+      await rcon.run(`setblock ${cx} ${block === 'skeleton_skull' ? -60 : -52} ${cz} minecraft:${block}`);
+    }
+    if (theme.name === 'Mine abandonnée') await rcon.run(`fill ${x0 + 3} -60 ${EXPE_MID + 4} ${x1 - 11} -60 ${EXPE_MID + 4} minecraft:rail replace minecraft:air`);
+    // monstres, plus nombreux à plusieurs, plus solides avec la vague et la difficulté
+    const factor = 0.6 + 0.16 * game.difficulty.power;
+    const count = Math.min(45, Math.round((4 + wave / 4) * players * factor));
+    const hp = Math.round((18 + 3 * wave) * factor);
+    const damage = 3 + Math.floor(wave / 4);
+    const metal = wave >= 9 ? 'iron' : wave >= 5 ? 'chainmail' : '';
+    for (let i = 0; i < count; i++) {
+      let cx = 0;
+      let cz = 0;
+      for (let tries = 0; tries < 20; tries++) {
+        cx = randomInt(x0 + 12, x1 - 3);
+        cz = randomInt(z0 + 2, z1 - 2);
+        if (!blocked.has(`${cx},${cz}`)) break;
+      }
+      const type = theme.mobs[i % theme.mobs.length]!;
+      const archer = type === 'skeleton' || type === 'stray';
+      const armored = metal && (archer || type === 'zombie' || type === 'husk');
+      const weapon = archer
+        ? 'HandItems:[{id:"minecraft:bow",count:1},{}],'
+        : type === 'wither_skeleton'
+          ? 'HandItems:[{id:"minecraft:stone_sword",count:1},{}],'
+          : theme.name === 'Mine abandonnée' && type === 'zombie'
+            ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],'
+            : '';
+      const armor = armored ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1}],` : '';
+      await rcon.run(
+        `summon minecraft:${type} ${cx} -60 ${cz} {Tags:["expe"],PersistenceRequired:1b,${weapon}${armor}ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],` +
+          `Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.attack_damage",base:${damage}},{id:"minecraft:generic.follow_range",base:40}]}`,
+      );
+    }
+    // le gardien, au fond, devant son coffre
+    const g = theme.guardian;
+    const ghp = Math.round((60 + 10 * wave) * (1 + 0.5 * (players - 1)) * factor);
+    await rcon.run(
+      `summon minecraft:${g.type} ${x1 - 4} -60 ${EXPE_MID} {Tags:["expe","expe_gardien"],PersistenceRequired:1b,${g.type === 'piglin_brute' ? 'IsImmuneToZombification:1b,' : ''}` +
+        `CustomName:'${healthBar(g.name, ghp, ghp, theme.color)}',CustomNameVisible:1b,Glowing:1b,Rotation:[90f,0f],${g.gear}ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],` +
+        `Health:${ghp}f,attributes:[{id:"minecraft:generic.max_health",base:${ghp}},{id:"minecraft:generic.attack_damage",base:${6 + Math.floor(wave / 2)}},` +
+        '{id:"minecraft:generic.follow_range",base:48},{id:"minecraft:generic.scale",base:1.4},{id:"minecraft:generic.knockback_resistance",base:0.6}]}',
+    );
+    expedition.guardianMax = ghp;
+    expedition.guardianShown = ghp;
+  };
+
+  /** Un membre quitte l'expédition : pioche rendue ; mort, il perd la moitié de ce qu'il a gagné là-bas. */
+  const leaveExpedition = async (name: string, died: boolean) => {
+    const start = expedition.members.get(name) ?? 0;
+    expedition.members.delete(name);
+    await rcon.run(`tag ${name} remove expe_membre`);
+    await rcon.run(`clear ${name} ${EXPE_PICKAXE_MATCH}`);
+    const gained = Math.max(0, (await emeraldsOf(name)) - start);
+    if (died) {
+      const lost = Math.floor(gained / 2);
+      if (lost > 0) await rcon.run(`clear ${name} minecraft:emerald ${lost}`);
+      await rcon.run(`tellraw @a {"text":"${name} est tombé en expédition${lost > 0 ? ` et perd ${lost} émeraudes` : ''}.","color":"red"}`);
+    } else {
+      await rcon.run(`tp ${name} 0 -60 12`);
+      await rcon.run(`effect give ${name} minecraft:resistance 3 4 true`);
+      await rcon.run(`tellraw @a {"text":"${name} revient de l’expédition${gained > 0 ? ` avec ${gained} émeraudes` : ''}.","color":"aqua"}`);
+    }
+  };
+
+  /** Départ : salle construite, inscrits téléportés, pillards lâchés sur le château. */
+  const startExpedition = async (wave: number) => {
+    const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+    for (const name of [...expedition.members.keys()]) {
+      if (online.includes(name) && !waiting.has(name)) continue;
+      expedition.members.delete(name);
+      if (online.includes(name)) await rcon.run(`give ${name} minecraft:emerald ${EXPE_PRICE}`);
+    }
+    if (expedition.members.size === 0) {
+      expedition.state = 'libre';
+      return;
+    }
+    const theme = choose(EXPE_THEMES);
+    Object.assign(expedition, { theme, wave, players: expedition.members.size, guardian: true, lastPower: Date.now(), warned: false });
+    const names = [...expedition.members.keys()];
+    await rcon.run(`tellraw @a {"text":"Expédition : ${theme.name} — ${names.join(', ')}. Des pillards attaquent le château !","color":"aqua"}`);
+    await buildExpedition(theme, wave, names.length);
+    for (const name of names) {
+      await rcon.run(`tag ${name} add expe_membre`);
+      await rcon.run(`clear ${name} ${EXPE_PICKAXE_MATCH}`);
+      await rcon.run(`tp ${name} ${EXPE_X + 4} -60 ${EXPE_MID} -90 0`);
+      await rcon.run(`give ${name} minecraft:${EXPE_PICKAXE}`);
+      await rcon.run(`effect give ${name} minecraft:resistance 5 4 true`);
+      expedition.members.set(name, await emeraldsOf(name));
+    }
+    await rcon.run('title @a[tag=expe_membre] times 5 50 10');
+    await rcon.run(`title @a[tag=expe_membre] subtitle {"text":"${EXPE_S / 60} minutes · le gardien garde le plus gros coffre · la plaque à l’entrée ramène au château","color":"gray"}`);
+    await rcon.run(`title @a[tag=expe_membre] title {"text":"${theme.name}","color":"${theme.color}"}`);
+    await rcon.run('bossbar add expedition {"text":"Expédition"}');
+    await rcon.run('bossbar set minecraft:expedition color purple');
+    await rcon.run(`bossbar set minecraft:expedition max ${EXPE_S}`);
+    expedition.endsAt = Date.now() + EXPE_S * 1000;
+    expedition.state = 'en_cours';
+    // pillards : ils visent le Roi ; les tourelles et ceux restés au château le défendent
+    const raid = Math.max(2, Math.round((2 + wave / 3) * (0.6 + 0.16 * game.difficulty.power)));
+    const raiderHp = 18 + 3 * wave;
+    for (let i = 0; i < raid; i++) {
+      const type = ['vindicator', 'pillager', 'zombie'][i % 3]!;
+      const [x, z] = SPAWNS[i % SPAWNS.length]!;
+      const weapon = type === 'vindicator' ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : type === 'pillager' ? 'HandItems:[{id:"minecraft:crossbow",count:1},{}],' : '';
+      await rcon.run(
+        `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague","pillard"],PersistenceRequired:1b,CustomName:'{"text":"Pillard","color":"dark_red"}',${weapon}` +
+          `ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],Health:${raiderHp}f,attributes:[{id:"minecraft:generic.max_health",base:${raiderHp}},{id:"minecraft:generic.follow_range",base:64}]}`,
+      );
+    }
+  };
+
+  /** Retour de tout le monde : salle vidée, pillards en fuite, zone déchargée. */
+  const endExpedition = async () => {
+    for (const name of [...expedition.members.keys()]) await leaveExpedition(name, false);
+    await rcon.run(`kill @e[type=!player,${EXPE_ZONE}]`);
+    if (/passed/.test(await rcon.run('execute if entity @e[tag=pillard]'))) {
+      await rcon.run('kill @e[tag=pillard]');
+      await rcon.run('tellraw @a {"text":"Les pillards s’enfuient au retour des aventuriers.","color":"gray"}');
+    }
+    await rcon.run('tag @a remove expe_membre');
+    await rcon.run('bossbar remove minecraft:expedition');
+    await rcon.run(`forceload remove ${EXPE_FORCELOAD}`);
+    expedition.state = 'finie';
+  };
+
+  /** Un passage de l'expédition (chaque seconde pendant la pause). */
+  const expeditionTick = async (wave: number) => {
+    if (expedition.state === 'inscription') {
+      if (Date.now() >= expedition.departAt) await startExpedition(wave);
+      return;
+    }
+    if (expedition.state !== 'en_cours') {
+      // personne ne reste dans la salle hors expédition (déconnexion, relance du script), ni avec la pioche prêtée
+      await rcon.run(`tp @a[${EXPE_ZONE}] 0 -60 12`);
+      await rcon.run(`clear @a ${EXPE_PICKAXE_MATCH}`);
+      return;
+    }
+    const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
+    const left = Math.max(0, Math.ceil((expedition.endsAt - Date.now()) / 1000));
+    for (const name of [...expedition.members.keys()]) {
+      if (!online.includes(name)) expedition.members.delete(name);
+      else if (waiting.has(name)) await leaveExpedition(name, true);
+      else if (/passed/.test(await rcon.run(`execute at ${name} if block ~ ~ ~ minecraft:polished_blackstone_pressure_plate`))) await leaveExpedition(name, false);
+    }
+    // qui se trouve dans la salle sans en être (revenu d'une déconnexion) rentre au château
+    for (const name of online) {
+      if (!expedition.members.has(name)) await rcon.run(`execute as @a[name=${name},gamemode=!spectator,${EXPE_ZONE}] run tp @s 0 -60 12`);
+    }
+    // le gardien : barre de vie, pouvoir toutes les 8 secondes, coffre à sa mort
+    if (expedition.guardian) {
+      const reply = await rcon.run(`data get entity ${GUARDIAN} Health`);
+      const g = expedition.theme.guardian;
+      if (!/data: /.test(reply)) {
+        expedition.guardian = false;
+        await fillChest(guardianChest, guardianLoot(expedition.wave, expedition.players));
+        await rcon.run(`execute positioned ${guardianChest} run particle minecraft:totem_of_undying ~ ~1 ~ 0.5 1 0.5 0.3 60`);
+        await rcon.run(`execute positioned ${guardianChest} run playsound minecraft:ui.toast.challenge_complete master @a[tag=expe_membre] ~ ~ ~ 1 1`);
+        await rcon.run(`tellraw @a {"text":"Le ${g.name} est vaincu : son coffre est ouvert !","color":"gold"}`);
+      } else {
+        const hp = number(reply);
+        if (Math.ceil((hp / expedition.guardianMax) * 10) !== Math.ceil((expedition.guardianShown / expedition.guardianMax) * 10)) {
+          expedition.guardianShown = hp;
+          await rcon.run(`data merge entity ${GUARDIAN} {CustomName:'${healthBar(g.name, hp, expedition.guardianMax, expedition.theme.color)}'}`);
+        }
+        if (Date.now() - expedition.lastPower > 8000) {
+          expedition.lastPower = Date.now();
+          const hit = 4 + Math.floor(expedition.wave / 5);
+          if (g.power === 'renforts') {
+            for (const ox of [1, -1]) await rcon.run(`execute at ${GUARDIAN} run summon minecraft:cave_spider ~${ox} ~ ~ {Tags:["expe"],PersistenceRequired:1b}`);
+            await rcon.run('title @a[tag=expe_membre] actionbar {"text":"Le Contremaître appelle ses ouvrières !","color":"gold"}');
+          } else if (g.power === 'onde') {
+            await rcon.run(`execute at ${GUARDIAN} run particle minecraft:sculk_soul ~ ~1 ~ 3 0.5 3 0.02 80`);
+            await rcon.run(`execute at ${GUARDIAN} as @a[distance=..6,gamemode=!spectator] run damage @s ${hit} minecraft:magic`);
+            await rcon.run(`execute at ${GUARDIAN} run effect give @a[distance=..6] minecraft:slowness 3 1 true`);
+            await rcon.run('title @a[tag=expe_membre] actionbar {"text":"Le Seigneur de la crypte libère une onde glacée !","color":"aqua"}');
+          } else {
+            await rcon.run(`execute at ${GUARDIAN} run particle minecraft:flame ~ ~0.5 ~ 3 0.2 3 0.05 120`);
+            await rcon.run(`execute at ${GUARDIAN} as @a[distance=..6,gamemode=!spectator] run damage @s ${hit} minecraft:in_fire`);
+            await rcon.run(`effect give ${GUARDIAN} minecraft:speed 4 1 true`);
+            await rcon.run('title @a[tag=expe_membre] actionbar {"text":"La Brute du Nether s’embrase !","color":"red"}');
+          }
+        }
+      }
+    }
+    await rcon.run('bossbar set minecraft:expedition players @a[tag=expe_membre]');
+    await rcon.run(`bossbar set minecraft:expedition value ${left}`);
+    await rcon.run(
+      `bossbar set minecraft:expedition name {"text":"${expedition.theme.name} : ${clock(left)} · ${expedition.guardian ? 'gardien en vie' : 'gardien vaincu'}","color":"${expedition.theme.color}"}`,
+    );
+    if (!expedition.warned && left <= 30) {
+      expedition.warned = true;
+      await rcon.run('title @a[tag=expe_membre] actionbar {"text":"Retour au château dans 30 secondes !","color":"yellow","bold":true}');
+    }
+    // au château : les pillards visent le Roi, les tourelles tirent
+    await rcon.run('team join chateau @a');
+    await rcon.run(`execute at ${KING} run team join chateau @e[tag=vague,type=!creeper,distance=..12]`);
+    await rcon.run(`execute at ${KING} run tp @e[tag=vague,distance=70..] 0 -60 35`);
+    await turretsTick();
+    if (left === 0 || expedition.members.size === 0) await endExpedition();
+  };
+  /** Texte de la barre de vague pendant une expédition. */
+  const expeditionStatus = async () => {
+    if (expedition.state === 'inscription') {
+      const left = Math.max(0, Math.ceil((expedition.departAt - Date.now()) / 1000));
+      return `Départ en expédition dans ${left} s : ${[...expedition.members.keys()].join(', ')}`;
+    }
+    const left = Math.max(0, Math.ceil((expedition.endsAt - Date.now()) / 1000));
+    const raiders = number(await rcon.run('execute if entity @e[tag=pillard]'));
+    return `Expédition en cours (${clock(left)})${raiders ? ` · ${raiders} pillard${raiders > 1 ? 's' : ''} au château` : ''} · la vague attend le retour`;
+  };
+
   await rcon.run('scoreboard objectives add record dummy');
   const best = await score('#meilleur', 'record');
   if (!continuing) {
@@ -1665,28 +2257,7 @@ async function main(): Promise<void> {
     let counterAttack = false;
     for (;;) {
       await sleep(2000);
-      if (!(await kingAlive())) {
-        await rcon.run('kill @e[tag=vague]');
-        await rcon.run('bossbar set minecraft:vague name {"text":"Le Roi est mort","color":"dark_red"}');
-        await kingSays(pick(KING_LINES.mort));
-        const held = n - 1;
-        const record = await score('#meilleur', 'record');
-        if (held > record) await rcon.run(`scoreboard players set #meilleur record ${held}`);
-        await say('Le Roi est mort !', `Vous avez tenu ${held} vague${held > 1 ? 's' : ''}${held > record ? ' : nouveau record !' : ` (record : ${record})`}`);
-        // classement des tueurs de la partie
-        const players = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
-        const ranking = await Promise.all(players.map(async (name) => ({ name, kills: await score(name, 'tues') })));
-        ranking.sort((a, b) => b.kills - a.kills);
-        const lines = ranking.map((r, i) => `{"text":"\\n${i + 1}. ${r.name} : ${r.kills} monstre${r.kills > 1 ? 's' : ''}","color":"${i === 0 ? 'gold' : 'white'}"}`);
-        await rcon.run(`tellraw @a [{"text":"Classement de la partie","color":"yellow","bold":true}${lines.length ? ',' + lines.join(',') : ''}]`);
-        console.log(`partie terminée à la vague ${n}`);
-        // nouvelle partie dans 30 s : le conteneur redémarre le script (--restart), qui remet tout à zéro
-        writeFileSync(GAME_OVER_MARK, String(n));
-        await sleep(25_000);
-        await say('Nouvelle partie !', 'Le château est remis à neuf');
-        await sleep(5_000);
-        process.exit(0);
-      }
+      if (!(await kingAlive())) await gameOver(n);
       await rcon.run('bossbar set minecraft:vague players @a');
       // barres de vie au-dessus des monstres, mises à jour quand leur vie change
       for (const [id, mob] of tracked) {
@@ -1785,83 +2356,9 @@ async function main(): Promise<void> {
           await say('Ruée !', 'Les monstres accélèrent');
         }
       }
-      // tourelles nouvellement posées : un numéro, et le joueur à moins de 8 blocs en devient le propriétaire
-      const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((x) => x.trim()).filter(Boolean);
-      for (let t = 0; t < 5; t++) {
-        await rcon.run('tag @e[tag=tourelle,tag=!suivie,limit=1] add nouvelle');
-        if (!/passed/.test(await rcon.run('execute if entity @e[tag=nouvelle]'))) break;
-        const id = `t${RUN}_${nextTurret++}`;
-        // propriétaire d'origine (étiquette proprio_…) si la tourelle a déjà été suivie, sinon le joueur le plus proche
-        let owner = /"proprio_(\w+)"/.exec(await rcon.run('data get entity @e[tag=nouvelle,limit=1] Tags'))?.[1];
-        for (const name of owner ? [] : online) {
-          if (/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=nouvelle,distance=..8]`))) {
-            owner = name;
-            break;
-          }
-        }
-        await rcon.run(`tag @e[tag=nouvelle] add ${id}`);
-        if (owner) await rcon.run(`tag @e[tag=nouvelle] add proprio_${owner}`);
-        await rcon.run('tag @e[tag=nouvelle] add suivie');
-        await rcon.run('tag @e[tag=nouvelle] remove nouvelle');
-        turrets.set(id, { owner, hp: TURRET_HP[0]!, shown: -1, level: 1 });
-      }
-      // tirs : chaque victime d'une tourelle compte pour son propriétaire (émeraudes, classement, rôle)
-      for (const [id, turret] of turrets) {
-        const owner = turret.owner;
-        const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
-        if (!/data: /.test(tags)) {
-          turrets.delete(id);
-          continue;
-        }
-        const kind = TURRET_KINDS.find((k) => k.tag !== 'fleche' && tags.includes(`"${k.tag}"`)) ?? TURRET_KINDS[0]!;
-        const level = turretLevel(tags);
-        const range = 22 + 4 * (level - 1);
-        const me = `@e[tag=${id},limit=1]`;
-        const maxHp = Math.round(TURRET_HP[level - 1]! * (has(owner, 'blindage') ? 1.5 : 1));
-        // une amélioration remet la vie au maximum du nouveau niveau
-        if (level > turret.level) {
-          turret.level = level;
-          turret.hp = maxHp;
-        }
-        const attackers = number(await rcon.run(`execute at ${me} if entity @e[tag=vague,distance=..2]`));
-        // abîmée par les monstres au contact ; sinon, elle se répare très lentement (1 point toutes les 10 s)
-        turret.hp = attackers > 0 ? Math.max(0, turret.hp - attackers * TURRET_HIT) : Math.min(maxHp, turret.hp + TURRET_REGEN);
-        if (turret.hp === 0) {
-          await rcon.run(`execute at ${me} run particle minecraft:explosion ~ ~1 ~ 0.3 0.3 0.3 0 3`);
-          await rcon.run(`execute at ${me} run playsound minecraft:entity.item.break master @a ~ ~ ~ 1 0.6`);
-          await rcon.run(`kill ${me}`);
-          if (owner) {
-            await rcon.run(`title ${owner} actionbar {"text":"Une de vos tourelles a été détruite !","color":"red"}`);
-            await rcon.run(`scoreboard players remove ${owner} tourelles 1`);
-          }
-          turrets.delete(id);
-          continue;
-        }
-        if (Math.ceil(turret.hp) !== turret.shown) {
-          turret.shown = Math.ceil(turret.hp);
-          const stars = level > 1 ? ` ${'★'.repeat(level)}` : '';
-          await rcon.run(`data merge entity ${me} {CustomName:'${healthBar(`${kind.name}${stars}`, turret.hp, maxHp, kind.color)}'}`);
-        }
-        const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
-        const by = owner && online.includes(owner) ? ` by ${owner}` : '';
-        const damage = Math.round(TURRET_DAMAGE[kind.tag]![level - 1]! * (has(owner, 'calibre') ? 1.25 : 1) * (owner && (turretBoost.get(owner) ?? 0) > Date.now() ? 3 : 1));
-        // cibles du tir (le canon touche tout ce qui est à 3 blocs de la cible) ; celles qui disparaissent sont ses victimes
-        if (kind.tag === 'canon') await rcon.run(`execute as ${me} at @s at ${near} run tag @e[tag=vague,distance=..3] add tir`);
-        else await rcon.run(`execute as ${me} at @s run tag ${near} add tir`);
-        const aimed = number(await rcon.run('execute if entity @e[tag=tir]'));
-        if (aimed === 0) continue;
-        await rcon.run(`execute as @e[tag=tir] run damage @s ${damage} minecraft:${kind.tag === 'canon' ? 'explosion' : 'arrow'}${by}`);
-        const killed = aimed - number(await rcon.run('execute if entity @e[tag=tir]'));
-        if (killed > 0 && by) turretKills.set(owner!, (turretKills.get(owner!) ?? 0) + killed);
-        if (kind.tag === 'glace') await rcon.run(`effect give @e[tag=tir] minecraft:slowness 3 ${level} true`);
-        // feu, et flèches enflammées au niveau 3
-        if (kind.tag === 'feu' || level >= 3) await rcon.run('execute as @e[tag=tir] run data merge entity @s {Fire:120s}');
-        const particle = kind.tag === 'canon' ? 'explosion' : kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
-        await rcon.run(`execute at @e[tag=tir] run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 ${kind.tag === 'canon' ? 1 : 12}`);
-        await rcon.run(`execute at ${me} run playsound minecraft:${kind.tag === 'canon' ? 'entity.generic.explode' : 'entity.arrow.shoot'} master @a ~ ~ ~ 0.6 1.2`);
-        await rcon.run('tag @e[tag=tir] remove tir');
-      }
-      await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
+      await turretsTick();
+      // un joueur revenu d'une déconnexion dans la salle d'expédition rentre au château
+      await rcon.run(`tp @a[${EXPE_ZONE}] 0 -60 12`);
       // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
       await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
       await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:resistance 5 1 true');
