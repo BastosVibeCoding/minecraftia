@@ -22,6 +22,8 @@
  * au catalogue personnel (livre et /trigger boutique), dans le chat, tous en même temps. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
  * Rôles jusqu'au niveau 20 (chaque niveau demande plus de victimes) et arbre de compétences par classe (/trigger arbre).
+ * Joueurs à terre (un allié accroupi les relève), ultimes (accroupi + clic droit, jauge de victimes), roulette de
+ * l'Enchanteur, jetons de gloire des élites et des boss échangés contre des objets uniques.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -385,6 +387,34 @@ const CATALOGUE_BOOK =
 /** Numéros d'achat du catalogue : passifs (1 à 20), Bénédiction du Roi (50), tourelles (60 et plus). */
 const BUY_BLESSING = 50;
 const BUY_TURRET = 60;
+/** Roulette de l'Enchanteur (catalogue) et objets uniques échangés contre des jetons de gloire. */
+const BUY_ROULETTE = 70;
+const BUY_UNIQUE = 80;
+const ROULETTE_PRICE = 15;
+/** Enchantements de la roulette selon l'objet tenu : [enchantement, niveau maximal normal]. */
+const ROULETTE: { match: RegExp; enchants: [string, number][] }[] = [
+  { match: /_sword$|_axe$/, enchants: [['sharpness', 5], ['smite', 5], ['fire_aspect', 2], ['looting', 3], ['knockback', 2], ['sweeping_edge', 3]] },
+  { match: /^bow$/, enchants: [['power', 5], ['flame', 1], ['punch', 2], ['infinity', 1]] },
+  { match: /^crossbow$/, enchants: [['quick_charge', 3], ['multishot', 1], ['piercing', 4]] },
+  { match: /_helmet$|_chestplate$|_leggings$|_boots$/, enchants: [['protection', 4], ['projectile_protection', 4], ['blast_protection', 4], ['thorns', 3]] },
+  { match: /^trident$/, enchants: [['impaling', 5], ['loyalty', 3], ['channeling', 1]] },
+  { match: /^mace$/, enchants: [['density', 5], ['breach', 4], ['wind_burst', 3]] },
+];
+/** Jeton de gloire : lâché par les élites (1) et les boss (3), échangé contre des objets uniques. */
+const TOKEN_ITEM = 'echo_shard[custom_data={jeton:1b},custom_name=\'{"text":"Jeton de gloire","color":"aqua","italic":false}\',enchantment_glint_override=true]';
+const TOKEN_NBT = '{id:"minecraft:echo_shard",count:COUNT,components:{"minecraft:custom_data":{jeton:1b},"minecraft:custom_name":\'{"text":"Jeton de gloire","color":"aqua","italic":false}\',"minecraft:enchantment_glint_override":1b}}';
+const UNIQUES: { name: string; cost: number; item: string }[] = [
+  { name: 'Excalibur', cost: 5, item: 'netherite_sword[enchantments={levels:{"minecraft:sharpness":8,"minecraft:fire_aspect":3,"minecraft:looting":3,"minecraft:sweeping_edge":3}},unbreakable={},custom_name=\'{"text":"Excalibur","color":"gold","italic":false}\']' },
+  { name: 'Arc du Roi', cost: 5, item: 'bow[enchantments={levels:{"minecraft:power":8,"minecraft:flame":1,"minecraft:infinity":1,"minecraft:punch":2}},unbreakable={},custom_name=\'{"text":"Arc du Roi","color":"gold","italic":false}\']' },
+  { name: 'Bottes d’Hermès', cost: 4, item: 'netherite_boots[enchantments={levels:{"minecraft:protection":5,"minecraft:feather_falling":6}},unbreakable={},attribute_modifiers={modifiers:[{type:"minecraft:generic.movement_speed",id:"minecraft:hermes",amount:0.04,operation:"add_value",slot:"feet"},{type:"minecraft:generic.armor",id:"minecraft:hermes_armure",amount:3,operation:"add_value",slot:"feet"}]},custom_name=\'{"text":"Bottes d’Hermès","color":"gold","italic":false}\']' },
+  { name: 'Totem d’immortalité', cost: 3, item: 'totem_of_undying' },
+];
+/** À terre : seuil de vie, durée, et temps (en passages d'une seconde) pour être relevé par un allié accroupi. */
+const DOWNED_HP = 6;
+const DOWNED_S = 20;
+const REVIVE_TICKS = 3;
+/** Ultime : victimes pour le charger. */
+const ULT_COST = 25;
 
 /** Équipement de départ, redonné à chaque nouvelle partie. */
 const KIT = [
@@ -784,6 +814,46 @@ async function main(): Promise<void> {
       await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master @a ~ ~ ~ 1 1.4`);
     }
   };
+  /** Ultime d'un rôle (accroupi + clic droit avec l'objet de capacité, jauge pleine). */
+  const useUltimate = async (r: Role, name: string) => {
+    await rcon.run(`title @a times 5 40 10`);
+    await rcon.run(`title @a subtitle {"text":"${name} déclenche son ultime !","color":"${r.color}"}`);
+    await rcon.run('title @a title {"text":"⚡"}');
+    await rcon.run(`execute at ${name} run playsound minecraft:item.totem.use master @a ~ ~ ~ 1 1`);
+    if (r.key === 'chevalier') {
+      await rcon.run(`effect give ${name} minecraft:resistance 10 4 true`);
+      await rcon.run(`effect give ${name} minecraft:strength 10 2 true`);
+      await rcon.run(`effect give ${name} minecraft:speed 10 1 true`);
+    } else if (r.key === 'archer') {
+      await rcon.run(`execute at ${name} as @e[tag=vague,distance=..30] run damage @s 15 minecraft:arrow by ${name}`);
+      await rcon.run(`execute at ${name} as @e[tag=vague,distance=..30] at @s run particle minecraft:crit ~ ~2 ~ 0.3 1 0.3 0.5 20`);
+    } else if (r.key === 'ingenieur') {
+      turretBoost.set(name, Date.now() + 15_000);
+      for (const turret of turrets.values()) if (turret.owner === name) turret.hp = TURRET_HP[turret.level - 1]! * (has(name, 'blindage') ? 1.5 : 1);
+    } else if (r.key === 'soigneur') {
+      for (const who of downed.keys()) await revive(who, name);
+      await rcon.run('effect give @a minecraft:instant_health 1 4 true');
+      await rcon.run(`effect give ${KING} minecraft:instant_health 1 5 true`);
+      await rcon.run('execute at @a run particle minecraft:totem_of_undying ~ ~1 ~ 0.5 1 0.5 0.3 30');
+    } else if (r.key === 'mage') {
+      await rcon.run('execute at @e[tag=vague] run particle minecraft:explosion_emitter ~ ~1 ~');
+      await rcon.run(`execute as @e[tag=vague] run damage @s 20 minecraft:explosion by ${name}`);
+    } else if (r.key === 'invocateur') {
+      const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
+      if (uuid) {
+        const stats = petStats(name, roleLevelFor(await score(name, 'tues')));
+        for (let i = 0; i < 6; i++) await rcon.run(petCommand(name, uuid, stats.hp, stats.damage, ['pet', `renfort_${name}`]));
+        setTimeout(() => void rcon.run(`kill @e[tag=renfort_${name}]`), PET_CALL_S * 1000);
+      }
+    }
+  };
+  /** Relève un joueur à terre. */
+  const revive = async (who: string, by: string) => {
+    downed.delete(who);
+    await rcon.run(`effect clear ${who}`);
+    await rcon.run(`effect give ${who} minecraft:instant_health 1 0 true`);
+    await rcon.run(`tellraw @a {"text":"${by} relève ${who} !","color":"green"}`);
+  };
   /** Attend qu'un joueur marche sur la plaque dorée (après `minSeconds`), en tenant la barre et la vie du Roi à jour. */
   const waitForStart = async (wave: number, minSeconds: number, color: string) => {
     await rcon.run(`execute if block ${WAVE_START} minecraft:air run setblock ${WAVE_START} minecraft:light_weighted_pressure_plate`);
@@ -864,6 +934,7 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add arbre_acquis dummy');
   await rcon.run('scoreboard objectives add arbre trigger');
   await rcon.run('scoreboard objectives add competence trigger');
+  await rcon.run('scoreboard objectives add accroupi minecraft.custom:minecraft.sneak_time');
   // le niveau de prestige est gardé dans « niv_prestige » ; « prestige » est la commande /trigger prestige
   // (recopie de l'ancien compteur, une seule fois : quand « niv_prestige » vient d'être créé, et pour les joueurs seulement)
   if (/Created/.test(await rcon.run('scoreboard objectives add niv_prestige dummy'))) {
@@ -884,6 +955,15 @@ async function main(): Promise<void> {
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
   /** Utilisations de la capacité pendant la vague en cours, par joueur (vidé à chaque vague). */
   const abilityUsed = new Map<string, number>();
+  /** Joueurs à terre : fin du délai et passages d'un allié accroupi à côté. */
+  const downed = new Map<string, { until: number; revive: number }>();
+  /** Temps accroupi au passage précédent (statistique), et qui s'est accroupi depuis. */
+  const sneakTime = new Map<string, number>();
+  const sneaking = new Set<string>();
+  /** Charge de l'ultime (victimes depuis le dernier ultime), par joueur. */
+  const ultCharge = new Map<string, number>();
+  /** Surcharge de l'Ingénieur : ses tourelles font triple dégâts jusqu'à cette date. */
+  const turretBoost = new Map<string, number>();
   /** Rôle et compétences apprises de chaque joueur (tenus à jour par la boucle des joueurs). */
   const skills = new Map<string, { role?: string; mask: number }>();
   const has = (name: string | undefined, key: string) =>
@@ -927,6 +1007,13 @@ async function main(): Promise<void> {
     void (async () => {
       try {
       const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((s) => s.trim()).filter(Boolean);
+      // qui s'est accroupi depuis le passage précédent (temps accroupi en hausse)
+      sneaking.clear();
+      for (const name of online) {
+        const t = await score(name, 'accroupi');
+        if (t > (sneakTime.get(name) ?? t)) sneaking.add(name);
+        sneakTime.set(name, t);
+      }
       for (const name of online) {
         const k = await score(name, 'tues');
         const before = kills.get(name);
@@ -938,6 +1025,7 @@ async function main(): Promise<void> {
         const prestige = await score(name, 'niv_prestige');
         levels.set('prestige', prestige);
         if (before !== undefined && k > before) {
+          ultCharge.set(name, Math.min(ULT_COST, (ultCharge.get(name) ?? 0) + (k - before)));
           const byTurret = Math.min(k - before, turretKills.get(name) ?? 0);
           turretKills.set(name, (turretKills.get(name) ?? 0) - byTurret);
           const bank = (turretBank.get(name) ?? 0) + byTurret;
@@ -1080,6 +1168,11 @@ async function main(): Promise<void> {
           if (/No items/.test(await rcon.run(`clear ${name} minecraft:carrot_on_a_stick[minecraft:custom_data={capacite:1b}] 0`))) {
             await rcon.run(`give ${name} minecraft:${abilityItem(myRole)}`);
           }
+          if ((await score(name, 'capacite')) > 0 && sneaking.has(name) && (ultCharge.get(name) ?? 0) >= ULT_COST) {
+            await rcon.run(`scoreboard players set ${name} capacite 0`);
+            ultCharge.set(name, 0);
+            await useUltimate(myRole, name);
+          }
           if ((await score(name, 'capacite')) > 0) {
             await rcon.run(`scoreboard players set ${name} capacite 0`);
             const uses = abilityUsed.get(name) ?? 0;
@@ -1168,10 +1261,49 @@ async function main(): Promise<void> {
             // tourelles achetées pendant la partie moins celles détruites : les cacher ne fait pas baisser le prix
             const ownedTurrets = () => score(name, 'tourelles');
             const emeralds = async () => Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
-            if (choice > 0) {
+            const tokens = async () => Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:echo_shard[minecraft:custom_data={jeton:1b}] 0`))?.[1] ?? 0);
+            // objets uniques : payés en jetons de gloire (retrait vérifié, rendu si incomplet)
+            const unique = choice >= BUY_UNIQUE ? UNIQUES[choice - BUY_UNIQUE] : undefined;
+            if (unique) {
+              const paid = (await tokens()) >= unique.cost ? Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:echo_shard[minecraft:custom_data={jeton:1b}] ${unique.cost}`))?.[1] ?? 0) : 0;
+              if (paid < unique.cost) {
+                if (paid > 0) await rcon.run(`give ${name} minecraft:${TOKEN_ITEM} ${paid}`);
+                await rcon.run(`tellraw ${name} {"text":"Pas assez de jetons de gloire : ${unique.name} en demande ${unique.cost}.","color":"red"}`);
+              } else {
+                await rcon.run(`give ${name} minecraft:${unique.item}`);
+                await rcon.run(`tellraw @a {"text":"${name} obtient ${unique.name} !","color":"gold"}`);
+              }
+            }
+            // roulette de l'Enchanteur : un enchantement au hasard sur l'objet tenu, parfois légendaire
+            if (choice === BUY_ROULETTE) {
+              const held = /"minecraft:([a-z_]+)"/.exec(await rcon.run(`data get entity ${name} SelectedItem.id`))?.[1] ?? '';
+              const table = ROULETTE.find((t) => t.match.test(held));
+              if (!table) {
+                await rcon.run(`tellraw ${name} {"text":"Tenez une arme, un arc, une arbalète, une armure, un trident ou une masse en main.","color":"red"}`);
+              } else if ((await emeralds()) < ROULETTE_PRICE) {
+                await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : la roulette coûte ${ROULETTE_PRICE}.","color":"red"}`);
+              } else {
+                const paid = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${ROULETTE_PRICE}`))?.[1] ?? 0);
+                if (paid < ROULETTE_PRICE) {
+                  if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+                } else {
+                  const [enchant, max] = table.enchants[Math.floor(Math.random() * table.enchants.length)]!;
+                  const roll = Math.random();
+                  const bonus = max === 1 ? 0 : roll < 0.05 ? 2 : roll < 0.3 ? 1 : 0;
+                  const level = max + bonus;
+                  await rcon.run(
+                    `item modify entity ${name} weapon.mainhand {"function":"minecraft:set_enchantments","enchantments":{"minecraft:${enchant}":${level}},"add":false}`,
+                  );
+                  const legend = bonus === 2;
+                  await rcon.run(`tellraw ${legend ? '@a' : name} {"text":"${legend ? `LÉGENDAIRE ! ${name} obtient` : 'Roulette :'} ${enchant} ${level}","color":"${legend ? 'gold' : 'light_purple'}","bold":${legend}}`);
+                  await rcon.run(`execute at ${name} run playsound minecraft:${legend ? 'ui.toast.challenge_complete' : 'block.enchantment_table.use'} master ${name} ~ ~ ~ 1 1`);
+                }
+              }
+            }
+            if (choice > 0 && choice !== BUY_ROULETTE && !unique) {
               // article choisi : prix, puis paiement s'il a assez d'émeraudes
               const passive = choice <= PASSIVES.length ? PASSIVES[choice - 1] : undefined;
-              const kind = choice >= BUY_TURRET ? TURRET_KINDS[choice - BUY_TURRET] : undefined;
+              const kind = choice >= BUY_TURRET && choice < BUY_TURRET + TURRET_KINDS.length ? TURRET_KINDS[choice - BUY_TURRET] : undefined;
               let price = 0;
               let label = '';
               if (passive) {
@@ -1229,6 +1361,15 @@ async function main(): Promise<void> {
             await line(BUY_BLESSING, `Bénédiction du Roi : niveau ${blessingNow} → ${blessingNow + 1}`, blessingNow < BLESSING.max ? passivePrice(BLESSING, blessingNow + 1) : undefined, 'gold');
             for (const [i, kind] of TURRET_KINDS.entries()) {
               await line(BUY_TURRET + i, `${kind.name} (vous en avez ${owned})`, Math.round(kind.price * (1 + owned) * (has(name, 'economie') ? 0.75 : 1)), kind.color);
+            }
+            await line(BUY_ROULETTE, 'Roulette de l’Enchanteur (objet tenu en main, parfois légendaire)', ROULETTE_PRICE, 'light_purple');
+            const myTokens = await tokens();
+            await rcon.run(`tellraw ${name} {"text":"— Jetons de gloire : ${myTokens} (lâchés par les élites et les boss) —","color":"aqua","bold":true}`);
+            for (const [i, u] of UNIQUES.entries()) {
+              await rcon.run(
+                `tellraw ${name} [{"text":"[Échanger] ","color":"aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger achat set ${BUY_UNIQUE + i}"}},` +
+                  `{"text":"${u.name} ","color":"gold"},{"text":"${u.cost} jetons","color":"aqua"}]`,
+              );
             }
           }
         }
@@ -1313,7 +1454,7 @@ async function main(): Promise<void> {
         const treeBonus = (attribute: string) => learnedSkills(role?.key, mask).reduce((sum, sk) => sum + (sk.attr?.[attribute] ?? 0), 0);
         const roleBonus = (attribute: string) => (role ? (role.bonus[attribute] ?? 0) + roleLevel * (role.perLevel[attribute] ?? 0) : 0) + treeBonus(attribute);
         // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
-        if (!waiting.has(name)) {
+        if (!waiting.has(name) && !downed.has(name)) {
           const owned = PASSIVES.filter((p) => (levels.get(p.key) ?? 0) > 0);
           const parts: string[] = owned.length
             ? owned.map((p, i) => `{"text":"${i ? ' · ' : ''}${p.short} ${levels.get(p.key)}","color":"${p.color}"}`)
@@ -1327,6 +1468,8 @@ async function main(): Promise<void> {
             const filled = Math.floor((into / step) * 5);
             const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${step}`}`;
             const freePoints = roleLevel - spentPoints(mask);
+            const charge = ultCharge.get(name) ?? 0;
+            parts.push(`{"text":"   ⚡ ${charge >= ULT_COST ? 'ULTIME PRÊT (accroupi + clic droit)' : `${charge}/${ULT_COST}`}","color":"${charge >= ULT_COST ? 'yellow' : 'gray'}","bold":${charge >= ULT_COST}}`);
             parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${freePoints > 0 ? ` (${freePoints} pt)` : ''}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
           }
           if (remaining > 0 && remaining <= 5) {
@@ -1350,8 +1493,46 @@ async function main(): Promise<void> {
           await rcon.run(`attribute ${name} minecraft:${attribute} base set ${value(levels.get(p.key) ?? 0) + roleBonus(attribute)}`);
         }
         for (const [attribute, base] of EXTRA_ATTRIBUTES) await rcon.run(`attribute ${name} minecraft:${attribute} base set ${base + roleBonus(attribute)}`);
+        // à terre : sous 3 cœurs, invulnérable mais sans force ; un allié accroupi à côté pendant 3 s le relève, sinon il meurt
+        if (!waiting.has(name)) {
+          const state = downed.get(name);
+          const hp = number(await rcon.run(`data get entity ${name} Health`));
+          if (!state && hp > 0 && hp <= DOWNED_HP) {
+            downed.set(name, { until: Date.now() + DOWNED_S * 1000, revive: 0 });
+            await rcon.run(`tellraw @a {"text":"${name} est à terre ! Accroupissez-vous à côté de lui pour le relever.","color":"red"}`);
+            await rcon.run(`execute at ${name} run playsound minecraft:entity.player.hurt master @a ~ ~ ~ 1 0.6`);
+          }
+          const now = downed.get(name);
+          if (now) {
+            await rcon.run(`effect give ${name} minecraft:resistance 2 4 true`);
+            await rcon.run(`effect give ${name} minecraft:slowness 2 6 true`);
+            await rcon.run(`effect give ${name} minecraft:weakness 2 9 true`);
+            await rcon.run(`effect give ${name} minecraft:glowing 2 0 true`);
+            let helper: string | undefined;
+            for (const other of online) {
+              if (other === name || !sneaking.has(other) || downed.has(other)) continue;
+              if (/passed/.test(await rcon.run(`execute at ${name} if entity @a[name=${other},distance=..2]`))) {
+                helper = other;
+                break;
+              }
+            }
+            const near = helper !== undefined;
+            now.revive = near ? now.revive + 1 : 0;
+            if (near && now.revive >= REVIVE_TICKS) {
+              await revive(name, helper!);
+            } else if (Date.now() > now.until) {
+              downed.delete(name);
+              await rcon.run(`effect clear ${name}`);
+              await rcon.run(`kill ${name}`);
+            } else {
+              const left = Math.ceil((now.until - Date.now()) / 1000);
+              await rcon.run(`title ${name} actionbar {"text":"À TERRE : ${left} s${near ? ' — on vous relève…' : ' — un allié accroupi à côté peut vous relever'}","color":"red","bold":true}`);
+            }
+          }
+        }
         if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
         waiting.add(name);
+        downed.delete(name);
         await rcon.run(`scoreboard players set ${name} morts 0`);
         await rcon.run(`gamemode spectator ${name}`);
         void respawn(name);
@@ -1370,7 +1551,7 @@ async function main(): Promise<void> {
   }
 
   /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
-  const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string }>();
+  const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string; tokens?: number }>();
   let nextMob = 0;
   for (let n = Number(firstWave); ; n++) {
     const p = game.difficulty.power;
@@ -1415,7 +1596,8 @@ async function main(): Promise<void> {
       const id = `m${RUN}_${nextMob++}`;
       const mob = mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p, id, bloodNight);
       await rcon.run(mob.command);
-      tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health, color: mob.color, ...(mob.elite ? { elite: mob.elite } : {}) });
+      const tokens = mob.name.startsWith('Zombie Géant') ? 3 : mob.elite ? 1 : 0;
+      tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health, color: mob.color, ...(mob.elite ? { elite: mob.elite } : {}), ...(tokens ? { tokens } : {}) });
       if (i % 4 === 3) await sleep(1000);
     }
     if (boss && !continuingNow) {
@@ -1425,13 +1607,13 @@ async function main(): Promise<void> {
         `summon minecraft:evoker 0 -60 50 {Tags:["vague","${id}"],PersistenceRequired:1b,CustomName:'${healthBar('Nécromancien', hp, hp)}',CustomNameVisible:1b,` +
           `Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.follow_range",base:64}]}`,
       );
-      tracked.set(id, { name: 'Nécromancien', max: hp, shown: hp });
+      tracked.set(id, { name: 'Nécromancien', max: hp, shown: hp, tokens: 2 });
     }
     // boss uniques : Chef des pillards (toutes les 10 vagues), Roi des zombies (toutes les 15), Wither affaibli (vague 20)
     const extraBoss = async (command: string, name: string, hp: number, count: number) => {
       const id = `m${RUN}_${nextMob++}`;
       await rcon.run(command.replace('TAGS', `Tags:["vague","${id}"]`).replace('NAME', `CustomName:'${healthBar(name, hp, hp)}',CustomNameVisible:1b`));
-      tracked.set(id, { name, max: hp, shown: hp });
+      tracked.set(id, { name, max: hp, shown: hp, tokens: name === 'Shulker' ? 1 : 3 });
       extra += count;
     };
     let extra = boss ? 1 : 0;
@@ -1510,6 +1692,8 @@ async function main(): Promise<void> {
       for (const [id, mob] of tracked) {
         const reply = await rcon.run(`data get entity @e[tag=${id},limit=1] Health`);
         if (!/data: /.test(reply)) {
+          // élites et boss lâchent des jetons de gloire là où ils sont tombés
+          if (mob.tokens && mob.pos) await rcon.run(`summon minecraft:item ${mob.pos} {Item:${TOKEN_NBT.replace('COUNT', String(mob.tokens))},PickupDelay:10s}`);
           // l'Explosif explose à sa mort (dégâts aux joueurs proches, aucun bloc cassé)
           if (mob.elite === 'explosif' && mob.pos) {
             await rcon.run(`execute positioned ${mob.pos} run particle minecraft:explosion_emitter ~ ~1 ~`);
@@ -1519,7 +1703,7 @@ async function main(): Promise<void> {
           tracked.delete(id);
           continue;
         }
-        if (mob.elite === 'explosif') {
+        if (mob.elite === 'explosif' || mob.tokens) {
           const pos = /\[(-?[0-9.]+)d, (-?[0-9.]+)d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity @e[tag=${id},limit=1] Pos`));
           if (pos) mob.pos = `${pos[1]} ${pos[2]} ${pos[3]}`;
         }
@@ -1660,7 +1844,7 @@ async function main(): Promise<void> {
         }
         const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
         const by = owner && online.includes(owner) ? ` by ${owner}` : '';
-        const damage = Math.round(TURRET_DAMAGE[kind.tag]![level - 1]! * (has(owner, 'calibre') ? 1.25 : 1));
+        const damage = Math.round(TURRET_DAMAGE[kind.tag]![level - 1]! * (has(owner, 'calibre') ? 1.25 : 1) * (owner && (turretBoost.get(owner) ?? 0) > Date.now() ? 3 : 1));
         // cibles du tir (le canon touche tout ce qui est à 3 blocs de la cible) ; celles qui disparaissent sont ses victimes
         if (kind.tag === 'canon') await rcon.run(`execute as ${me} at @s at ${near} run tag @e[tag=vague,distance=..3] add tir`);
         else await rcon.run(`execute as ${me} at @s run tag ${near} add tir`);
