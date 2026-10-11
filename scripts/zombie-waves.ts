@@ -1329,6 +1329,9 @@ async function main(): Promise<void> {
         mob.shown = hp;
         await rcon.run(`data merge entity @e[tag=${id},limit=1] {CustomName:'${healthBar(mob.name, hp, mob.max, mob.color)}'}`);
       }
+      // loups de l'Invocateur : pas de reproduction (délai de reproduction tenu en permanence), louveteaux retirés
+      await rcon.run('execute as @e[type=minecraft:wolf,tag=pet] run data merge entity @s {Age:6000}');
+      await rcon.run('kill @e[type=minecraft:wolf,tag=!pet]');
       // pas d'orbes d'expérience : la barre d'expérience sert à la progression des rôles
       await rcon.run('kill @e[type=minecraft:experience_orb]');
       // pouvoirs des élites : régénération, rage, étendard qui renforce les monstres autour
