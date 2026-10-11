@@ -397,6 +397,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   for (const item of KIT) await rcon.run(`give @a minecraft:${item}`);
   await rcon.run(`give @a minecraft:${ROLE_TICKET_ITEM}`);
   await rcon.run('scoreboard players reset * role');
+  await rcon.run('scoreboard players reset * tourelles');
   await rcon.run('effect give @a minecraft:instant_health 1 5 true');
   await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
@@ -782,6 +783,7 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add role dummy');
   await rcon.run('scoreboard objectives add prestige dummy');
   await rcon.run('scoreboard objectives add boutique trigger');
+  await rcon.run('scoreboard objectives add tourelles dummy');
   await rcon.run('scoreboard objectives add achat trigger');
   /** Victimes des tourelles en attente de paiement, par propriétaire, et reste (une émeraude toutes les deux). */
   const turretKills = new Map<string, number>();
@@ -913,6 +915,7 @@ async function main(): Promise<void> {
           await rcon.run(`scoreboard players set ${name} role ${r.id}`);
           const kit = r.key === 'ingenieur' ? [...r.kit, ...TURRET_KINDS.filter((k) => k.tag === 'fleche' || k.tag === 'canon').map((k) => `armor_stand[${turretItemArgs(k)}]`), `paper[${turretUpgradeItemArgs()}] 2`] : r.kit;
           for (const item of kit) await rcon.run(`give ${name} minecraft:${item}`);
+          if (r.key === 'ingenieur') await rcon.run(`scoreboard players add ${name} tourelles 2`);
           await rcon.run(`clear ${name} minecraft:carrot_on_a_stick[minecraft:custom_data={capacite:1b}]`);
           await rcon.run(`give ${name} minecraft:${abilityItem(r)}`);
           await rcon.run(`title ${name} times 5 40 10`);
@@ -1034,9 +1037,8 @@ async function main(): Promise<void> {
             await rcon.run(`scoreboard players set ${name} achat 0`);
             const blessingLevel = await score('#equipe', `p_${BLESSING.key}`);
             // tourelles possédées : posées (étiquette du propriétaire) ou encore dans l'inventaire
-            const ownedTurrets = async () =>
-              number(await rcon.run(`execute if entity @e[tag=tourelle,tag=proprio_${name}]`)) +
-              Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:armor_stand 0`))?.[1] ?? 0);
+            // tourelles achetées pendant la partie moins celles détruites : les cacher ne fait pas baisser le prix
+            const ownedTurrets = () => score(name, 'tourelles');
             const emeralds = async () => Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
             if (choice > 0) {
               // article choisi : prix, puis paiement s'il a assez d'émeraudes
@@ -1057,7 +1059,12 @@ async function main(): Promise<void> {
               } else if ((await emeralds()) < price) {
                 await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : ${label} coûte ${price}.","color":"red"}`);
               } else {
-                await rcon.run(`clear ${name} minecraft:emerald ${price}`);
+                // paiement vérifié : si le retrait est incomplet, on rend exactement ce qui a été pris et l'achat est annulé
+                const paid = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${price}`))?.[1] ?? 0);
+                if (paid < price) {
+                  if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+                  await rcon.run(`tellraw ${name} {"text":"Achat annulé : les émeraudes ont bougé pendant le paiement.","color":"red"}`);
+                } else {
                 if (passive) {
                   const next = (levels.get(passive.key) ?? 0) + 1;
                   levels.set(passive.key, next);
@@ -1069,9 +1076,11 @@ async function main(): Promise<void> {
                   await rcon.run(`tellraw @a {"text":"${name} bénit le Roi (niveau ${blessingLevel + 1}/${BLESSING.max})","color":"gold"}`);
                 } else if (kind) {
                   await rcon.run(`give ${name} minecraft:armor_stand[${turretItemArgs(kind)}]`);
+                  await rcon.run(`scoreboard players add ${name} tourelles 1`);
                 }
                 await rcon.run(`tellraw ${name} {"text":"Acheté : ${label} (${price} émeraudes)","color":"green"}`);
                 await rcon.run(`execute at ${name} run playsound minecraft:entity.villager.yes master ${name} ~ ~ ~ 1 1`);
+                }
               }
             }
             // la boutique, à jour, dans le chat du joueur
@@ -1421,7 +1430,10 @@ async function main(): Promise<void> {
           await rcon.run(`execute at ${me} run particle minecraft:explosion ~ ~1 ~ 0.3 0.3 0.3 0 3`);
           await rcon.run(`execute at ${me} run playsound minecraft:entity.item.break master @a ~ ~ ~ 1 0.6`);
           await rcon.run(`kill ${me}`);
-          if (owner) await rcon.run(`title ${owner} actionbar {"text":"Une de vos tourelles a été détruite !","color":"red"}`);
+          if (owner) {
+            await rcon.run(`title ${owner} actionbar {"text":"Une de vos tourelles a été détruite !","color":"red"}`);
+            await rcon.run(`scoreboard players remove ${owner} tourelles 1`);
+          }
           turrets.delete(id);
           continue;
         }
