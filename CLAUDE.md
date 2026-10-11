@@ -51,6 +51,8 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
 - RCON : les réponses se mélangent entre connexions simultanées (sortie de console partagée). Pendant qu'un script
   RCON tourne (`scripts/zombie-waves.ts`, conteneur `vagues`), ne pas lancer de `rcon-cli` : une réponse égarée
   (« Test passed ») fausse ses tests (hall sauté, plaque, etc.). Diagnostiquer par les journaux (`docker logs`).
+  État de la partie sans RCON : écouter `tcpdump -i br-2ae3a97209e2 -A 'tcp dst port 25575'` (texte de la barre de vague).
+  Mise à jour en gardant la progression : `/opt/minecraft/basculer-en-pause.sh` sur le VPS (attend la pause, reprend en mode N).
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 
