@@ -23,7 +23,7 @@
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
  * Rôles jusqu'au niveau 20 (chaque niveau demande plus de victimes) et arbre de compétences par classe (/trigger arbre).
  * Expéditions pendant la pause (salle au hasard, minerais, coffres, gardien ; pillards au château pendant ce temps).
- * Joueurs à terre (un allié accroupi les relève), ultimes (accroupi + clic droit, jauge de victimes), roulette de
+ * Joueurs à terre (un allié accroupi les relève), ultimes (objet ⚡ Ultime donné quand la jauge de victimes est pleine), roulette de
  * l'Enchanteur, jetons de gloire des élites et des boss échangés contre des objets uniques.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
@@ -418,6 +418,11 @@ const DOWNED_S = 20;
 const REVIVE_TICKS = 3;
 /** Ultime : victimes pour le charger. */
 const ULT_COST = 25;
+/** Objet donné quand la jauge est pleine : un clic droit avec lui lance l'ultime (il est alors repris). */
+const ULT_ITEM =
+  'warped_fungus_on_a_stick[custom_data={ultime:1b},custom_name=\'{"text":"⚡ Ultime","color":"yellow","bold":true,"italic":false}\',' +
+  'lore=[\'{"text":"Clic droit : déclenche l’ultime de votre classe","color":"gray","italic":false}\'],enchantment_glint_override=true]';
+const ULT_ITEM_MATCH = 'minecraft:warped_fungus_on_a_stick[minecraft:custom_data={ultime:1b}]';
 /**
  * Expédition, pendant la pause entre deux vagues : une salle loin de l'arène (minerais d'émeraude, coffres, monstres,
  * un gardien), payée par joueur, plus rentable que son prix, et d'autant plus que la vague est avancée. Pendant ce
@@ -611,6 +616,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run(`give @a minecraft:${ROLE_TICKET_ITEM}`);
   await rcon.run('scoreboard players reset * role');
   await rcon.run('scoreboard players reset * arbre_acquis');
+  await rcon.run('scoreboard players reset * charge_ult');
   await rcon.run('scoreboard players reset * tourelles');
   // le prestige ne vaut que pour la partie en cours
   await rcon.run('scoreboard players reset * niv_prestige');
@@ -914,7 +920,7 @@ async function main(): Promise<void> {
       await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master @a ~ ~ ~ 1 1.4`);
     }
   };
-  /** Ultime d'un rôle (accroupi + clic droit avec l'objet de capacité, jauge pleine). */
+  /** Ultime d'un rôle (clic droit avec l'objet ⚡ Ultime, donné quand la jauge est pleine). */
   const useUltimate = async (r: Role, name: string) => {
     await rcon.run(`title @a times 5 40 10`);
     await rcon.run(`title @a subtitle {"text":"${name} déclenche son ultime !","color":"${r.color}"}`);
@@ -1086,6 +1092,7 @@ async function main(): Promise<void> {
   // équipe « château » : un monstre de l'équipe ignore les joueurs (alliés) et vise le Roi ; on peut toujours le frapper
   await rcon.run('team add chateau');
   await rcon.run('team modify chateau friendlyFire true');
+  await rcon.run('team add horde');
   // vie maximale (et non la vie actuelle : le script peut reprendre en cours de partie)
   const maxReply = await rcon.run(`attribute ${KING} minecraft:generic.max_health get`);
   const kingMax = Number(/is (-?[0-9.]+)/.exec(maxReply)?.[1] ?? 100);
@@ -1127,6 +1134,9 @@ async function main(): Promise<void> {
   let nextTurret = 0;
   const turretBank = new Map<string, number>();
   await rcon.run('scoreboard objectives add capacite minecraft.used:minecraft.carrot_on_a_stick');
+  // ultime : charge gardée dans le monde (survit à une relance du script), objet utilisé = déclenchement
+  await rcon.run('scoreboard objectives add charge_ult dummy');
+  await rcon.run('scoreboard objectives add ultime minecraft.used:minecraft.warped_fungus_on_a_stick');
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
   /** Utilisations de la capacité pendant la vague en cours, par joueur (vidé à chaque vague). */
   const abilityUsed = new Map<string, number>();
@@ -1135,8 +1145,12 @@ async function main(): Promise<void> {
   /** Temps accroupi au passage précédent (statistique), et qui s'est accroupi depuis. */
   const sneakTime = new Map<string, number>();
   const sneaking = new Set<string>();
-  /** Charge de l'ultime (victimes depuis le dernier ultime), par joueur. */
+  /** Charge de l'ultime (victimes depuis le dernier ultime), par joueur ; recopiée dans le score « charge_ult ». */
   const ultCharge = new Map<string, number>();
+  const setCharge = async (name: string, value: number) => {
+    ultCharge.set(name, value);
+    await rcon.run(`scoreboard players set ${name} charge_ult ${value}`);
+  };
   /** Surcharge de l'Ingénieur : ses tourelles font triple dégâts jusqu'à cette date. */
   const turretBoost = new Map<string, number>();
   /** Rôle et compétences apprises de chaque joueur (tenus à jour par la boucle des joueurs). */
@@ -1216,6 +1230,7 @@ async function main(): Promise<void> {
       for (const name of online) {
         const k = await score(name, 'tues');
         const before = kills.get(name);
+        if (!ultCharge.has(name)) ultCharge.set(name, await score(name, 'charge_ult'));
         kills.set(name, k);
         const levels = new Map<string, number>();
         for (const p of PASSIVES) levels.set(p.key, await score(name, `p_${p.key}`));
@@ -1227,7 +1242,7 @@ async function main(): Promise<void> {
           const byKnowledge = Math.min(k - before, xpBonus.get(name) ?? 0);
           xpBonus.set(name, (xpBonus.get(name) ?? 0) - byKnowledge);
           const fought = k - before - byKnowledge;
-          ultCharge.set(name, Math.min(ULT_COST, (ultCharge.get(name) ?? 0) + fought));
+          if (fought > 0) await setCharge(name, Math.min(ULT_COST, (ultCharge.get(name) ?? 0) + fought));
           const byTurret = Math.min(fought, turretKills.get(name) ?? 0);
           turretKills.set(name, (turretKills.get(name) ?? 0) - byTurret);
           const bank = (turretBank.get(name) ?? 0) + byTurret;
@@ -1416,10 +1431,19 @@ async function main(): Promise<void> {
           if (/No items/.test(await rcon.run(`clear ${name} minecraft:carrot_on_a_stick[minecraft:custom_data={capacite:1b}] 0`))) {
             await rcon.run(`give ${name} minecraft:${abilityItem(myRole)}`);
           }
-          if ((await score(name, 'capacite')) > 0 && sneaking.has(name) && (ultCharge.get(name) ?? 0) >= ULT_COST) {
-            await rcon.run(`scoreboard players set ${name} capacite 0`);
-            ultCharge.set(name, 0);
-            await useUltimate(myRole, name);
+          // ultime : jauge pleine, l'objet ⚡ Ultime est donné ; un clic droit avec lui le déclenche
+          const charged = (ultCharge.get(name) ?? 0) >= ULT_COST;
+          if ((await score(name, 'ultime')) > 0) {
+            await rcon.run(`scoreboard players set ${name} ultime 0`);
+            if (charged) {
+              await rcon.run(`clear ${name} ${ULT_ITEM_MATCH}`);
+              await setCharge(name, 0);
+              await useUltimate(myRole, name);
+            }
+          } else if (charged && /No items/.test(await rcon.run(`clear ${name} ${ULT_ITEM_MATCH} 0`))) {
+            await rcon.run(`give ${name} minecraft:${ULT_ITEM}`);
+            await rcon.run(`title ${name} actionbar {"text":"⚡ Ultime prêt : clic droit avec l’objet ⚡ Ultime","color":"yellow","bold":true}`);
+            await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master ${name} ~ ~ ~ 1 1.4`);
           }
           if ((await score(name, 'capacite')) > 0) {
             await rcon.run(`scoreboard players set ${name} capacite 0`);
@@ -1700,8 +1724,8 @@ async function main(): Promise<void> {
             const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${step}`}`;
             const freePoints = roleLevel - spentPoints(mask);
             const charge = ultCharge.get(name) ?? 0;
-            parts.push(`{"text":"   ⚡ ${charge >= ULT_COST ? 'ULTIME PRÊT (accroupi + clic droit)' : `${charge}/${ULT_COST}`}","color":"${charge >= ULT_COST ? 'yellow' : 'gray'}","bold":${charge >= ULT_COST}}`);
-            parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${freePoints > 0 ? ` (${freePoints} pt)` : ''}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
+            const ult = `{"text":" ⚡${charge >= ULT_COST ? 'PRÊT' : `${charge}/${ULT_COST}`}${owned.length ? ' · ' : ''}","color":"${charge >= ULT_COST ? 'yellow' : 'gray'}","bold":true}`;
+            parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${freePoints > 0 ? ` (${freePoints} pt)` : ''}","color":"${role.color}","bold":true}`, ult);
           }
           if (remaining > 0 && remaining <= 5) {
             const me = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity ${name} Pos`));
@@ -2332,6 +2356,10 @@ async function main(): Promise<void> {
         await rcon.run(`fill ${sx} ${-61 + siegeStep} -1 ${sx} ${-61} 1 minecraft:oak_planks replace minecraft:air`);
         siegeStep++;
         if (siegeStep === 10) await rcon.run('title @a actionbar {"text":"La tour de siège touche le mur est : défendez-le !","color":"gold"}');
+      }
+      // le Wither vise tout ce qui n'est pas mort-vivant : tant qu'il est là, les monstres sont ses alliés (équipe « horde »)
+      if (/passed/.test(await rcon.run('execute if entity @e[type=minecraft:wither,tag=vague]'))) {
+        await rcon.run('team join horde @e[tag=vague,team=!chateau]');
       }
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
