@@ -445,10 +445,11 @@ const PASSIVES: Passive[] = [
 ];
 
 /**
- * Prestige : +1 émeraude par monstre tué de sa main, par niveau. Vendu par le Maître du prestige, de plus en plus cher,
- * et permanent : il reste après la mort du Roi et d'une partie à l'autre (score `prestige`, jamais remis à zéro).
+ * Prestige : +1 émeraude par monstre tué de sa main, par niveau, pour toujours (score `prestige`, jamais remis à zéro,
+ * même après la mort du Roi). Chaque étape coûte 100 émeraudes et fait repartir de zéro : inventaire vidé (kit de
+ * départ redonné) et passifs remis à 0 ; le rôle et la Bénédiction du Roi (passif d'équipe) restent.
  */
-const PRESTIGE_PRICES = [40, 80, 120, 160, 200];
+const PRESTIGE_PRICES = [100, 100, 100, 100, 100];
 /** Victimes des tourelles : une émeraude toutes les deux pour le poseur. */
 const TURRET_KILLS_PER_EMERALD = 2;
 
@@ -521,7 +522,7 @@ async function setUpShop(rcon: Rcon): Promise<void> {
     const level = i + 1;
     const sell =
       `{id:"minecraft:nether_star",count:1,components:{"minecraft:custom_data":{prestige:${level}},` +
-      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre (permanent)","color":"gold","italic":false}'}}`;
+      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre pour toujours (repart de zéro)","color":"gold","italic":false}'}}`;
     await rcon.run(
       `data modify entity @e[tag=prestige,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${price}},sell:${sell},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
@@ -785,6 +786,14 @@ async function main(): Promise<void> {
           if (level === (levels.get('prestige') ?? 0) + 1) {
             levels.set('prestige', level);
             await rcon.run(`scoreboard players set ${name} prestige ${level}`);
+            // on repart de zéro : inventaire vidé, kit de départ, passifs à 0
+            await rcon.run(`clear ${name}`);
+            for (const item of KIT) await rcon.run(`give ${name} minecraft:${item}`);
+            for (const passive of PASSIVES) {
+              await rcon.run(`scoreboard players reset ${name} p_${passive.key}`);
+              levels.set(passive.key, 0);
+            }
+            await rcon.run(`tellraw @a {"text":"${name} passe Prestige ${level} et repart de zéro !","color":"gold"}`);
             await rcon.run(`title ${name} times 5 40 10`);
             await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre, pour toujours","color":"gold"}`);
             await rcon.run(`title ${name} title {"text":"★"}`);
