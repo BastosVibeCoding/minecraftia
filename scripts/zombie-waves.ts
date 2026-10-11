@@ -20,6 +20,7 @@
  * comptées pour leur poseur (une émeraude toutes les deux).
  * Chaque niveau de passif coûte plus cher que le précédent ; chaque joueur a son Maître des passifs, qui ne montre
  * que ses prochains niveaux. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
+ * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -416,6 +417,13 @@ const turretItemArgs = (k: TurretKind) =>
   `Invulnerable:1b,NoBasePlate:1b,DisabledSlots:${LOCKED_SLOTS},CustomName:'"${k.name}"',CustomNameVisible:1b,ArmorItems:[{},{},{},{id:"minecraft:${k.head}",count:1}]}`;
 const turretUpgradeItemArgs = () =>
   `custom_data={passif:"${TURRET_UPGRADE.key}"},custom_name='{"text":"${TURRET_UPGRADE.label}","color":"${TURRET_UPGRADE.color}","italic":false}',enchantment_glint_override=true`;
+/** Vie des tourelles selon leur niveau, et dégâts par monstre au contact (à moins de 2 blocs) à chaque passage. */
+const TURRET_HP = [40, 60, 80];
+const TURRET_HIT = 3;
+/** Vie regagnée par passage (toutes les 2 s) sans monstre au contact : 1 point toutes les 10 s. */
+const TURRET_REGEN = 0.2;
+/** Parchemin de réparation de tourelle : à garder sur soi en s'approchant d'une tourelle abîmée. */
+const TURRET_REPAIR = { key: 'reparetourelle', label: 'Réparation de tourelle (approchez-vous d’une tourelle)', color: 'green' };
 /** Parchemin d'amélioration de tourelle : à garder sur soi en s'approchant d'une tourelle (3 niveaux). */
 const TURRET_UPGRADE = { key: 'ameliotourelle', label: 'Amélioration de tourelle (approchez-vous d’une tourelle)', color: 'light_purple' };
 const scrollComponents = (p: { key: string; label: string; color: string }) =>
@@ -436,6 +444,7 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 2, item: 'firework_rocket', count: 16, components: '"minecraft:fireworks":{flight_duration:2b}' },
   // tourelles : vendues dans la boutique personnelle de chaque joueur (prix croissant avec ses tourelles)
   { price: 10, item: 'paper', components: scrollComponents(TURRET_UPGRADE) },
+  { price: 6, item: 'paper', components: scrollComponents(TURRET_REPAIR) },
   { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 14, item: 'diamond_leggings', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
@@ -660,6 +669,7 @@ async function main(): Promise<void> {
       await rcon.run(`execute at ${name} run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 2 0.6`);
     } else if (r.key === 'ingenieur') {
       await applyUpgrade(rcon, 'reparation');
+      for (const turret of turrets.values()) turret.hp = TURRET_HP[2]!;
       await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
     } else if (r.key === 'invocateur') {
       const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
@@ -761,6 +771,9 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add prestige dummy');
   /** Victimes des tourelles en attente de paiement, par propriétaire, et reste (une émeraude toutes les deux). */
   const turretKills = new Map<string, number>();
+  /** Tourelles suivies : numéro → propriétaire (le joueur qui l'a posée), vie, vie affichée. */
+  const turrets = new Map<string, { owner: string | undefined; hp: number; shown: number; level: number }>();
+  let nextTurret = 0;
   const turretBank = new Map<string, number>();
   await rcon.run('scoreboard objectives add capacite minecraft.used:minecraft.carrot_on_a_stick');
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
@@ -937,6 +950,21 @@ async function main(): Promise<void> {
             }
           }
         }
+        // réparation de tourelle : le parchemin sert près (3 blocs) d'une tourelle abîmée, qui retrouve toute sa vie
+        const repairItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_REPAIR.key}"}]`;
+        if (/Found/.test(await rcon.run(`clear ${name} ${repairItem} 0`))) {
+          for (const [id, turret] of turrets) {
+            if (turret.hp >= TURRET_HP[2]! || !/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=${id},distance=..3]`))) continue;
+            const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
+            const maxHp = TURRET_HP[tags.includes('"lvl3"') ? 2 : tags.includes('"lvl2"') ? 1 : 0]!;
+            if (turret.hp >= maxHp) continue;
+            await rcon.run(`clear ${name} ${repairItem} 1`);
+            turret.hp = maxHp;
+            await rcon.run(`execute at @e[tag=${id}] run particle minecraft:happy_villager ~ ~1.5 ~ 0.4 0.6 0.4 0 20`);
+            await rcon.run(`title ${name} actionbar {"text":"Tourelle réparée !","color":"green"}`);
+            break;
+          }
+        }
         // amélioration de tourelle : le parchemin sert quand on se tient à 3 blocs d'une tourelle pas au maximum
         const scrollItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_UPGRADE.key}"}]`;
         if (/Found/.test(await rcon.run(`clear ${name} ${scrollItem} 0`)) && /passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=tourelle,tag=!lvl3,distance=..3]`))) {
@@ -1091,9 +1119,6 @@ async function main(): Promise<void> {
   /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
   const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string }>();
   let nextMob = 0;
-  /** Tourelles suivies : numéro → propriétaire (le joueur qui l'a posée). */
-  const turrets = new Map<string, string | undefined>();
-  let nextTurret = 0;
   for (let n = Number(firstWave); ; n++) {
     const p = game.difficulty.power;
     const total = Math.round((4 + 3 * n) * p);
@@ -1323,10 +1348,11 @@ async function main(): Promise<void> {
         if (owner) await rcon.run(`tag @e[tag=nouvelle] add proprio_${owner}`);
         await rcon.run('tag @e[tag=nouvelle] add suivie');
         await rcon.run('tag @e[tag=nouvelle] remove nouvelle');
-        turrets.set(id, owner);
+        turrets.set(id, { owner, hp: TURRET_HP[0]!, shown: -1, level: 1 });
       }
       // tirs : chaque victime d'une tourelle compte pour son propriétaire (émeraudes, classement, rôle)
-      for (const [id, owner] of turrets) {
+      for (const [id, turret] of turrets) {
+        const owner = turret.owner;
         const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
         if (!/data: /.test(tags)) {
           turrets.delete(id);
@@ -1336,6 +1362,28 @@ async function main(): Promise<void> {
         const level = tags.includes('"lvl3"') ? 3 : tags.includes('"lvl2"') ? 2 : 1;
         const range = 22 + 6 * (level - 1);
         const me = `@e[tag=${id},limit=1]`;
+        const maxHp = TURRET_HP[level - 1]!;
+        // une amélioration remet la vie au maximum du nouveau niveau
+        if (level > turret.level) {
+          turret.level = level;
+          turret.hp = maxHp;
+        }
+        const attackers = number(await rcon.run(`execute at ${me} if entity @e[tag=vague,distance=..2]`));
+        // abîmée par les monstres au contact ; sinon, elle se répare très lentement (1 point toutes les 10 s)
+        turret.hp = attackers > 0 ? Math.max(0, turret.hp - attackers * TURRET_HIT) : Math.min(maxHp, turret.hp + TURRET_REGEN);
+        if (turret.hp === 0) {
+          await rcon.run(`execute at ${me} run particle minecraft:explosion ~ ~1 ~ 0.3 0.3 0.3 0 3`);
+          await rcon.run(`execute at ${me} run playsound minecraft:entity.item.break master @a ~ ~ ~ 1 0.6`);
+          await rcon.run(`kill ${me}`);
+          if (owner) await rcon.run(`title ${owner} actionbar {"text":"Une de vos tourelles a été détruite !","color":"red"}`);
+          turrets.delete(id);
+          continue;
+        }
+        if (Math.ceil(turret.hp) !== turret.shown) {
+          turret.shown = Math.ceil(turret.hp);
+          const stars = level === 3 ? ' ★★★' : level === 2 ? ' ★★' : '';
+          await rcon.run(`data merge entity ${me} {CustomName:'${healthBar(`${kind.name}${stars}`, turret.hp, maxHp, kind.color)}'}`);
+        }
         const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
         const by = owner && online.includes(owner) ? ` by ${owner}` : '';
         const damage = TURRET_DAMAGE[kind.tag]![level - 1];

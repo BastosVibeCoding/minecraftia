@@ -48,6 +48,9 @@ Référence d'architecture : [docs/PLAN.md](docs/PLAN.md). Journal de travail : 
   (md5 « OfflinePlayer:<nom> », v3) dans `whitelist.json` puis `whitelist reload`.
 - `docker compose up` recrée `mc-server` (joueurs éjectés) si son bloc du compose a changé, même en ne
   nommant qu'un bot : `deploy.sh` passe `--no-deps` ; un changement du serveur se fait à part, joueurs prévenus.
+- RCON : les réponses se mélangent entre connexions simultanées (sortie de console partagée). Pendant qu'un script
+  RCON tourne (`scripts/zombie-waves.ts`, conteneur `vagues`), ne pas lancer de `rcon-cli` : une réponse égarée
+  (« Test passed ») fausse ses tests (hall sauté, plaque, etc.). Diagnostiquer par les journaux (`docker logs`).
 - Essais réels : `scripts/test-player.ts` (joueur scripté « Testeur ») + préparation par RCON ; déploiement
   `bash scripts/deploy.sh` ; journaux `docker logs minecraftia`.
 
