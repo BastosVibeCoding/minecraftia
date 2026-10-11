@@ -551,6 +551,11 @@ async function lobby(rcon: Rcon): Promise<void> {
   };
   await rcon.run('bossbar set minecraft:vague name {"text":"Hall : choisissez la carte et la difficulté, puis la plaque dorée","color":"gold"}');
   await rcon.run('bossbar set minecraft:vague value 0');
+  // on arrive dans le hall les mains vides (le kit est donné au lancement de la partie)
+  await rcon.run('clear @a');
+  await rcon.run('effect clear @a');
+  await rcon.run('xp set @a 0 levels');
+  await rcon.run('xp set @a 0 points');
   for (;;) {
     // les arrivants (et ceux qui reviennent d'une partie) sont envoyés dans le hall
     await rcon.run(`execute as @a[gamemode=!adventure] run tp @s ${LOBBY_SPAWN}`);
