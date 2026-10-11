@@ -11,6 +11,10 @@
  * événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
  * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur) chez le Maître des rôles ; ils montent
  * de niveau avec les victimes et ont une capacité spéciale par vague (objet à utiliser d'un clic droit).
+ * Hall d'avant-partie : choix de la carte (classique, désert, neige, Nether) et de la difficulté (Facile à Cauchemar).
+ * Nouveaux monstres (Breeze, Bogged, sorcière, blaze, squelette wither, brute, zoglin, Illusionniste, Warden, shulkers),
+ * monstres d'élite, Bélier, tour de siège, assaut par le nord, nuit de sang.
+ * Les joueurs lancent chaque vague en marchant sur la plaque dorée de la cour.
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -30,13 +34,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SPAWNS: [number, number][] = [
   [-30, 50], [0, 55], [30, 50], [-50, 30], [50, 30], [-45, -10], [45, -10], [0, -45],
 ];
+/** Points d'apparition au nord, derrière le château (une vague sur trois attaque par là). */
+const NORTH_SPAWNS: [number, number][] = [[-30, -50], [0, -55], [30, -50], [-50, -30], [50, -30]];
 const KING = '@e[tag=roi,limit=1]';
 /** Équipement incassable et réparé : seulement les objets qui ont une durabilité (flèches et blocs intacts). */
 const UNBREAKABLE =
   '{"function":"minecraft:filtered","item_filter":{"predicates":{"minecraft:damage":{}}},' +
   '"modifier":{"function":"minecraft:set_components","components":{"minecraft:unbreakable":{},"minecraft:damage":0}}}';
 const SLOTS = ['armor.head', 'armor.chest', 'armor.legs', 'armor.feet', 'weapon.offhand', ...Array.from({ length: 9 }, (_, i) => `hotbar.${i}`), ...Array.from({ length: 27 }, (_, i) => `inventory.${i}`)];
-const PAUSE_S = 20;
+/** Pause minimale après une vague, avant que la plaque puisse lancer la suivante. */
+const PAUSE_S = 5;
+/** Plaque dorée de la cour : les joueurs lancent eux-mêmes la vague suivante en marchant dessus. */
+const WAVE_START = '3 -60 9';
 /** Attente avant de revenir en jeu après une mort. */
 const RESPAWN_S = 5;
 
@@ -56,7 +65,24 @@ function waveTheme(n: number): 'normale' | 'araignées' | 'squelettes' {
   return n % 7 === 0 ? 'squelettes' : n % 4 === 0 ? 'araignées' : 'normale';
 }
 
-function mobCommand(n: number, i: number, x: number, z: number, p: number, id: string): { command: string; name: string; health: number } {
+/** Monstres d'élite : un pouvoir, affiché devant leur nom dans sa couleur. */
+const ELITES = [
+  { key: 'blinde', label: 'Blindé', color: 'gray' },
+  { key: 'enrage', label: 'Enragé', color: 'red' },
+  { key: 'regen', label: 'Régénérant', color: 'light_purple' },
+  { key: 'explosif', label: 'Explosif', color: 'gold' },
+  { key: 'diviseur', label: 'Diviseur', color: 'dark_green' },
+  { key: 'etendard', label: 'Porte-étendard', color: 'yellow' },
+];
+/** Nouveaux monstres à la place de zombies ordinaires : [vague effective minimale, tous les combien, rang, type]. */
+const EXTRA_MOBS: [number, number, number, string][] = [
+  [3, 8, 6, 'breeze'], [4, 9, 7, 'witch'], [4, 7, 3, 'bogged'], [6, 10, 8, 'blaze'],
+  [7, 11, 9, 'wither_skeleton'], [8, 12, 10, 'piglin_brute'], [8, 13, 11, 'zoglin'], [9, 14, 12, 'illusioner'],
+];
+
+function mobCommand(
+  n: number, i: number, x: number, z: number, p: number, id: string, bloodNight: boolean,
+): { command: string; name: string; health: number; color: string; elite?: string } {
   const theme = waveTheme(n);
   // e : vague « effective », plus avancée quand la partie est plus dure
   const e = n + (p - 1);
@@ -72,38 +98,49 @@ function mobCommand(n: number, i: number, x: number, z: number, p: number, id: s
   if (!boss && theme !== 'normale' && (type === 'zombie' || type === 'husk')) {
     type = theme === 'araignées' ? (i % 4 === 3 && !giant ? 'cave_spider' : 'spider') : i % 3 === 1 ? 'stray' : 'skeleton';
   }
+  // nouveaux monstres, de plus en plus nombreux, à la place de zombies ordinaires
+  if (!boss && !giant && theme === 'normale' && (type === 'zombie' || type === 'husk')) {
+    const extra = EXTRA_MOBS.find(([min, every, rank]) => e >= min && i % every === rank);
+    if (extra) type = extra[3];
+  }
   const zombieLike = type === 'zombie' || type === 'husk';
-  const archer = type === 'skeleton' || type === 'stray';
+  const archer = type === 'skeleton' || type === 'stray' || type === 'bogged';
   // sapeurs : un zombie sur quatre creuse les murs de pierre (voir la boucle principale)
   const sapper = zombieLike && !boss && !giant && i % 4 === 2;
   const charged = creeper && e >= 6 && i % 12 === 11 ? 'powered:1b,' : '';
   const baby = zombieLike && !boss && !giant && e >= 4 && i % 4 === 3 ? 'IsBaby:1b,' : '';
-  const health = boss ? 100 + 15 * n : giant ? 36 + 6 * n : ravager ? 70 + 6 * n : 18 + 3 * n;
+  // nuit de sang : +50 % de vie
+  const health = Math.round((boss ? 100 + 15 * n : giant ? 36 + 6 * n : ravager ? 70 + 6 * n : 18 + 3 * n) * (bloodNight ? 1.5 : 1));
+  const elite = !boss && type !== 'creeper' && Math.random() < Math.min(0.3, 0.08 + 0.01 * n) ? ELITES[Math.floor(Math.random() * ELITES.length)] : undefined;
   const metal = e >= 9 ? 'iron' : e >= 5 ? 'chainmail' : 'leather';
   const armor = (zombieLike || archer) && e >= 2 ? `ArmorItems:[{id:"minecraft:${metal}_boots",count:1},{},{id:"minecraft:${metal}_chestplate",count:1},{id:"minecraft:${metal}_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` : '';
-  const weapon = archer ? 'HandItems:[{id:"minecraft:bow",count:1},{}],' : vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 5 ? `HandItems:[{id:"minecraft:${e >= 9 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
+  const weapon = type === 'wither_skeleton' ? 'HandItems:[{id:"minecraft:stone_sword",count:1},{}],' : archer ? 'HandItems:[{id:"minecraft:bow",count:1},{}],' : vindicator ? 'HandItems:[{id:"minecraft:iron_axe",count:1},{}],' : sapper ? 'HandItems:[{id:"minecraft:iron_pickaxe",count:1},{}],' : zombieLike && e >= 5 ? `HandItems:[{id:"minecraft:${e >= 9 ? 'iron' : 'stone'}_sword",count:1},{}],` : '';
   const scale = boss ? 4 : giant ? (p > 1 && i % 2 === 0 ? 2.8 : 1.9) : 0;
-  const name = boss ? 'Zombie Géant' : giant ? (archer ? 'Archer géant' : type === 'spider' ? 'Araignée géante' : 'Géant') : ravager ? 'Bélier' : '';
+  const baseName = boss ? 'Zombie Géant' : giant ? (archer ? 'Archer géant' : type === 'spider' ? 'Araignée géante' : 'Géant') : ravager ? 'Bélier' : '';
+  const name = elite ? (baseName ? `${baseName} ${elite.label.toLowerCase()}` : elite.label) : baseName;
+  const nameColor = elite?.color ?? 'white';
   const attrs = [
     scale ? `{id:"minecraft:generic.scale",base:${scale}}` : '',
     `{id:"minecraft:generic.max_health",base:${health}}`,
     '{id:"minecraft:generic.follow_range",base:64}',
+    elite?.key === 'blinde' ? '{id:"minecraft:generic.armor",base:16},{id:"minecraft:generic.armor_toughness",base:8}' : '',
     giant || boss ? `{id:"minecraft:generic.attack_damage",base:${(boss ? 6 : 4) + Math.floor(n / 3)}}` : zombieLike ? `{id:"minecraft:generic.attack_damage",base:${3 + Math.floor(n / 4)}}` : '',
     zombieLike ? `{id:"minecraft:generic.movement_speed",base:${(giant || boss ? 0.2 : 0.23 + 0.006 * e).toFixed(3)}}` : '',
   ].filter(Boolean);
   const command =
-    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague","${id}"${sapper ? ',"sapeur"' : ''}],PersistenceRequired:1b,${baby}${charged}` +
-    `CustomName:'${healthBar(name, health, health)}',CustomNameVisible:1b,${armor}${weapon}` +
+    `summon minecraft:${type} ${x} -60 ${z} {Tags:["vague","${id}"${sapper ? ',"sapeur"' : ''}${ravager ? ',"belier"' : ''}${elite ? `,"elite_${elite.key}"` : ''}],` +
+    `PersistenceRequired:1b,${type === 'piglin_brute' ? 'IsImmuneToZombification:1b,' : ''}${baby}${charged}` +
+    `CustomName:'${healthBar(name, health, health, nameColor)}',CustomNameVisible:1b,${armor}${weapon}` +
     `ArmorDropChances:[0f,0f,0f,0f],HandDropChances:[0f,0f],Health:${health}f,attributes:[${attrs.join(',')}]}`;
-  return { command, name, health };
+  return { command, name, health, color: nameColor, ...(elite ? { elite: elite.key } : {}) };
 }
 
 /** Nom affiché au-dessus d'un monstre : son nom éventuel et une barre de vie (verte, jaune, rouge). */
-function healthBar(name: string, hp: number, max: number): string {
+function healthBar(name: string, hp: number, max: number, nameColor = 'white'): string {
   const filled = Math.max(0, Math.min(10, Math.ceil((hp / max) * 10)));
   const color = filled > 6 ? 'green' : filled > 3 ? 'yellow' : 'red';
   const parts = [
-    ...(name ? [`{"text":"${name} ","color":"white"}`] : []),
+    ...(name ? [`{"text":"${name} ","color":"${nameColor}"}`] : []),
     `{"text":"${'█'.repeat(filled)}","color":"${color}"}`,
     `{"text":"${'█'.repeat(10 - filled)}","color":"dark_gray"}`,
   ];
@@ -214,8 +251,65 @@ const KIT = [
   'bow[enchantments={levels:{"minecraft:power":2,"minecraft:infinity":1}}]',
   'arrow 64', 'shield', 'flint_and_steel', 'cooked_beef 32', 'cobblestone 64',
 ];
-/** Copie intacte du château, 1000 blocs plus à l'est, recopiée sur le château à chaque nouvelle partie. */
-const MODEL_DX = 1000;
+/**
+ * Cartes : même plan de château, style et décor différents. Le modèle intact de chaque carte est à `dx` blocs à l'est ;
+ * il est recopié sur l'arène à chaque nouvelle partie. `wall` : matériau des murs (sapeurs, murs renforcés) ;
+ * `ground` : sol (douves) ; `wallBlock` et `merlon` : blocs des tours d'archers.
+ */
+interface GameMap {
+  key: string;
+  name: string;
+  color: string;
+  dx: number;
+  wall: string;
+  ground: string;
+  wallBlock: string;
+  merlon: string;
+}
+const MAPS: GameMap[] = [
+  { key: 'classique', name: 'Château classique', color: 'green', dx: 1000, wall: '#minecraft:stone_bricks', ground: 'minecraft:grass_block', wallBlock: 'stone_bricks', merlon: 'stone_brick_wall' },
+  { key: 'desert', name: 'Forteresse du désert', color: 'yellow', dx: 2000, wall: 'minecraft:cut_sandstone', ground: 'minecraft:sand', wallBlock: 'cut_sandstone', merlon: 'sandstone_wall' },
+  { key: 'neige', name: 'Citadelle des neiges', color: 'aqua', dx: 3000, wall: 'minecraft:polished_diorite', ground: 'minecraft:snow_block', wallBlock: 'polished_diorite', merlon: 'diorite_wall' },
+  { key: 'nether', name: 'Bastion du Nether', color: 'red', dx: 4000, wall: 'minecraft:polished_blackstone_bricks', ground: 'minecraft:netherrack', wallBlock: 'polished_blackstone_bricks', merlon: 'polished_blackstone_brick_wall' },
+];
+/** Difficultés : multiplicateur du nombre de monstres, difficulté du jeu, vie de base du Roi. */
+interface Difficulty {
+  key: string;
+  name: string;
+  color: string;
+  power: number;
+  mc: 'normal' | 'hard';
+  kingHp: number;
+}
+const DIFFICULTIES: Difficulty[] = [
+  { key: 'facile', name: 'Facile', color: 'green', power: 1.5, mc: 'normal', kingHp: 200 },
+  { key: 'normal', name: 'Normal', color: 'yellow', power: 2.5, mc: 'normal', kingHp: 150 },
+  { key: 'difficile', name: 'Difficile', color: 'red', power: 3.5, mc: 'hard', kingHp: 150 },
+  { key: 'cauchemar', name: 'Cauchemar', color: 'dark_purple', power: 5, mc: 'hard', kingHp: 100 },
+];
+/** Carte et difficulté de la partie en cours (choisies dans le hall, gardées dans le score « partie »). */
+const game = { map: MAPS[0]!, difficulty: DIFFICULTIES[1]! };
+/** Demi-largeur de l'arène recopiée depuis le modèle (château, abords, points d'apparition). */
+const ARENA = 60;
+/**
+ * Hall d'avant-partie : un levier par carte (rangée z = -303) et par difficulté (rangée z = -299), aux x ci-dessous,
+ * posés sur des socles (levier à y = -59) ; plaque « Lancer la partie » en (0, -60, -297).
+ */
+const LOBBY_SPAWN = '0.5 -60 -301.5';
+const LOBBY_LEVER_X = [-6, -2, 2, 6];
+const LOBBY_START = '0 -60 -297';
+
+/** Recopie l'arène depuis un modèle (`masked` : seulement les blocs pleins, pour réparer sans effacer). */
+async function copyArena(rcon: Rcon, dx: number, masked: boolean): Promise<void> {
+  await rcon.run(`forceload add ${dx - ARENA} ${-ARENA} ${dx + ARENA} ${ARENA}`);
+  await rcon.run(`forceload add ${-ARENA} ${-ARENA} ${ARENA} ${ARENA}`);
+  for (let x0 = -ARENA; x0 <= ARENA; x0 += 11) {
+    const x1 = Math.min(ARENA, x0 + 10);
+    await rcon.run(`clone ${x0 + dx} -62 ${-ARENA} ${x1 + dx} -43 ${ARENA} ${x0} -62 ${-ARENA}${masked ? ' masked' : ''}`);
+  }
+  await rcon.run(`forceload remove ${dx - ARENA} ${-ARENA} ${dx + ARENA} ${ARENA}`);
+  await rcon.run(`forceload remove ${-ARENA} ${-ARENA} ${ARENA} ${ARENA}`);
+}
 
 /**
  * Nouvelle partie : château remis à neuf (blocs posés retirés, brèches rebouchées, coffre rempli),
@@ -225,13 +319,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[tag=vague]');
   await rcon.run('kill @e[tag=roi]');
   await rcon.run('kill @e[type=minecraft:zombie_villager]');
-  await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
-  await rcon.run('forceload add -32 -32 32 32');
-  for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
-    await rcon.run(`clone ${x0 + MODEL_DX} -62 -32 ${x1 + MODEL_DX} -43 32 ${x0} -62 -32`);
-  }
-  await rcon.run(`forceload remove ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
-  await rcon.run('forceload remove -32 -32 32 32');
+  await copyArena(rcon, game.map.dx, false);
   await rcon.run('kill @e[type=minecraft:item]');
   await rcon.run('kill @e[type=minecraft:iron_golem]');
   await rcon.run('kill @e[type=minecraft:snow_golem]');
@@ -243,7 +331,7 @@ async function newGame(rcon: Rcon): Promise<void> {
     "summon minecraft:villager 0 -60 -3 {CustomName:'\"Le Roi\"',CustomNameVisible:1b,NoAI:1b,PersistenceRequired:1b,Tags:[\"roi\"],Glowing:1b," +
       'Rotation:[0f,0f],VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Health:150f,attributes:[{id:"minecraft:generic.max_health",base:150}]}',
   );
-  // vie maximale du Roi selon la Bénédiction (remise à zéro juste avant : le Roi repart à 150)
+  // vie maximale du Roi selon la difficulté et la Bénédiction (remise à zéro juste avant)
   const blessing = Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #equipe p_${BLESSING.key}`))?.[1] ?? 0);
   await rcon.run(`attribute ${KING} minecraft:generic.max_health base set ${kingHealth(blessing)}`);
   await rcon.run(`data modify entity ${KING} Health set value ${kingHealth(blessing)}f`);
@@ -355,7 +443,7 @@ const PASSIVES: Passive[] = [
 /** Bénédiction du Roi : passif d'équipe (score de « #equipe »), +25 de vie maximale pour le Roi par niveau, jusqu'à la fin de la partie. */
 const BLESSING: Passive = { key: 'roi', short: 'Roi', label: '+25 vie max du Roi', color: 'gold', price: 15, max: 10 };
 const KING_BASE_HEALTH = 150;
-const kingHealth = (level: number) => KING_BASE_HEALTH + 25 * level;
+const kingHealth = (level: number) => game.difficulty.kingHp + 25 * level;
 
 /** Parchemin d'un passif (objet unique, reconnu par son étiquette `passif`). */
 const scroll = (p: Passive) =>
@@ -373,35 +461,32 @@ const UPGRADES: Passive[] = [
 
 /** Effet d'une amélioration du château (réparation : recopie des murs et du sol intacts, sans effacer les blocs posés). */
 async function applyUpgrade(rcon: Rcon, key: string): Promise<void> {
-  await rcon.run(`forceload add ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
   await rcon.run('forceload add -32 -32 32 32');
   if (key === 'reparation') {
-    for (const [x0, x1] of [[-32, -11], [-10, 11], [12, 32]] as const) {
-      await rcon.run(`clone ${x0 + MODEL_DX} -62 -32 ${x1 + MODEL_DX} -43 32 ${x0} -62 -32 masked`);
-    }
+    await copyArena(rcon, game.map.dx, true);
     // sol compris (cratères rebouchés) ; les améliorations achetées sont ensuite remises (douves en eau, murs renforcés)
     for (const upgrade of ['murs', 'douves']) {
       if (Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #equipe p_${upgrade}`))?.[1] ?? 0) > 0) await applyUpgrade(rcon, upgrade);
     }
   } else if (key === 'murs') {
     for (const [x0, x1] of [[-24, -1], [0, 24]] as const) {
-      await rcon.run(`fill ${x0} -61 -24 ${x1} -43 24 minecraft:deepslate_bricks replace #minecraft:stone_bricks`);
+      await rcon.run(`fill ${x0} -61 -24 ${x1} -43 24 minecraft:deepslate_bricks replace ${game.map.wall}`);
     }
   } else if (key === 'douves') {
     for (const box of ['-26 -62 -26 26 -61 -23', '-26 -62 23 -3 -61 26', '3 -62 23 26 -61 26', '23 -62 -22 26 -61 22', '-26 -62 -22 -23 -61 22']) {
       await rcon.run(`fill ${box} minecraft:water replace #minecraft:dirt`);
+      await rcon.run(`fill ${box} minecraft:water replace ${game.map.ground}`);
     }
   } else if (key === 'tours') {
     for (const cx of [-12, 12]) {
       const cz = 14;
-      await rcon.run(`fill ${cx - 2} -60 ${cz - 2} ${cx + 2} -48 ${cz + 2} minecraft:stone_bricks hollow`);
-      await rcon.run(`fill ${cx - 2} -47 ${cz - 2} ${cx + 2} -47 ${cz + 2} minecraft:stone_brick_wall hollow`);
+      await rcon.run(`fill ${cx - 2} -60 ${cz - 2} ${cx + 2} -48 ${cz + 2} minecraft:${game.map.wallBlock} hollow`);
+      await rcon.run(`fill ${cx - 2} -47 ${cz - 2} ${cx + 2} -47 ${cz + 2} minecraft:${game.map.merlon} hollow`);
       await rcon.run(`fill ${cx} -60 ${cz + 1} ${cx} -48 ${cz + 1} minecraft:ladder[facing=north]`);
       await rcon.run(`fill ${cx} -60 ${cz - 2} ${cx} -59 ${cz - 2} minecraft:air`);
       await rcon.run(`setblock ${cx} -46 ${cz} minecraft:lantern`);
     }
   }
-  await rcon.run(`forceload remove ${MODEL_DX - 32} -32 ${MODEL_DX + 32} 32`);
   await rcon.run('forceload remove -32 -32 32 32');
 }
 
@@ -454,6 +539,40 @@ async function setUpShop(rcon: Rcon): Promise<void> {
   }
 }
 
+/**
+ * Hall d'avant-partie : tout le monde y est envoyé (mode aventure : leviers et plaques seulement), choisit la carte
+ * et la difficulté avec les leviers, puis marche sur la plaque « Lancer la partie ».
+ */
+async function lobby(rcon: Rcon): Promise<void> {
+  const powered = async (pos: string) => /passed/.test(await rcon.run(`execute if block ${pos} minecraft:lever[powered=true]`));
+  const choice = async <T>(row: number, options: T[], fallback: T) => {
+    for (const [i, x] of LOBBY_LEVER_X.entries()) if (await powered(`${x} -59 ${row}`)) return options[i] ?? fallback;
+    return fallback;
+  };
+  await rcon.run('bossbar set minecraft:vague name {"text":"Hall : choisissez la carte et la difficulté, puis la plaque dorée","color":"gold"}');
+  await rcon.run('bossbar set minecraft:vague value 0');
+  for (;;) {
+    // les arrivants (et ceux qui reviennent d'une partie) sont envoyés dans le hall
+    await rcon.run(`execute as @a[gamemode=!adventure] run tp @s ${LOBBY_SPAWN}`);
+    await rcon.run('gamemode adventure @a');
+    await rcon.run(`spawnpoint @a ${LOBBY_SPAWN.split(' ').map((v) => Math.floor(Number(v))).join(' ')}`);
+    await rcon.run('bossbar set minecraft:vague players @a');
+    game.map = await choice(-303, MAPS, MAPS[0]!);
+    game.difficulty = await choice(-299, DIFFICULTIES, DIFFICULTIES[1]!);
+    await rcon.run(
+      `title @a actionbar [{"text":"Carte : ","color":"gray"},{"text":"${game.map.name}","color":"${game.map.color}"},` +
+        `{"text":"   Difficulté : ","color":"gray"},{"text":"${game.difficulty.name}","color":"${game.difficulty.color}"}]`,
+    );
+    if (/passed/.test(await rcon.run(`execute if block ${LOBBY_START} #minecraft:pressure_plates[powered=true]`))) break;
+    await sleep(1000);
+  }
+  await rcon.run(`scoreboard players set #carte partie ${MAPS.indexOf(game.map)}`);
+  await rcon.run(`scoreboard players set #difficulte partie ${DIFFICULTIES.indexOf(game.difficulty)}`);
+  await rcon.run(`difficulty ${game.difficulty.mc}`);
+  await rcon.run(`tellraw @a [{"text":"Partie lancée : ","color":"gold"},{"text":"${game.map.name}","color":"${game.map.color}"},{"text":" en ","color":"gold"},{"text":"${game.difficulty.name}","color":"${game.difficulty.color}"}]`);
+  await rcon.run('spawnpoint @a 0 -60 12');
+}
+
 async function main(): Promise<void> {
   const password = process.env.RCON_PASSWORD;
   if (!password) throw new Error('RCON_PASSWORD absent');
@@ -485,6 +604,21 @@ async function main(): Promise<void> {
       await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master @a ~ ~ ~ 1 1.4`);
     }
   };
+  /** Attend qu'un joueur marche sur la plaque dorée (après `minSeconds`), en tenant la barre et la vie du Roi à jour. */
+  const waitForStart = async (wave: number, minSeconds: number, color: string) => {
+    await rcon.run(`execute if block ${WAVE_START} minecraft:air run setblock ${WAVE_START} minecraft:light_weighted_pressure_plate`);
+    const since = Date.now();
+    for (;;) {
+      const ready = Date.now() - since >= minSeconds * 1000;
+      await rcon.run(
+        `bossbar set minecraft:vague name {"text":"${ready ? `Marchez sur la plaque dorée pour lancer la vague ${wave}` : `Vague ${wave} : pause…`}","color":"${color}"}`,
+      );
+      await rcon.run('bossbar set minecraft:vague players @a');
+      await kingAlive();
+      if (ready && /passed/.test(await rcon.run(`execute if block ${WAVE_START} minecraft:light_weighted_pressure_plate[power=1..]`))) return;
+      await sleep(1000);
+    }
+  };
   const kingSays = (line: string) => rcon.run(`tellraw @a [{"text":"<Le Roi> ","color":"gold"},{"text":"${line}","color":"yellow"}]`);
   const say = (title: string, subtitle = '') =>
     rcon.run(`title @a subtitle {"text":"${subtitle}","color":"gray"}`).then(() => rcon.run(`title @a title {"text":"${title}","color":"gold"}`));
@@ -500,7 +634,16 @@ async function main(): Promise<void> {
   // pas de messages de commandes dans le chat (les nôtres comme celles des admins)
   for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
-  if (firstWave === '1') await newGame(rcon);
+  await rcon.run('scoreboard objectives add partie dummy');
+  if (firstWave === '1') {
+    await lobby(rcon);
+    await newGame(rcon);
+  } else {
+    // reprise en cours de partie : même carte et même difficulté
+    const read = async (key: string) => Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #${key} partie`))?.[1] ?? -1);
+    game.map = MAPS[await read('carte')] ?? MAPS[0]!;
+    game.difficulty = DIFFICULTIES[await read('difficulte')] ?? DIFFICULTIES.find((d) => d.power === Number(power)) ?? DIFFICULTIES[1]!;
+  }
   // vie des joueurs en cœurs, sous les pseudos et dans la liste (Tab)
   await rcon.run('scoreboard objectives add vie health {"text":"❤","color":"red"}');
   await rcon.run('scoreboard objectives setdisplay below_name vie');
@@ -533,6 +676,8 @@ async function main(): Promise<void> {
   const abilityUsed = new Set<string>();
   /** Dernier niveau de rôle connu par joueur (annonce des montées de niveau). */
   const roleLevels = new Map<string, number>();
+  /** Dernière progression montrée dans la barre d'expérience, par joueur. */
+  const xpShown = new Map<string, string>();
   // dégâts infligés (en dixièmes de point de vie) : base du vol de vie et des coups critiques
   await rcon.run('scoreboard objectives add degats minecraft.custom:minecraft.damage_dealt');
   const dealt = new Map<string, number>();
@@ -679,6 +824,18 @@ async function main(): Promise<void> {
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
         const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
+        // barre d'expérience = progression du rôle (niveau affiché au-dessus, barre jusqu'au niveau suivant)
+        if (role) {
+          const progress = roleLevel >= ROLE_MAX_LEVEL ? 1 : (k % ROLE_KILLS_PER_LEVEL) / ROLE_KILLS_PER_LEVEL;
+          const xpBar = `${roleLevel}:${progress}`;
+          if (xpShown.get(name) !== xpBar) {
+            xpShown.set(name, xpBar);
+            // points pour remplir la barre d'un niveau L (de 0 à 15) : 2L + 7
+            const points = Math.min(2 * roleLevel + 6, Math.floor(progress * (2 * roleLevel + 7)));
+            await rcon.run(`xp set ${name} ${roleLevel} levels`);
+            await rcon.run(`xp set ${name} ${points} points`);
+          }
+        }
         const roleBonus = (attribute: string) => (role ? (role.bonus[attribute] ?? 0) + roleLevel * (role.perLevel[attribute] ?? 0) : 0);
         // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
         if (!waiting.has(name)) {
@@ -688,7 +845,10 @@ async function main(): Promise<void> {
             : ['{"text":"Aucun passif : voyez le Maître des passifs","color":"gray"}'];
           if (role) {
             const ready = abilityUsed.has(name) ? '' : ' ✦';
-            parts.unshift(`{"text":"${role.name} niv.${roleLevel}${ready}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
+            const into = roleLevel >= ROLE_MAX_LEVEL ? ROLE_KILLS_PER_LEVEL : k % ROLE_KILLS_PER_LEVEL;
+            const filled = Math.floor((into / ROLE_KILLS_PER_LEVEL) * 5);
+            const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${ROLE_KILLS_PER_LEVEL}`}`;
+            parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
           }
           if (remaining > 0 && remaining <= 5) {
             const me = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity ${name} Pos`));
@@ -728,17 +888,14 @@ async function main(): Promise<void> {
 
   await rcon.run('scoreboard objectives add record dummy');
   const best = await score('#meilleur', 'record');
-  await say('Défendez le Roi !', `Vague ${firstWave} dans ${firstDelay} secondes${best ? ` · record : vague ${best}` : ''}`);
-  for (let s = Number(firstDelay); s > 0; s -= 5) {
-    await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${firstWave} dans ${s} s","color":"red"}`);
-    await sleep(5000);
-  }
+  await say('Défendez le Roi !', `Préparez-vous, puis marchez sur la plaque dorée${best ? ` · record : vague ${best}` : ''}`);
+  await waitForStart(Number(firstWave), Number(firstDelay) > 0 ? Math.min(Number(firstDelay), 10) : 0, 'red');
 
   /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
-  const tracked = new Map<string, { name: string; max: number; shown: number }>();
+  const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string }>();
   let nextMob = 0;
   for (let n = Number(firstWave); ; n++) {
-    const p = Math.max(1, Number(power));
+    const p = game.difficulty.power;
     const total = Math.round((4 + 3 * n) * p);
     const theme = waveTheme(n);
     const boss = n % (p > 1 ? 3 : 5) === 0;
@@ -751,12 +908,22 @@ async function main(): Promise<void> {
     await kingSays(pick(boss || n % 10 === 0 || n % 15 === 0 || n === 20 ? KING_LINES.boss : KING_LINES.vague));
     await say(n > 20 ? `Vague ${n} (Infini)` : `Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
+    // nuit de sang toutes les 10 vagues ; une vague sur trois attaque aussi par le nord
+    const bloodNight = n % 10 === 0;
+    const northFront = n % 3 === 0;
+    if (bloodNight) {
+      await rcon.run('time set midnight');
+      await say('Nuit de sang !', 'Les monstres ont 50 % de vie en plus');
+    } else if (northFront) {
+      await rcon.run('title @a actionbar {"text":"Attention : ils attaquent aussi par le nord !","color":"red"}');
+    }
     for (let i = 0; i < total; i++) {
-      const [x, z] = SPAWNS[i % SPAWNS.length]!;
+      const spawns = northFront && i % 2 === 1 ? NORTH_SPAWNS : SPAWNS;
+      const [x, z] = spawns[i % spawns.length]!;
       const id = `m${nextMob++}`;
-      const mob = mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p, id);
+      const mob = mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p, id, bloodNight);
       await rcon.run(mob.command);
-      tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health });
+      tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health, color: mob.color, ...(mob.elite ? { elite: mob.elite } : {}) });
       if (i % 4 === 3) await sleep(1000);
     }
     if (boss) {
@@ -792,6 +959,20 @@ async function main(): Promise<void> {
         'Roi des zombies', hp, 1,
       );
     }
+    // le Warden, boss rare toutes les 12 vagues
+    if (n % 12 === 0) {
+      await extraBoss(
+        'summon minecraft:warden 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:250f,attributes:[{id:"minecraft:generic.max_health",base:250},{id:"minecraft:generic.follow_range",base:64}]}',
+        'Warden', 250, 1,
+      );
+      await rcon.run('title @a actionbar {"text":"Le Warden sort des profondeurs… abattez-le de loin !","color":"dark_aqua"}');
+    }
+    // shulkers postés sur les remparts nord : leurs projectiles font léviter
+    if (n % 6 === 0 && n + p - 1 >= 6) {
+      for (const sx of [-14, 14]) {
+        await extraBoss(`summon minecraft:shulker ${sx} -50 -20 {TAGS,NAME,PersistenceRequired:1b,Health:40f,attributes:[{id:"minecraft:generic.max_health",base:40}]}`, 'Shulker', 40, 1);
+      }
+    }
     if (n === 20) {
       await extraBoss('summon minecraft:wither 0 -45 50 {TAGS,NAME,PersistenceRequired:1b,Health:150f}', 'Wither affaibli', 150, 1);
       await rcon.run('title @a actionbar {"text":"Le boss final : le Wither !","color":"dark_purple"}');
@@ -799,6 +980,10 @@ async function main(): Promise<void> {
     await rcon.run(`bossbar set minecraft:vague max ${total + extra}`);
     let kingCalled = false;
     let eventDone = false;
+    // tour de siège (une vague sur six) : une rampe qui monte marche après marche contre le mur est
+    const siegeTower = n % 6 === 3;
+    let siegeStep = 0;
+    if (siegeTower) await rcon.run('title @a actionbar {"text":"Une tour de siège approche du mur est !","color":"gold"}');
     /** Seuils de vie du Roi déjà commentés pendant cette vague. */
     const kingWarned = new Set<string>();
     const started = Date.now();
@@ -833,13 +1018,49 @@ async function main(): Promise<void> {
       for (const [id, mob] of tracked) {
         const reply = await rcon.run(`data get entity @e[tag=${id},limit=1] Health`);
         if (!/data: /.test(reply)) {
+          // l'Explosif explose à sa mort (dégâts aux joueurs proches, aucun bloc cassé)
+          if (mob.elite === 'explosif' && mob.pos) {
+            await rcon.run(`execute positioned ${mob.pos} run particle minecraft:explosion_emitter ~ ~1 ~`);
+            await rcon.run(`execute positioned ${mob.pos} run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 1 1`);
+            await rcon.run(`execute positioned ${mob.pos} as @a[distance=..4] run damage @s 8 minecraft:explosion`);
+          }
           tracked.delete(id);
           continue;
         }
+        if (mob.elite === 'explosif') {
+          const pos = /\[(-?[0-9.]+)d, (-?[0-9.]+)d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity @e[tag=${id},limit=1] Pos`));
+          if (pos) mob.pos = `${pos[1]} ${pos[2]} ${pos[3]}`;
+        }
         const hp = number(reply);
+        // le Diviseur se dédouble à mi-vie (une fois)
+        if (mob.elite === 'diviseur' && !mob.split && hp < mob.max / 2) {
+          mob.split = true;
+          for (const ox of [1, -1]) {
+            await rcon.run(`execute at @e[tag=${id},limit=1] run summon minecraft:zombie ~${ox} ~ ~ {Tags:["vague"],PersistenceRequired:1b,ArmorItems:[{},{},{},{id:"minecraft:leather_helmet",count:1}],attributes:[{id:"minecraft:generic.follow_range",base:64}]}`);
+          }
+        }
         if (Math.ceil((hp / mob.max) * 10) === Math.ceil((mob.shown / mob.max) * 10)) continue;
         mob.shown = hp;
-        await rcon.run(`data merge entity @e[tag=${id},limit=1] {CustomName:'${healthBar(mob.name, hp, mob.max)}'}`);
+        await rcon.run(`data merge entity @e[tag=${id},limit=1] {CustomName:'${healthBar(mob.name, hp, mob.max, mob.color)}'}`);
+      }
+      // pas d'orbes d'expérience : la barre d'expérience sert à la progression des rôles
+      await rcon.run('kill @e[type=minecraft:experience_orb]');
+      // pouvoirs des élites : régénération, rage, étendard qui renforce les monstres autour
+      await rcon.run('effect give @e[tag=elite_regen] minecraft:regeneration 3 1 true');
+      await rcon.run('effect give @e[tag=elite_enrage] minecraft:speed 3 1 true');
+      await rcon.run('execute at @e[tag=elite_etendard] run effect give @e[tag=vague,distance=..8] minecraft:strength 3 0 true');
+      await rcon.run('execute at @e[tag=elite_etendard] run effect give @e[tag=vague,distance=..8] minecraft:resistance 3 0 true');
+      // le Bélier défonce barricades et murs devant lui
+      for (const target of [game.map.wall, 'minecraft:cobblestone', '#minecraft:planks', '#minecraft:logs']) {
+        await rcon.run(`execute as @e[tag=belier] at @s rotated ~ 0 run fill ^-1 ^ ^1 ^1 ^2 ^2 minecraft:air replace ${target}`);
+      }
+      // tour de siège : une marche de plus à chaque passage, jusqu'au sommet du mur est
+      if (siegeTower && siegeStep < 10) {
+        const sx = 30 - siegeStep;
+        await rcon.run(`fill ${sx} ${-60 + siegeStep} -1 ${sx} ${-60 + siegeStep} 1 minecraft:oak_stairs[facing=west]`);
+        await rcon.run(`fill ${sx} ${-61 + siegeStep} -1 ${sx} ${-61} 1 minecraft:oak_planks replace minecraft:air`);
+        siegeStep++;
+        if (siegeStep === 10) await rcon.run('title @a actionbar {"text":"La tour de siège touche le mur est : défendez-le !","color":"gold"}');
       }
       // près du Roi (12 blocs), les monstres rejoignent l'équipe des joueurs : ils les ignorent et attaquent le Roi
       await rcon.run('team join chateau @a');
@@ -947,7 +1168,7 @@ async function main(): Promise<void> {
         }
       }
       // les sapeurs creusent un tunnel d'un bloc sur deux devant eux, dans la pierre et les briques
-      await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace #minecraft:stone_bricks');
+      await rcon.run(`execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace ${game.map.wall}`);
       await rcon.run('execute as @e[tag=sapeur] at @s rotated ~ 0 run fill ^ ^ ^1 ^ ^1 ^1 minecraft:air replace minecraft:cobblestone');
       if ((await score('#equipe', 'p_murs')) > 0) await rcon.run('execute as @e[type=creeper,tag=vague] run data merge entity @s {ExplosionRadius:2b}');
       await rcon.run('bossbar set minecraft:roi players @a');
@@ -968,6 +1189,7 @@ async function main(): Promise<void> {
     await rcon.run('give @a minecraft:emerald 5');
     await rcon.run(`effect give ${KING} minecraft:instant_health 1 1 true`);
     await rcon.run('weather clear');
+    await rcon.run('time set day');
     remaining = 0;
     if (n % 5 === 0) {
       await rcon.run('setblock 0 -60 15 minecraft:chest[facing=south]');
@@ -994,12 +1216,8 @@ async function main(): Promise<void> {
       await rcon.run('title @a actionbar {"text":"Un marchand masqué est dans la cour… jusqu’à la prochaine vague !","color":"dark_purple"}');
       await kingSays(pick(KING_LINES.marche));
     }
-    await say(`Vague ${n} repoussée !`, `Prochaine vague dans ${PAUSE_S} secondes`);
-    for (let s = PAUSE_S; s > 0; s -= 5) {
-      await rcon.run(`bossbar set minecraft:vague name {"text":"Vague ${n + 1} dans ${s} s","color":"green"}`);
-      await kingAlive();
-      await sleep(5000);
-    }
+    await say(`Vague ${n} repoussée !`, 'Marchez sur la plaque dorée quand vous êtes prêts');
+    await waitForStart(n + 1, PAUSE_S, 'green');
   }
 }
 
