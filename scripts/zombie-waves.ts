@@ -419,7 +419,16 @@ const TURRET_KINDS: TurretKind[] = [
   { tag: 'canon', name: 'Canon', color: 'dark_gray', price: 18, head: 'tnt' },
 ];
 /** Dégâts par type et par niveau (1 à 3). */
-const TURRET_DAMAGE: Record<string, [number, number, number]> = { fleche: [5, 8, 12], glace: [3, 4, 6], feu: [4, 6, 9], canon: [4, 6, 9] };
+/** Niveau maximal d'une tourelle (étiquettes lvl2 à lvl5 ; sans étiquette : niveau 1). */
+const TURRET_MAX_LEVEL = 5;
+const TURRET_DAMAGE: Record<string, number[]> = { fleche: [5, 8, 12, 16, 21], glace: [3, 4, 6, 8, 10], feu: [4, 6, 9, 12, 15], canon: [4, 6, 9, 12, 15] };
+/** Niveau d'une tourelle d'après ses étiquettes (réponse de `data get entity … Tags`). */
+const turretLevel = (tags: string) => {
+  for (let level = TURRET_MAX_LEVEL; level >= 2; level--) if (tags.includes(`"lvl${level}"`)) return level;
+  return 1;
+};
+/** Sélecteur des tourelles qui peuvent encore monter de niveau. */
+const NOT_MAX_TURRET = `tag=tourelle,tag=!lvl${TURRET_MAX_LEVEL}`;
 /** Emplacements d'un support d'armure tous verrouillés : on ne peut rien lui prendre ni lui mettre. */
 const LOCKED_SLOTS = 4144959;
 const turretComponents = (k: TurretKind) =>
@@ -435,13 +444,13 @@ const turretItemArgs = (k: TurretKind) =>
 const turretUpgradeItemArgs = () =>
   `custom_data={passif:"${TURRET_UPGRADE.key}"},custom_name='{"text":"${TURRET_UPGRADE.label}","color":"${TURRET_UPGRADE.color}","italic":false}',enchantment_glint_override=true`;
 /** Vie des tourelles selon leur niveau, et dégâts par monstre au contact (à moins de 2 blocs) à chaque passage. */
-const TURRET_HP = [40, 60, 80];
+const TURRET_HP = [40, 60, 80, 100, 130];
 const TURRET_HIT = 3;
 /** Vie regagnée par passage (toutes les 2 s) sans monstre au contact : 1 point toutes les 10 s. */
 const TURRET_REGEN = 0.2;
 /** Parchemin de réparation de tourelle : à garder sur soi en s'approchant d'une tourelle abîmée. */
 const TURRET_REPAIR = { key: 'reparetourelle', label: 'Réparation de tourelle (approchez-vous d’une tourelle)', color: 'green' };
-/** Parchemin d'amélioration de tourelle : à garder sur soi en s'approchant d'une tourelle (3 niveaux). */
+/** Parchemin d’amélioration de tourelle : à garder sur soi en s’approchant d’une tourelle (jusqu’au niveau 5). */
 const TURRET_UPGRADE = { key: 'ameliotourelle', label: 'Amélioration de tourelle (approchez-vous d’une tourelle)', color: 'light_purple' };
 const scrollComponents = (p: { key: string; label: string; color: string }) =>
   `"minecraft:custom_data":{passif:"${p.key}"},"minecraft:custom_name":'{"text":"${p.label}","color":"${p.color}","italic":false}',"minecraft:enchantment_glint_override":1b`;
@@ -684,7 +693,7 @@ async function main(): Promise<void> {
       await rcon.run(`execute at ${name} run playsound minecraft:entity.arrow.shoot master @a ~ ~ ~ 2 0.6`);
     } else if (r.key === 'ingenieur') {
       await applyUpgrade(rcon, 'reparation');
-      for (const turret of turrets.values()) turret.hp = TURRET_HP[2]!;
+      for (const turret of turrets.values()) turret.hp = TURRET_HP[turret.level - 1]!;
       await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
     } else if (r.key === 'invocateur') {
       const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
@@ -975,9 +984,9 @@ async function main(): Promise<void> {
         const repairItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_REPAIR.key}"}]`;
         if (/Found/.test(await rcon.run(`clear ${name} ${repairItem} 0`))) {
           for (const [id, turret] of turrets) {
-            if (turret.hp >= TURRET_HP[2]! || !/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=${id},distance=..3]`))) continue;
+            if (turret.hp >= TURRET_HP[turret.level - 1]! || !/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=${id},distance=..3]`))) continue;
             const tags = await rcon.run(`data get entity @e[tag=${id},limit=1] Tags`);
-            const maxHp = TURRET_HP[tags.includes('"lvl3"') ? 2 : tags.includes('"lvl2"') ? 1 : 0]!;
+            const maxHp = TURRET_HP[turretLevel(tags) - 1]!;
             if (turret.hp >= maxHp) continue;
             await rcon.run(`clear ${name} ${repairItem} 1`);
             turret.hp = maxHp;
@@ -988,17 +997,16 @@ async function main(): Promise<void> {
         }
         // amélioration de tourelle : le parchemin sert quand on se tient à 3 blocs d'une tourelle pas au maximum
         const scrollItem = `minecraft:paper[minecraft:custom_data={passif:"${TURRET_UPGRADE.key}"}]`;
-        if (/Found/.test(await rcon.run(`clear ${name} ${scrollItem} 0`)) && /passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=tourelle,tag=!lvl3,distance=..3]`))) {
+        if (/Found/.test(await rcon.run(`clear ${name} ${scrollItem} 0`)) && /passed/.test(await rcon.run(`execute at ${name} if entity @e[${NOT_MAX_TURRET},distance=..3]`))) {
           await rcon.run(`clear ${name} ${scrollItem} 1`);
-          await rcon.run(`execute at ${name} run tag @e[tag=tourelle,tag=!lvl3,distance=..3,limit=1,sort=nearest] add cible`);
-          await rcon.run('tag @e[tag=cible,tag=lvl2] add lvl3');
-          await rcon.run('tag @e[tag=cible,tag=lvl3] remove lvl2');
-          await rcon.run('tag @e[tag=cible,tag=!lvl2,tag=!lvl3] add lvl2');
-          for (const kind of TURRET_KINDS) {
-            for (const [lvl, stars] of [[2, '★★'], [3, '★★★']] as const) {
-              await rcon.run(`execute as @e[tag=cible,${kindSelector(kind)},tag=lvl${lvl}] run data merge entity @s {CustomName:'{"text":"${kind.name} ${stars}","color":"${kind.color}"}'}`);
-            }
+          await rcon.run(`execute at ${name} run tag @e[${NOT_MAX_TURRET},distance=..3,limit=1,sort=nearest] add cible`);
+          // du plus haut au plus bas : la tourelle ne monte que d'un niveau (son nom suit avec sa barre de vie)
+          for (let level = TURRET_MAX_LEVEL - 1; level >= 2; level--) {
+            await rcon.run(`tag @e[tag=cible,tag=lvl${level}] add lvl${level + 1}`);
+            await rcon.run(`tag @e[tag=cible,tag=lvl${level + 1}] remove lvl${level}`);
           }
+          const noLevel = Array.from({ length: TURRET_MAX_LEVEL - 1 }, (_, i) => `tag=!lvl${i + 2}`).join(',');
+          await rcon.run(`tag @e[tag=cible,${noLevel}] add lvl2`);
           await rcon.run('execute at @e[tag=cible] run particle minecraft:totem_of_undying ~ ~1.5 ~ 0.3 0.5 0.3 0.3 40');
           await rcon.run('tag @e[tag=cible] remove cible');
           await rcon.run(`title ${name} actionbar {"text":"Tourelle améliorée !","color":"light_purple"}`);
@@ -1423,8 +1431,8 @@ async function main(): Promise<void> {
           continue;
         }
         const kind = TURRET_KINDS.find((k) => k.tag !== 'fleche' && tags.includes(`"${k.tag}"`)) ?? TURRET_KINDS[0]!;
-        const level = tags.includes('"lvl3"') ? 3 : tags.includes('"lvl2"') ? 2 : 1;
-        const range = 22 + 6 * (level - 1);
+        const level = turretLevel(tags);
+        const range = 22 + 4 * (level - 1);
         const me = `@e[tag=${id},limit=1]`;
         const maxHp = TURRET_HP[level - 1]!;
         // une amélioration remet la vie au maximum du nouveau niveau
@@ -1448,7 +1456,7 @@ async function main(): Promise<void> {
         }
         if (Math.ceil(turret.hp) !== turret.shown) {
           turret.shown = Math.ceil(turret.hp);
-          const stars = level === 3 ? ' ★★★' : level === 2 ? ' ★★' : '';
+          const stars = level > 1 ? ` ${'★'.repeat(level)}` : '';
           await rcon.run(`data merge entity ${me} {CustomName:'${healthBar(`${kind.name}${stars}`, turret.hp, maxHp, kind.color)}'}`);
         }
         const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
@@ -1464,7 +1472,7 @@ async function main(): Promise<void> {
         if (killed > 0 && by) turretKills.set(owner!, (turretKills.get(owner!) ?? 0) + killed);
         if (kind.tag === 'glace') await rcon.run(`effect give @e[tag=tir] minecraft:slowness 3 ${level} true`);
         // feu, et flèches enflammées au niveau 3
-        if (kind.tag === 'feu' || level === 3) await rcon.run('execute as @e[tag=tir] run data merge entity @s {Fire:120s}');
+        if (kind.tag === 'feu' || level >= 3) await rcon.run('execute as @e[tag=tir] run data merge entity @s {Fire:120s}');
         const particle = kind.tag === 'canon' ? 'explosion' : kind.tag === 'glace' ? 'snowflake' : kind.tag === 'feu' ? 'flame' : 'crit';
         await rcon.run(`execute at @e[tag=tir] run particle minecraft:${particle} ~ ~1 ~ 0.3 0.5 0.3 0.05 ${kind.tag === 'canon' ? 1 : 12}`);
         await rcon.run(`execute at ${me} run playsound minecraft:${kind.tag === 'canon' ? 'entity.generic.explode' : 'entity.arrow.shoot'} master @a ~ ~ ~ 0.6 1.2`);
