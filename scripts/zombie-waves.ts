@@ -707,7 +707,12 @@ async function main(): Promise<void> {
           await rcon.run('effect give @a minecraft:darkness 20 0 true');
           await say('Brouillard !', 'On ne voit plus rien…');
         } else if (roll < 0.3) {
-          await rcon.run('execute as @e[tag=vague,sort=random,limit=8] at @s run summon minecraft:tnt ~ ~15 ~ {fuse:45}');
+          // météores sans casse : dégâts d'explosion autour de 8 monstres, aucun bloc touché
+          await rcon.run('tag @e[tag=vague,sort=random,limit=8] add meteore');
+          await rcon.run('execute at @e[tag=meteore] run particle minecraft:explosion_emitter ~ ~1 ~');
+          await rcon.run('execute at @e[tag=meteore] run playsound minecraft:entity.generic.explode master @a ~ ~ ~ 1 0.8');
+          await rcon.run('execute at @e[tag=meteore] as @e[tag=vague,distance=..3] run damage @s 8 minecraft:explosion');
+          await rcon.run('tag @e[tag=meteore] remove meteore');
           await say('Pluie de météores !', 'Le ciel tombe sur les monstres');
         } else if (roll < 0.4) {
           await rcon.run('effect give @e[tag=vague] minecraft:speed 20 1 true');
