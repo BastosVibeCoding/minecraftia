@@ -398,6 +398,8 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run(`give @a minecraft:${ROLE_TICKET_ITEM}`);
   await rcon.run('scoreboard players reset * role');
   await rcon.run('scoreboard players reset * tourelles');
+  // le prestige ne vaut que pour la partie en cours
+  await rcon.run('scoreboard players reset * prestige');
   await rcon.run('effect give @a minecraft:instant_health 1 5 true');
   await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
@@ -500,8 +502,8 @@ const PASSIVES: Passive[] = [
 ];
 
 /**
- * Prestige : +1 émeraude par monstre tué de sa main, par niveau, pour toujours (score `prestige`, jamais remis à zéro,
- * même après la mort du Roi). Chaque étape coûte 100 émeraudes et fait repartir de zéro : inventaire vidé (kit de
+ * Prestige : +1 émeraude par monstre tué de sa main, par niveau, jusqu'à la fin de la partie (score `prestige`, remis à
+ * zéro à chaque nouvelle partie). Chaque étape coûte 100 émeraudes et fait repartir de zéro : inventaire vidé (kit de
  * départ redonné) et passifs remis à 0 ; le rôle et la Bénédiction du Roi (passif d'équipe) restent.
  */
 const PRESTIGE_PRICES = [100, 100, 100, 100, 100];
@@ -577,7 +579,7 @@ async function setUpShop(rcon: Rcon): Promise<void> {
     const level = i + 1;
     const sell =
       `{id:"minecraft:nether_star",count:1,components:{"minecraft:custom_data":{prestige:${level}},` +
-      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre pour toujours (repart de zéro)","color":"gold","italic":false}'}}`;
+      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie (repart de zéro)","color":"gold","italic":false}'}}`;
     await rcon.run(
       `data modify entity @e[tag=prestige,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${price}},sell:${sell},` +
         'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
@@ -742,7 +744,8 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add tues minecraft.custom:minecraft.mob_kills "Zombies tués"');
   await rcon.run('scoreboard objectives setdisplay sidebar tues');
   // pas de messages de commandes dans le chat (les nôtres comme celles des admins)
-  for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false']) await rcon.run(`gamerule ${rule}`);
+  // pas de messages de commandes ; les monstres ne lâchent rien (ni objets ni expérience)
+  for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false', 'doMobLoot false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
   await rcon.run('scoreboard objectives add partie dummy');
   if (firstWave === '1' && !resuming) {
@@ -863,7 +866,7 @@ async function main(): Promise<void> {
             }
             await rcon.run(`tellraw @a {"text":"${name} passe Prestige ${level} et repart de zéro !","color":"gold"}`);
             await rcon.run(`title ${name} times 5 40 10`);
-            await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre, pour toujours","color":"gold"}`);
+            await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie","color":"gold"}`);
             await rcon.run(`title ${name} title {"text":"★"}`);
             await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
           } else {
