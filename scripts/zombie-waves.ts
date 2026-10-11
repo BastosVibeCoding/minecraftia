@@ -1255,6 +1255,7 @@ async function main(): Promise<void> {
   // ultime : charge gardée dans le monde (survit à une relance du script), objet utilisé = déclenchement
   await rcon.run('scoreboard objectives add charge_ult dummy');
   await rcon.run('scoreboard objectives add ultime minecraft.used:minecraft.warped_fungus_on_a_stick');
+  await rcon.run('scoreboard objectives add declencher trigger');
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
   /** Utilisations de la capacité pendant la vague en cours, par joueur (vidé à chaque vague). */
   const abilityUsed = new Map<string, number>();
@@ -1265,6 +1266,8 @@ async function main(): Promise<void> {
   const sneaking = new Set<string>();
   /** Charge de l'ultime (victimes depuis le dernier ultime), par joueur ; recopiée dans le score « charge_ult ». */
   const ultCharge = new Map<string, number>();
+  /** Joueurs à qui le bouton « Déclencher l'ultime » a déjà été montré pour la charge en cours. */
+  const ultAnnounced = new Set<string>();
   const setCharge = async (name: string, value: number) => {
     ultCharge.set(name, value);
     await rcon.run(`scoreboard players set ${name} charge_ult ${value}`);
@@ -1553,18 +1556,28 @@ async function main(): Promise<void> {
             await rcon.run(`give ${name} minecraft:${abilityItem(myRole)}`);
           }
           // ultime : jauge pleine, l'objet ⚡ Ultime est donné ; un clic droit avec lui le déclenche
+          // (ou le bouton du chat, /trigger declencher, qui marche même en visant un loup ou un bloc)
           const charged = (ultCharge.get(name) ?? 0) >= ULT_COST;
-          if ((await score(name, 'ultime')) > 0) {
+          await rcon.run(`scoreboard players enable ${name} declencher`);
+          if ((await score(name, 'ultime')) > 0 || (await score(name, 'declencher')) > 0) {
             await rcon.run(`scoreboard players set ${name} ultime 0`);
+            await rcon.run(`scoreboard players set ${name} declencher 0`);
             if (charged) {
               await rcon.run(`clear ${name} ${ULT_ITEM_MATCH}`);
               await setCharge(name, 0);
+              ultAnnounced.delete(name);
               await useUltimate(myRole, name);
             }
-          } else if (charged && /No items/.test(await rcon.run(`clear ${name} ${ULT_ITEM_MATCH} 0`))) {
-            await rcon.run(`give ${name} minecraft:${ULT_ITEM}`);
-            await rcon.run(`title ${name} actionbar {"text":"⚡ Ultime prêt : clic droit avec l’objet ⚡ Ultime","color":"yellow","bold":true}`);
-            await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master ${name} ~ ~ ~ 1 1.4`);
+          } else if (charged) {
+            if (/No items/.test(await rcon.run(`clear ${name} ${ULT_ITEM_MATCH} 0`))) await rcon.run(`give ${name} minecraft:${ULT_ITEM}`);
+            if (!ultAnnounced.has(name)) {
+              ultAnnounced.add(name);
+              await rcon.run(
+                `tellraw ${name} [{"text":"⚡ Ultime prêt ! ","color":"yellow","bold":true},{"text":"[ Déclencher l’ultime ]","color":"gold","bold":true,` +
+                  `"clickEvent":{"action":"run_command","value":"/trigger declencher"}},{"text":" ou clic droit dans le vide avec l’objet ⚡ Ultime","color":"gray","bold":false}]`,
+              );
+              await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master ${name} ~ ~ ~ 1 1.4`);
+            }
           }
           if ((await score(name, 'capacite')) > 0) {
             await rcon.run(`scoreboard players set ${name} capacite 0`);
