@@ -22,6 +22,7 @@
  * au catalogue personnel (livre et /trigger boutique), dans le chat, tous en même temps. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
  * Rôles jusqu'au niveau 20 (chaque niveau demande plus de victimes) et arbre de compétences par classe (/trigger arbre).
+ * Forgeron (enchantement monté au-delà du maximum contre des jetons) et Enchanteur (roulette) dans le donjon.
  * Expéditions pendant la pause (salle au hasard, minerais, coffres, gardien ; pillards au château pendant ce temps).
  * Joueurs à terre (un allié accroupi les relève), ultimes (objet ⚡ Ultime donné quand la jauge de victimes est pleine), roulette de
  * l'Enchanteur, jetons de gloire des élites et des boss échangés contre des objets uniques.
@@ -394,6 +395,50 @@ const BUY_UNIQUE = 80;
 const ROULETTE_PRICE = 15;
 /** Place de l'Enchanteur : dans le donjon, côté est, en face du coffre (libre sur toutes les cartes). */
 const ENCHANTER_POS = '4.5 -60 4.5';
+/**
+ * Forge : le Forgeron (dans le donjon, côté ouest) monte d'un niveau un enchantement de l'objet tenu, contre des jetons
+ * de gloire : 1 jeton jusqu'au maximum normal, puis 2, 4, 6… par niveau au-delà, jusqu'au plafond de la forge.
+ */
+const FORGE_POS = '-4.5 -60 1.5';
+/** Valeur de /trigger forge qui affiche le menu (les autres : numéro de l'enchantement + 1). */
+const FORGE_MENU = 999;
+const FORGE_ENCHANTS: { key: string; name: string; max: number; cap?: number }[] = [
+  { key: 'sharpness', name: 'Tranchant', max: 5 },
+  { key: 'smite', name: 'Châtiment', max: 5 },
+  { key: 'bane_of_arthropods', name: 'Fléau des arthropodes', max: 5 },
+  { key: 'fire_aspect', name: 'Aura de feu', max: 2 },
+  { key: 'looting', name: 'Butin', max: 3 },
+  { key: 'knockback', name: 'Recul', max: 2, cap: 5 },
+  { key: 'sweeping_edge', name: 'Affilage', max: 3 },
+  { key: 'power', name: 'Puissance', max: 5 },
+  { key: 'punch', name: 'Frappe', max: 2, cap: 5 },
+  { key: 'quick_charge', name: 'Charge rapide', max: 3, cap: 5 },
+  { key: 'piercing', name: 'Perforation', max: 4 },
+  { key: 'protection', name: 'Protection', max: 4 },
+  { key: 'projectile_protection', name: 'Protection contre les projectiles', max: 4 },
+  { key: 'blast_protection', name: 'Protection contre les explosions', max: 4 },
+  { key: 'fire_protection', name: 'Protection contre le feu', max: 4 },
+  { key: 'feather_falling', name: 'Chute amortie', max: 4 },
+  { key: 'thorns', name: 'Épines', max: 3 },
+  { key: 'efficiency', name: 'Efficacité', max: 5 },
+  { key: 'fortune', name: 'Fortune', max: 3 },
+  { key: 'impaling', name: 'Empalement', max: 5 },
+  { key: 'loyalty', name: 'Loyauté', max: 3, cap: 5 },
+  { key: 'riptide', name: 'Impulsion', max: 3, cap: 5 },
+  { key: 'density', name: 'Densité', max: 5 },
+  { key: 'breach', name: 'Brèche', max: 4 },
+  { key: 'wind_burst', name: 'Rafale', max: 3, cap: 5 },
+  { key: 'respiration', name: 'Apnée', max: 3 },
+  { key: 'depth_strider', name: 'Agilité aquatique', max: 3 },
+  { key: 'swift_sneak', name: 'Furtivité rapide', max: 3 },
+];
+const forgeCap = (e: { max: number; cap?: number }) => e.cap ?? e.max + 5;
+const forgeCost = (e: { max: number }, level: number) => (level <= e.max ? 1 : 2 * (level - e.max));
+/** Nom français d'un enchantement (sinon son identifiant). */
+const enchantName = (key: string) =>
+  FORGE_ENCHANTS.find((e) => e.key === key)?.name ??
+  ({ flame: 'Flamme', infinity: 'Infinité', multishot: 'Tir multiple', channeling: 'Canalisation' } as Record<string, string>)[key] ??
+  key;
 /** Enchantements de la roulette selon l'objet tenu : [enchantement, niveau maximal normal]. */
 const ROULETTE: { match: RegExp; enchants: [string, number][] }[] = [
   { match: /_sword$|_axe$/, enchants: [['sharpness', 5], ['smite', 5], ['fire_aspect', 2], ['looting', 3], ['knockback', 2], ['sweeping_edge', 3]] },
@@ -819,6 +864,15 @@ async function setUpShop(rcon: Rcon): Promise<void> {
       'VillagerData:{profession:"minecraft:librarian",level:5,type:"minecraft:swamp"},Offers:{Recipes:[]}}',
   );
   await rcon.run(`summon minecraft:interaction ${ENCHANTER_POS} {width:1.0f,height:2.1f,response:1b,Tags:["enchanteur_clic"]}`);
+  // le Forgeron, côté ouest du donjon : un clic droit affiche la forge de l'objet tenu
+  await rcon.run('kill @e[tag=forgeron]');
+  await rcon.run('kill @e[tag=forgeron_clic]');
+  await rcon.run(
+    `summon minecraft:villager ${FORGE_POS} {CustomName:'{"text":"Forgeron","color":"gold"}',CustomNameVisible:1b,` +
+      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,Tags:["forgeron"],Rotation:[-90f,0f],' +
+      'VillagerData:{profession:"minecraft:toolsmith",level:5,type:"minecraft:snow"},Offers:{Recipes:[]}}',
+  );
+  await rcon.run(`summon minecraft:interaction ${FORGE_POS} {width:1.0f,height:2.1f,response:1b,Tags:["forgeron_clic"]}`);
   for (const a of [...SHOP, ...[REPAIR, ...UPGRADES].map((u) => ({ price: u.price, item: '', upgrade: u }))]) {
     const sell = 'upgrade' in a ? scroll(a.upgrade) : `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
     await rcon.run(
@@ -981,10 +1035,73 @@ async function main(): Promise<void> {
           `item modify entity ${name} weapon.mainhand {"function":"minecraft:set_enchantments","enchantments":{"minecraft:${enchant}":${level}},"add":false}`,
         );
         const legend = bonus === 2;
-        await rcon.run(`tellraw ${legend ? '@a' : name} {"text":"${legend ? `LÉGENDAIRE ! ${name} obtient` : 'Roulette :'} ${enchant} ${level}","color":"${legend ? 'gold' : 'light_purple'}","bold":${legend}}`);
+        await rcon.run(`tellraw ${legend ? '@a' : name} {"text":"${legend ? `LÉGENDAIRE ! ${name} obtient` : 'Roulette :'} ${enchantName(enchant)} ${level}","color":"${legend ? 'gold' : 'light_purple'}","bold":${legend}}`);
         await rcon.run(`execute at ${name} run playsound minecraft:${legend ? 'ui.toast.challenge_complete' : 'block.enchantment_table.use'} master ${name} ~ ~ ~ 1 1`);
       }
     }
+  };
+  /** Objet tenu et ses enchantements (identifiant → niveau). */
+  const heldEnchants = async (name: string) => {
+    const id = /"minecraft:([a-z_]+)"/.exec(await rcon.run(`data get entity ${name} SelectedItem.id`))?.[1] ?? '';
+    const reply = await rcon.run(`data get entity ${name} SelectedItem.components."minecraft:enchantments".levels`);
+    const levels = new Map<string, number>();
+    for (const m of reply.matchAll(/"minecraft:([a-z_]+)": (\d+)/g)) levels.set(m[1]!, Number(m[2]));
+    return { id, levels };
+  };
+  const tokensOf = async (name: string) =>
+    Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:echo_shard[minecraft:custom_data={jeton:1b}] 0`))?.[1] ?? 0);
+  /** Menu de la forge pour l'objet tenu : une ligne par enchantement, avec son prix en jetons. */
+  const forgeMenu = async (name: string) => {
+    const { id, levels } = await heldEnchants(name);
+    if (!id) {
+      await rcon.run(`tellraw ${name} {"text":"Forge : tenez en main l’objet à forger, puis parlez au Forgeron.","color":"red"}`);
+      return;
+    }
+    const entries = FORGE_ENCHANTS.map((e, i) => ({ e, i, level: levels.get(e.key) })).filter((x) => x.level !== undefined);
+    if (entries.length === 0) {
+      await rcon.run(`tellraw ${name} {"text":"Forge : cet objet n’a aucun enchantement à forger. Passez d’abord voir l’Enchanteur.","color":"red"}`);
+      return;
+    }
+    await rcon.run(`tellraw ${name} [{"text":"— Forge — ","color":"gold","bold":true},{"text":"${await tokensOf(name)} jetons de gloire","color":"aqua"}]`);
+    for (const { e, i, level } of entries) {
+      if (level! >= forgeCap(e)) {
+        await rcon.run(`tellraw ${name} [{"text":"   ✔ ","color":"dark_gray"},{"text":"${e.name} ${level} (maximum de la forge)","color":"gray"}]`);
+        continue;
+      }
+      const cost = forgeCost(e, level! + 1);
+      await rcon.run(
+        `tellraw ${name} [{"text":"[Forger] ","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger forge set ${i + 1}"},` +
+          `"hoverEvent":{"action":"show_text","contents":"${cost} jeton${cost > 1 ? 's' : ''}"}},{"text":"${e.name} ${level} → ${level! + 1} ","color":"${level! + 1 > e.max ? 'light_purple' : 'white'}"},` +
+          `{"text":"${cost} jeton${cost > 1 ? 's' : ''}","color":"aqua"}]`,
+      );
+    }
+  };
+  /** Forge un niveau de plus de l'enchantement n° `index` sur l'objet tenu (jetons retirés et vérifiés). */
+  const forgeUpgrade = async (name: string, index: number) => {
+    const e = FORGE_ENCHANTS[index];
+    if (!e) return;
+    const level = (await heldEnchants(name)).levels.get(e.key);
+    if (level === undefined) {
+      await rcon.run(`tellraw ${name} {"text":"Forge : l’objet en main n’a pas ${e.name}.","color":"red"}`);
+      return;
+    }
+    if (level >= forgeCap(e)) {
+      await rcon.run(`tellraw ${name} {"text":"Forge : ${e.name} ${level} est déjà au maximum de la forge.","color":"gray"}`);
+      return;
+    }
+    const cost = forgeCost(e, level + 1);
+    const paid = (await tokensOf(name)) >= cost ? Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:echo_shard[minecraft:custom_data={jeton:1b}] ${cost}`))?.[1] ?? 0) : 0;
+    if (paid < cost) {
+      if (paid > 0) await rcon.run(`give ${name} minecraft:${TOKEN_ITEM} ${paid}`);
+      await rcon.run(`tellraw ${name} {"text":"Pas assez de jetons de gloire : ${e.name} ${level + 1} en demande ${cost}.","color":"red"}`);
+      return;
+    }
+    await rcon.run(`item modify entity ${name} weapon.mainhand {"function":"minecraft:set_enchantments","enchantments":{"minecraft:${e.key}":${level + 1}},"add":false}`);
+    await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
+    await rcon.run(`execute at ${name} run particle minecraft:lava ~ ~1 ~ 0.3 0.3 0.3 0 8`);
+    if (level + 1 >= e.max + 3) await rcon.run(`tellraw @a {"text":"⚒ ${name} forge ${e.name} ${level + 1} !","color":"gold","bold":true}`);
+    else await rcon.run(`tellraw ${name} {"text":"⚒ Forgé : ${e.name} ${level + 1} (${cost} jeton${cost > 1 ? 's' : ''})","color":"gold"}`);
+    await forgeMenu(name);
   };
   /** Attend qu'un joueur marche sur la plaque dorée (après `minSeconds`), en tenant la barre et la vie du Roi à jour. */
   const waitForStart = async (wave: number, minSeconds: number, color: string) => {
@@ -1127,6 +1244,7 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add boutique trigger');
   await rcon.run('scoreboard objectives add tourelles dummy');
   await rcon.run('scoreboard objectives add achat trigger');
+  await rcon.run('scoreboard objectives add forge trigger');
   /** Victimes des tourelles en attente de paiement, par propriétaire, et reste (une émeraude toutes les deux). */
   const turretKills = new Map<string, number>();
   /** Tourelles suivies : numéro → propriétaire (le joueur qui l'a posée), vie, vie affichée. */
@@ -1219,6 +1337,9 @@ async function main(): Promise<void> {
       await rcon.run('execute as @e[tag=enchanteur_clic] on target run tag @s add enchanteur_demande');
       await rcon.run('data remove entity @e[tag=enchanteur_clic,limit=1] interaction');
       const enchanterAsked = /passed/.test(await rcon.run('execute if entity @a[tag=enchanteur_demande]'));
+      await rcon.run('execute as @e[tag=forgeron_clic] on target run tag @s add forge_demande');
+      await rcon.run('data remove entity @e[tag=forgeron_clic,limit=1] interaction');
+      const forgeAsked = /passed/.test(await rcon.run('execute if entity @a[tag=forge_demande]'));
       await rcon.run('execute at @e[tag=enchanteur] run particle minecraft:enchant ~ ~1.8 ~ 0.4 0.4 0.4 0.6 8');
       // qui s'est accroupi depuis le passage précédent (temps accroupi en hausse)
       sneaking.clear();
@@ -1523,6 +1644,18 @@ async function main(): Promise<void> {
           await rcon.run(`tag ${name} remove enchanteur_demande`);
           await spinRoulette(name);
         }
+        // forge : clic droit sur le Forgeron (ou /trigger forge) = menu ; /trigger forge set <n> = forger
+        await rcon.run(`scoreboard players enable ${name} forge`);
+        let forgeAsk = await score(name, 'forge');
+        if (forgeAsked && /passed/.test(await rcon.run(`execute if entity @a[name=${name},tag=forge_demande]`))) {
+          await rcon.run(`tag ${name} remove forge_demande`);
+          forgeAsk = FORGE_MENU;
+        }
+        if (forgeAsk > 0) {
+          await rcon.run(`scoreboard players set ${name} forge 0`);
+          if (forgeAsk === FORGE_MENU) await forgeMenu(name);
+          else await forgeUpgrade(name, forgeAsk - 1);
+        }
         // catalogue personnel : ouverture (/trigger boutique) et achats (/trigger achat set <numéro>)
         {
           await rcon.run(`scoreboard players enable ${name} boutique`);
@@ -1614,6 +1747,10 @@ async function main(): Promise<void> {
               await line(BUY_TURRET + i, `${kind.name} (vous en avez ${owned})`, Math.round(kind.price * (1 + owned) * (has(name, 'economie') ? 0.75 : 1)), kind.color);
             }
             await line(BUY_ROULETTE, 'Roulette de l’Enchanteur (objet tenu en main, parfois légendaire ; ou clic droit sur l’Enchanteur du donjon)', ROULETTE_PRICE, 'light_purple');
+            await rcon.run(
+              `tellraw ${name} [{"text":"[⚒ Forge] ","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger forge set ${FORGE_MENU}"}},` +
+                `{"text":"monter un enchantement de l’objet en main au-delà du maximum, contre des jetons (ou le Forgeron du donjon)","color":"gray"}]`,
+            );
             const myTokens = await tokens();
             await rcon.run(`tellraw ${name} {"text":"— Jetons de gloire : ${myTokens} (lâchés par les élites et les boss) —","color":"aqua","bold":true}`);
             for (const [i, u] of UNIQUES.entries()) {
