@@ -392,6 +392,8 @@ const BUY_TURRET = 60;
 const BUY_ROULETTE = 70;
 const BUY_UNIQUE = 80;
 const ROULETTE_PRICE = 15;
+/** Place de l'Enchanteur : dans le donjon, côté est, en face du coffre (libre sur toutes les cartes). */
+const ENCHANTER_POS = '4.5 -60 4.5';
 /** Enchantements de la roulette selon l'objet tenu : [enchantement, niveau maximal normal]. */
 const ROULETTE: { match: RegExp; enchants: [string, number][] }[] = [
   { match: /_sword$|_axe$/, enchants: [['sharpness', 5], ['smite', 5], ['fire_aspect', 2], ['looting', 3], ['knockback', 2], ['sweeping_edge', 3]] },
@@ -802,6 +804,15 @@ async function setUpShop(rcon: Rcon): Promise<void> {
         'Tags:["marchand"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:weaponsmith",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
     );
   }
+  // l'Enchanteur, dans le donjon en face du coffre : un clic droit (zone de clic posée sur lui) lance la roulette
+  await rcon.run('kill @e[tag=enchanteur]');
+  await rcon.run('kill @e[tag=enchanteur_clic]');
+  await rcon.run(
+    `summon minecraft:villager ${ENCHANTER_POS} {CustomName:'{"text":"Enchanteur","color":"light_purple"}',CustomNameVisible:1b,` +
+      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,Tags:["enchanteur"],Rotation:[90f,0f],' +
+      'VillagerData:{profession:"minecraft:librarian",level:5,type:"minecraft:swamp"},Offers:{Recipes:[]}}',
+  );
+  await rcon.run(`summon minecraft:interaction ${ENCHANTER_POS} {width:1.0f,height:2.1f,response:1b,Tags:["enchanteur_clic"]}`);
   for (const a of [...SHOP, ...[REPAIR, ...UPGRADES].map((u) => ({ price: u.price, item: '', upgrade: u }))]) {
     const sell = 'upgrade' in a ? scroll(a.upgrade) : `{id:"minecraft:${a.item}",count:${a.count ?? 1}${a.components ? `,components:{${a.components}}` : ''}}`;
     await rcon.run(
@@ -942,6 +953,32 @@ async function main(): Promise<void> {
     await rcon.run(`effect clear ${who}`);
     await rcon.run(`effect give ${who} minecraft:instant_health 1 0 true`);
     await rcon.run(`tellraw @a {"text":"${by} relève ${who} !","color":"green"}`);
+  };
+  /** Roulette de l'Enchanteur (boutique ou PNJ) : un enchantement au hasard sur l'objet tenu, parfois légendaire. */
+  const spinRoulette = async (name: string) => {
+    const held = /"minecraft:([a-z_]+)"/.exec(await rcon.run(`data get entity ${name} SelectedItem.id`))?.[1] ?? '';
+    const table = ROULETTE.find((t) => t.match.test(held));
+    if (!table) {
+      await rcon.run(`tellraw ${name} {"text":"Tenez en main une arme, un arc, une arbalète, une armure, un trident ou une masse (roulette : ${ROULETTE_PRICE} émeraudes).","color":"red"}`);
+    } else if (Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0) < ROULETTE_PRICE) {
+      await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : la roulette coûte ${ROULETTE_PRICE}.","color":"red"}`);
+    } else {
+      const paid = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${ROULETTE_PRICE}`))?.[1] ?? 0);
+      if (paid < ROULETTE_PRICE) {
+        if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+      } else {
+        const [enchant, max] = table.enchants[Math.floor(Math.random() * table.enchants.length)]!;
+        const roll = Math.random();
+        const bonus = max === 1 ? 0 : roll < 0.05 ? 2 : roll < 0.3 ? 1 : 0;
+        const level = max + bonus;
+        await rcon.run(
+          `item modify entity ${name} weapon.mainhand {"function":"minecraft:set_enchantments","enchantments":{"minecraft:${enchant}":${level}},"add":false}`,
+        );
+        const legend = bonus === 2;
+        await rcon.run(`tellraw ${legend ? '@a' : name} {"text":"${legend ? `LÉGENDAIRE ! ${name} obtient` : 'Roulette :'} ${enchant} ${level}","color":"${legend ? 'gold' : 'light_purple'}","bold":${legend}}`);
+        await rcon.run(`execute at ${name} run playsound minecraft:${legend ? 'ui.toast.challenge_complete' : 'block.enchantment_table.use'} master ${name} ~ ~ ~ 1 1`);
+      }
+    }
   };
   /** Attend qu'un joueur marche sur la plaque dorée (après `minSeconds`), en tenant la barre et la vie du Roi à jour. */
   const waitForStart = async (wave: number, minSeconds: number, color: string) => {
@@ -1164,6 +1201,11 @@ async function main(): Promise<void> {
     void (async () => {
       try {
       const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((s) => s.trim()).filter(Boolean);
+      // clic droit sur l'Enchanteur : le joueur est marqué, la zone de clic remise à zéro
+      await rcon.run('execute as @e[tag=enchanteur_clic] on target run tag @s add enchanteur_demande');
+      await rcon.run('data remove entity @e[tag=enchanteur_clic,limit=1] interaction');
+      const enchanterAsked = /passed/.test(await rcon.run('execute if entity @a[tag=enchanteur_demande]'));
+      await rcon.run('execute at @e[tag=enchanteur] run particle minecraft:enchant ~ ~1.8 ~ 0.4 0.4 0.4 0.6 8');
       // qui s'est accroupi depuis le passage précédent (temps accroupi en hausse)
       sneaking.clear();
       for (const name of online) {
@@ -1453,6 +1495,10 @@ async function main(): Promise<void> {
         // tourelle posée près de lui (6 blocs) et pas encore attribuée : elle est à lui, même pendant une pause
         await rcon.run(`execute at ${name} run tag @e[tag=tourelle,tag=!possedee,distance=..6] add proprio_${name}`);
         await rcon.run(`tag @e[tag=proprio_${name},tag=!possedee] add possedee`);
+        if (enchanterAsked && /passed/.test(await rcon.run(`execute if entity @a[name=${name},tag=enchanteur_demande]`))) {
+          await rcon.run(`tag ${name} remove enchanteur_demande`);
+          await spinRoulette(name);
+        }
         // catalogue personnel : ouverture (/trigger boutique) et achats (/trigger achat set <numéro>)
         {
           await rcon.run(`scoreboard players enable ${name} boutique`);
@@ -1480,32 +1526,7 @@ async function main(): Promise<void> {
                 await rcon.run(`tellraw @a {"text":"${name} obtient ${unique.name} !","color":"gold"}`);
               }
             }
-            // roulette de l'Enchanteur : un enchantement au hasard sur l'objet tenu, parfois légendaire
-            if (choice === BUY_ROULETTE) {
-              const held = /"minecraft:([a-z_]+)"/.exec(await rcon.run(`data get entity ${name} SelectedItem.id`))?.[1] ?? '';
-              const table = ROULETTE.find((t) => t.match.test(held));
-              if (!table) {
-                await rcon.run(`tellraw ${name} {"text":"Tenez une arme, un arc, une arbalète, une armure, un trident ou une masse en main.","color":"red"}`);
-              } else if ((await emeralds()) < ROULETTE_PRICE) {
-                await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : la roulette coûte ${ROULETTE_PRICE}.","color":"red"}`);
-              } else {
-                const paid = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${ROULETTE_PRICE}`))?.[1] ?? 0);
-                if (paid < ROULETTE_PRICE) {
-                  if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
-                } else {
-                  const [enchant, max] = table.enchants[Math.floor(Math.random() * table.enchants.length)]!;
-                  const roll = Math.random();
-                  const bonus = max === 1 ? 0 : roll < 0.05 ? 2 : roll < 0.3 ? 1 : 0;
-                  const level = max + bonus;
-                  await rcon.run(
-                    `item modify entity ${name} weapon.mainhand {"function":"minecraft:set_enchantments","enchantments":{"minecraft:${enchant}":${level}},"add":false}`,
-                  );
-                  const legend = bonus === 2;
-                  await rcon.run(`tellraw ${legend ? '@a' : name} {"text":"${legend ? `LÉGENDAIRE ! ${name} obtient` : 'Roulette :'} ${enchant} ${level}","color":"${legend ? 'gold' : 'light_purple'}","bold":${legend}}`);
-                  await rcon.run(`execute at ${name} run playsound minecraft:${legend ? 'ui.toast.challenge_complete' : 'block.enchantment_table.use'} master ${name} ~ ~ ~ 1 1`);
-                }
-              }
-            }
+            if (choice === BUY_ROULETTE) await spinRoulette(name);
             if (choice > 0 && choice !== BUY_ROULETTE && !unique) {
               // article choisi : prix, puis paiement s'il a assez d'émeraudes
               const passive = choice <= PASSIVES.length ? PASSIVES[choice - 1] : undefined;
@@ -1568,7 +1589,7 @@ async function main(): Promise<void> {
             for (const [i, kind] of TURRET_KINDS.entries()) {
               await line(BUY_TURRET + i, `${kind.name} (vous en avez ${owned})`, Math.round(kind.price * (1 + owned) * (has(name, 'economie') ? 0.75 : 1)), kind.color);
             }
-            await line(BUY_ROULETTE, 'Roulette de l’Enchanteur (objet tenu en main, parfois légendaire)', ROULETTE_PRICE, 'light_purple');
+            await line(BUY_ROULETTE, 'Roulette de l’Enchanteur (objet tenu en main, parfois légendaire ; ou clic droit sur l’Enchanteur du donjon)', ROULETTE_PRICE, 'light_purple');
             const myTokens = await tokens();
             await rcon.run(`tellraw ${name} {"text":"— Jetons de gloire : ${myTokens} (lâchés par les élites et les boss) —","color":"aqua","bold":true}`);
             for (const [i, u] of UNIQUES.entries()) {
