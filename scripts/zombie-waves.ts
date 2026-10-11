@@ -294,7 +294,8 @@ const BLACK_MARKET_CHANCE = 0.35;
 const CATALOGUE_BOOK =
   `written_book[custom_data={catalogue:1b},written_book_content={title:"Catalogue",author:"Le Roi",pages:['[{"text":"Catalogue\\\\n\\\\n","bold":true,"color":"dark_purple"},` +
   `{"text":"[ Ouvrir ma boutique ]","color":"dark_green","bold":true,"clickEvent":{"action":"run_command","value":"/trigger boutique"}},` +
-  `{"text":"\\\\n\\\\nPassifs et tourelles, à vos niveaux et à vos prix. On peut aussi taper /trigger boutique.","color":"black","bold":false}]']}]`;
+  `{"text":"\\\\n\\\\n[ ★ Prestige ]","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger prestige"}},` +
+  `{"text":"\\\\n\\\\nPassifs et tourelles, à vos niveaux et à vos prix. Aussi : /trigger boutique, /trigger prestige.","color":"black","bold":false}]']}]`;
 /** Numéros d'achat du catalogue : passifs (1 à 20), Bénédiction du Roi (50), tourelles (60 et plus). */
 const BUY_BLESSING = 50;
 const BUY_TURRET = 60;
@@ -404,7 +405,8 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('scoreboard players reset * role');
   await rcon.run('scoreboard players reset * tourelles');
   // le prestige ne vaut que pour la partie en cours
-  await rcon.run('scoreboard players reset * prestige');
+  await rcon.run('scoreboard players reset * niv_prestige');
+  await rcon.run('scoreboard players set #migre niv_prestige 1');
   await rcon.run('effect give @a minecraft:instant_health 1 5 true');
   await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
@@ -582,41 +584,8 @@ async function applyUpgrade(rcon: Rcon, key: string): Promise<void> {
 
 /** Le marchand, à côté du trône du Roi (invincible), avec les articles de la boutique. */
 async function setUpShop(rcon: Rcon): Promise<void> {
-  // le Maître du prestige, dans la salle du trône : niveaux de prestige permanents
+  // le prestige se passe avec /trigger prestige (plus de PNJ)
   await rcon.run('kill @e[tag=prestige]');
-  await rcon.run(
-    `summon minecraft:villager -3.5 -60 -2.5 {CustomName:'{"text":"Maître du prestige","color":"gold"}',CustomNameVisible:1b,` +
-      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
-      'Tags:["prestige"],Rotation:[0f,0f],VillagerData:{profession:"minecraft:librarian",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
-  );
-  for (const [i, price] of PRESTIGE_PRICES.entries()) {
-    const level = i + 1;
-    const sell =
-      `{id:"minecraft:nether_star",count:1,components:{"minecraft:custom_data":{prestige:${level}},` +
-      `"minecraft:custom_name":'{"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie (repart de zéro)","color":"gold","italic":false}'}}`;
-    await rcon.run(
-      `data modify entity @e[tag=prestige,limit=1] Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${price}},sell:${sell},` +
-        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
-    );
-  }
-  // le Maître des rôles, dans la cour devant le donjon : un ticket contre un rôle
-  await rcon.run('kill @e[tag=roles]');
-  await rcon.run(
-    `summon minecraft:villager -3.5 -60 9.5 {CustomName:'{"text":"Maître des rôles","color":"gold"}',CustomNameVisible:1b,` +
-      'NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,' +
-      'Tags:["roles"],Rotation:[180f,0f],VillagerData:{profession:"minecraft:armorer",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
-  );
-  for (const r of ROLES) {
-    const sell =
-      `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{role:"${r.key}"},` +
-      `"minecraft:custom_name":'{"text":"Rôle : ${r.name}","color":"${r.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
-    for (const buy of [ROLE_TICKET, `{id:"minecraft:emerald",count:${ROLE_CHANGE_PRICE}}`]) {
-      await rcon.run(
-        `data modify entity @e[tag=roles,limit=1] Offers.Recipes append value {buy:${buy},sell:${sell},` +
-          'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
-      );
-    }
-  }
   // passifs et tourelles s'achètent au catalogue personnel (plus de PNJ par joueur)
   await rcon.run('kill @e[tag=passifs]');
   await rcon.run('kill @e[tag=marchand]');
@@ -768,7 +737,9 @@ async function main(): Promise<void> {
     await lobby(rcon);
     await newGame(rcon);
   } else {
-    // reprise en cours de partie : même carte et même difficulté
+    // reprise en cours de partie : même carte et même difficulté ; qui était coincé en spectateur revient en jeu
+    await rcon.run('tp @a[gamemode=spectator] 0 -60 12');
+    await rcon.run('gamemode survival @a[gamemode=spectator]');
     const read = async (key: string) => Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get #${key} partie`))?.[1] ?? -1);
     game.map = MAPS[await read('carte')] ?? MAPS[0]!;
     game.difficulty = DIFFICULTIES[await read('difficulte')] ?? DIFFICULTIES.find((d) => d.power === Number(power)) ?? DIFFICULTIES[1]!;
@@ -800,7 +771,14 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add morts deathCount');
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   await rcon.run('scoreboard objectives add role dummy');
-  await rcon.run('scoreboard objectives add prestige dummy');
+  // le niveau de prestige est gardé dans « niv_prestige » ; « prestige » est la commande /trigger prestige
+  if (!/has 1/.test(await rcon.run('scoreboard players get #migre niv_prestige'))) {
+    await rcon.run('scoreboard objectives add niv_prestige dummy');
+    await rcon.run('scoreboard players operation * niv_prestige = * prestige');
+    await rcon.run('scoreboard objectives remove prestige');
+    await rcon.run('scoreboard players set #migre niv_prestige 1');
+  }
+  await rcon.run('scoreboard objectives add prestige trigger');
   await rcon.run('scoreboard objectives add boutique trigger');
   await rcon.run('scoreboard objectives add tourelles dummy');
   await rcon.run('scoreboard objectives add achat trigger');
@@ -855,7 +833,7 @@ async function main(): Promise<void> {
         for (const p of PASSIVES) levels.set(p.key, await score(name, `p_${p.key}`));
         levels.set('role', await score(name, 'role'));
         // pièces : victimes de sa main × (1 + prestige) ; victimes de ses tourelles, une émeraude toutes les deux
-        const prestige = await score(name, 'prestige');
+        const prestige = await score(name, 'niv_prestige');
         levels.set('prestige', prestige);
         if (before !== undefined && k > before) {
           const byTurret = Math.min(k - before, turretKills.get(name) ?? 0);
@@ -865,28 +843,42 @@ async function main(): Promise<void> {
           const emeralds = (k - before - byTurret) * (1 + prestige) + Math.floor(bank / TURRET_KILLS_PER_EMERALD);
           if (emeralds > 0) await rcon.run(`give ${name} minecraft:emerald ${emeralds}`);
         }
-        // prestige acheté : l'étoile n'est valable que pour le niveau suivant (sinon remboursée)
-        for (const [i, price] of PRESTIGE_PRICES.entries()) {
-          const level = i + 1;
-          const bought = Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:nether_star[minecraft:custom_data={prestige:${level}}]`))?.[1] ?? 0);
-          if (bought === 0) continue;
-          if (level === (levels.get('prestige') ?? 0) + 1) {
-            levels.set('prestige', level);
-            await rcon.run(`scoreboard players set ${name} prestige ${level}`);
-            // on repart de zéro : inventaire vidé, kit de départ, passifs à 0
-            await rcon.run(`clear ${name}`);
-            for (const item of KIT) await rcon.run(`give ${name} minecraft:${item}`);
-            for (const passive of PASSIVES) {
-              await rcon.run(`scoreboard players reset ${name} p_${passive.key}`);
-              levels.set(passive.key, 0);
-            }
-            await rcon.run(`tellraw @a {"text":"${name} passe Prestige ${level} et repart de zéro !","color":"gold"}`);
-            await rcon.run(`title ${name} times 5 40 10`);
-            await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie","color":"gold"}`);
-            await rcon.run(`title ${name} title {"text":"★"}`);
-            await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
+        // /trigger prestige : 1 = voir son prestige et le prix, 2 = confirmer le passage au niveau suivant
+        await rcon.run(`scoreboard players enable ${name} prestige`);
+        const prestigeAsk = await score(name, 'prestige');
+        if (prestigeAsk > 0) {
+          await rcon.run(`scoreboard players set ${name} prestige 0`);
+          const current = levels.get('prestige') ?? 0;
+          const level = current + 1;
+          const price = PRESTIGE_PRICES[current];
+          if (price === undefined) {
+            await rcon.run(`tellraw ${name} {"text":"Prestige ${current} : c’est le maximum.","color":"gold"}`);
+          } else if (prestigeAsk === 1) {
+            await rcon.run(`tellraw ${name} [{"text":"★ Prestige ${current} → ${level} : ","color":"gold","bold":true},{"text":"${price} émeraudes. +${level} émeraude${level > 1 ? 's' : ''} par monstre tué de ta main jusqu’à la fin de la partie.","color":"yellow"}]`);
+            await rcon.run(`tellraw ${name} {"text":"Attention : tu repars de zéro (inventaire vidé, kit de départ, passifs à 0). Pose tes tourelles avant !","color":"red"}`);
+            await rcon.run(`tellraw ${name} {"text":"[ Passer Prestige ${level} ]","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger prestige set 2"},"hoverEvent":{"action":"show_text","contents":"${price} émeraudes"}}`);
           } else {
-            await rcon.run(`title ${name} actionbar {"text":"Prestige ${level} : il fallait d’abord le niveau ${level - 1 < 1 ? 1 : level - 1} (étoile perdue)","color":"gray"}`);
+            const owned = Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
+            const paid = owned >= price ? Number(/Removed (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald ${price}`))?.[1] ?? 0) : 0;
+            if (paid < price) {
+              if (paid > 0) await rcon.run(`give ${name} minecraft:emerald ${paid}`);
+              await rcon.run(`tellraw ${name} {"text":"Pas assez d’émeraudes : le Prestige ${level} coûte ${price}.","color":"red"}`);
+            } else {
+              levels.set('prestige', level);
+              await rcon.run(`scoreboard players set ${name} niv_prestige ${level}`);
+              // on repart de zéro : inventaire vidé, kit de départ, passifs à 0
+              await rcon.run(`clear ${name}`);
+              for (const item of KIT) await rcon.run(`give ${name} minecraft:${item}`);
+              for (const passive of PASSIVES) {
+                await rcon.run(`scoreboard players reset ${name} p_${passive.key}`);
+                levels.set(passive.key, 0);
+              }
+              await rcon.run(`tellraw @a {"text":"${name} passe Prestige ${level} et repart de zéro !","color":"gold"}`);
+              await rcon.run(`title ${name} times 5 40 10`);
+              await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie","color":"gold"}`);
+              await rcon.run(`title ${name} title {"text":"★"}`);
+              await rcon.run(`execute at ${name} run playsound minecraft:ui.toast.challenge_complete master ${name} ~ ~ ~ 1 1`);
+            }
           }
         }
         // parchemins achetés : consommés, niveau monté (au-delà du maximum, remboursés)
@@ -1117,7 +1109,7 @@ async function main(): Promise<void> {
                     `tellraw ${name} [{"text":"[Acheter] ","color":"green","bold":true,"clickEvent":{"action":"run_command","value":"/trigger achat set ${id}"},` +
                       `"hoverEvent":{"action":"show_text","contents":"${price} émeraudes"}},{"text":"${text} ","color":"${color}"},{"text":"${price} 💎","color":"gold"}]`,
                   );
-            await rcon.run(`tellraw ${name} [{"text":"— Boutique de ${name} — ","color":"light_purple","bold":true},{"text":"${await emeralds()} émeraudes","color":"gold"}]`);
+            await rcon.run(`tellraw ${name} [{"text":"— Boutique de ${name} — ","color":"light_purple","bold":true},{"text":"${await emeralds()} émeraudes ","color":"gold"},{"text":"[★ Prestige]","color":"gold","clickEvent":{"action":"run_command","value":"/trigger prestige"}}]`);
             for (const [i, passive] of PASSIVES.entries()) {
               const next = (levels.get(passive.key) ?? 0) + 1;
               await line(i + 1, `${passive.label} : niveau ${next - 1} → ${next}`, next <= passive.max ? passivePrice(passive, next) : undefined, passive.color);
