@@ -9,7 +9,7 @@
  * Tourelles à poser où l'on veut ; réparation et améliorations du château ; boss uniques (pillards, Roi des zombies,
  * Wither à la vague 20, puis mode Infini) ; tourelles de quatre types améliorables ; le Roi parle ; marché noir ;
  * événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
- * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur, Mage) chez le Maître des rôles (changement
+ * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur, Mage, Invocateur) chez le Maître des rôles (changement
  * de classe ensuite pour 50 émeraudes, niveau gardé) ; ils montent
  * de niveau avec les victimes et ont une capacité spéciale par vague (objet à utiliser d'un clic droit).
  * Hall d'avant-partie : choix de la carte (classique, désert, neige, Nether) et de la difficulté (Facile à Cauchemar).
@@ -220,7 +220,18 @@ const ROLES: Role[] = [
     ability: 'Tempête de foudre',
     kit: ['wind_charge 64', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]'],
   },
+  {
+    id: 6, key: 'invocateur', name: '🐺 Invocateur', color: 'gold',
+    bonus: {},
+    perLevel: { 'generic.max_health': 2 },
+    ability: 'Appel de la meute',
+    kit: ['cooked_beef 32', 'bone 16'],
+  },
 ];
+/** Loups de l'Invocateur : 2, plus un tous les 2 niveaux de rôle ; renforts de la capacité pendant 30 s. */
+const PET_BASE = 2;
+const PET_CALL = 3;
+const PET_CALL_S = 30;
 /** Prix d'un changement de classe chez le Maître des rôles (le niveau du rôle, lié aux victimes, est gardé). */
 const ROLE_CHANGE_PRICE = 50;
 /** Victimes par niveau de rôle, et niveau maximal. */
@@ -229,6 +240,15 @@ const ROLE_MAX_LEVEL = 5;
 /** Objet de capacité (canne à carotte : son utilisation est comptée par une statistique du jeu). */
 const abilityItem = (r: Role) =>
   `carrot_on_a_stick[custom_data={capacite:1b},unbreakable={},custom_name='{"text":"${r.ability} (clic droit)","color":"${r.color}","italic":false}']`;
+/** Commande d'apparition d'un loup de l'Invocateur, plus solide et plus fort à chaque niveau de rôle. */
+const petCommand = (name: string, uuid: string, level: number, tags: string[]) => {
+  const hp = 30 + 6 * level;
+  return (
+    `execute at ${name} run summon minecraft:wolf ~1 ~ ~1 {Owner:${uuid},Tags:[${tags.map((t) => `"${t}"`).join(',')}],PersistenceRequired:1b,` +
+    `CustomName:'{"text":"Loup de ${name}","color":"gold"}',Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},` +
+    `{id:"minecraft:generic.attack_damage",base:${4 + level}},{id:"minecraft:generic.movement_speed",base:0.35}]}`
+  );
+};
 /** Ticket de rôle, donné à chaque joueur en début de partie ; c'est la monnaie du Maître des rôles. */
 const ROLE_TICKET = '{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{ticket:"role"},"minecraft:custom_name":\'{"text":"Ticket de rôle","color":"gold","italic":false}\',"minecraft:enchantment_glint_override":1b}}';
 const ROLE_TICKET_ITEM = 'paper[custom_data={ticket:"role"},custom_name=\'{"text":"Ticket de rôle","color":"gold","italic":false}\',enchantment_glint_override=true]';
@@ -341,6 +361,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('kill @e[type=minecraft:snow_golem]');
   await rcon.run('kill @e[tag=tourelle]');
   await rcon.run('kill @e[tag=marchenoir]');
+  await rcon.run('kill @e[tag=pet]');
   // passifs remis à zéro : ils ne servent que pendant la partie en cours (Bénédiction du Roi comprise)
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard players reset * p_${p.key}`);
   await rcon.run(
@@ -640,6 +661,14 @@ async function main(): Promise<void> {
     } else if (r.key === 'ingenieur') {
       await applyUpgrade(rcon, 'reparation');
       await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
+    } else if (r.key === 'invocateur') {
+      const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
+      if (uuid) {
+        const level = Math.min(ROLE_MAX_LEVEL, Math.floor((await score(name, 'tues')) / ROLE_KILLS_PER_LEVEL));
+        for (let i = 0; i < PET_CALL; i++) await rcon.run(petCommand(name, uuid, level, ['pet', `renfort_${name}`]));
+        await rcon.run(`execute at ${name} run playsound minecraft:entity.wolf.howl master @a ~ ~ ~ 2 1`);
+        setTimeout(() => void rcon.run(`kill @e[tag=renfort_${name}]`), PET_CALL_S * 1000);
+      }
     } else if (r.key === 'mage') {
       // foudre sur les 6 monstres les plus proches (24 blocs), dégâts comptés pour le Mage
       await rcon.run(`execute at ${name} run tag @e[tag=vague,distance=..24,limit=6,sort=nearest] add foudre`);
@@ -865,6 +894,21 @@ async function main(): Promise<void> {
           await rcon.run(`title ${name} subtitle {"text":"Vous êtes ${r.name}","color":"${r.color}"}`);
           await rcon.run(`title ${name} title {"text":""}`);
           await rcon.run(`tellraw @a {"text":"${name} devient ${r.name}","color":"${r.color}"}`);
+        }
+        // meute de l'Invocateur : un loup de plus par passage s'il en manque ; plus de loups si on change de rôle
+        {
+          const isSummoner = (await score(name, 'role')) === 6;
+          if (!isSummoner) {
+            await rcon.run(`kill @e[tag=pet_${name}]`);
+          } else {
+            const level = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
+            const wanted = PET_BASE + Math.floor(level / 2);
+            const pets = number(await rcon.run(`execute if entity @e[tag=pet_${name}]`));
+            if (pets < wanted) {
+              const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
+              if (uuid) await rcon.run(petCommand(name, uuid, level, ['pet', `pet_${name}`]));
+            }
+          }
         }
         // rôle : niveau d'après les victimes de la partie, objet de capacité, capacité utilisée
         const myRoleId = await score(name, 'role');
