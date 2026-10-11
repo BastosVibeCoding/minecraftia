@@ -968,10 +968,10 @@ async function main(): Promise<void> {
                   'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
               );
             }
-            // chaque tourelle possédée rend la suivante 50 % plus chère
+            // chaque tourelle possédée ajoute le prix de départ (+100 %)
             for (const k of TURRET_KINDS) {
               await rcon.run(
-                `data modify entity ${npc} Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${Math.round(k.price * (1 + 0.5 * owned))}},` +
+                `data modify entity ${npc} Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${Math.round(k.price * (1 + owned))}},` +
                   `sell:{id:"minecraft:armor_stand",count:1,components:{${turretComponents(k)}}},maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}`,
               );
             }
