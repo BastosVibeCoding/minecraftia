@@ -24,7 +24,8 @@
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
- * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague, « 1r » pour reprendre sans le hall] [difficulté : 1 normal, 2 dur…]
+ * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague, « 1r » pour reprendre
+ *   sans le hall, « 7c » pour reprendre la vague 7 déjà en cours] [difficulté : 1 normal, 2 dur…]
  */
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { Rcon } from './rcon.js';
@@ -34,6 +35,8 @@ const [rconHost = 'localhost', firstDelay = '60', resumeWave = '1', power = '1']
 const GAME_OVER_MARK = '/tmp/partie-finie';
 /** « 1r » : reprise à la vague 1 d'une partie déjà lancée (sans repasser par le hall). */
 const resuming = resumeWave.endsWith('r') && !existsSync(GAME_OVER_MARK);
+/** « 7c » : la vague 7 est déjà en cours (ses monstres sont là) : on la reprend sans rien faire apparaître. */
+const continuing = resumeWave.endsWith('c') && !existsSync(GAME_OVER_MARK);
 const firstWave = existsSync(GAME_OVER_MARK) ? '1' : String(Number.parseInt(resumeWave, 10));
 rmSync(GAME_OVER_MARK, { force: true });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -44,6 +47,8 @@ const SPAWNS: [number, number][] = [
 ];
 /** Points d'apparition au nord, derrière le château (une vague sur trois attaque par là). */
 const NORTH_SPAWNS: [number, number][] = [[-30, -50], [0, -55], [30, -50], [-50, -30], [50, -30]];
+/** Préfixe des étiquettes de ce lancement du script (les numéros ne se mélangent pas avec ceux d'un lancement précédent). */
+const RUN = Date.now().toString(36);
 const KING = '@e[tag=roi,limit=1]';
 /** Équipement incassable et réparé : seulement les objets qui ont une durabilité (flèches et blocs intacts). */
 const UNBREAKABLE =
@@ -756,8 +761,10 @@ async function main(): Promise<void> {
   // pas de messages de commandes ; les monstres ne lâchent rien (ni objets ni expérience)
   for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false', 'doMobLoot false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
+  // les tourelles déjà posées (lancement précédent du script) seront reprises en main
+  await rcon.run('tag @e[tag=tourelle] remove suivie');
   await rcon.run('scoreboard objectives add partie dummy');
-  if (firstWave === '1' && !resuming) {
+  if (firstWave === '1' && !resuming && !continuing) {
     await lobby(rcon);
     await newGame(rcon);
   } else {
@@ -1182,8 +1189,10 @@ async function main(): Promise<void> {
 
   await rcon.run('scoreboard objectives add record dummy');
   const best = await score('#meilleur', 'record');
-  await say('Défendez le Roi !', `Préparez-vous, puis marchez sur la plaque dorée${best ? ` · record : vague ${best}` : ''}`);
-  await waitForStart(Number(firstWave), Number(firstDelay) > 0 ? Math.min(Number(firstDelay), 10) : 0, 'red');
+  if (!continuing) {
+    await say('Défendez le Roi !', `Préparez-vous, puis marchez sur la plaque dorée${best ? ` · record : vague ${best}` : ''}`);
+    await waitForStart(Number(firstWave), Number(firstDelay) > 0 ? Math.min(Number(firstDelay), 10) : 0, 'red');
+  }
 
   /** Monstres des vagues encore en vie : étiquette unique → nom, vie maximale, dernière vie affichée. */
   const tracked = new Map<string, { name: string; max: number; shown: number; color?: string; elite?: string; split?: boolean; pos?: string }>();
@@ -1193,35 +1202,37 @@ async function main(): Promise<void> {
     const total = Math.round((4 + 3 * n) * p);
     const theme = waveTheme(n);
     const boss = n % (p > 1 ? 3 : 5) === 0;
+    // reprise d'une vague déjà en cours : ni annonce ni apparition, on surveille les monstres déjà là
+    const continuingNow = continuing && n === Number(firstWave);
     await rcon.run('kill @e[tag=marchenoir]');
     abilityUsed.clear();
     if (n === 21) {
       await say('Mode Infini !', 'Les vagues ne s’arrêteront plus : battez le record');
       await kingSays(pick(KING_LINES.infini));
     }
-    await kingSays(pick(boss || n % 10 === 0 || n % 15 === 0 || n === 20 ? KING_LINES.boss : KING_LINES.vague));
-    await say(n > 20 ? `Vague ${n} (Infini)` : `Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
+    if (!continuingNow) await kingSays(pick(boss || n % 10 === 0 || n % 15 === 0 || n === 20 ? KING_LINES.boss : KING_LINES.vague));
+    if (!continuingNow) await say(n > 20 ? `Vague ${n} (Infini)` : `Vague ${n}`, boss ? 'Un Zombie Géant et son Nécromancien approchent…' : theme === 'araignées' ? 'Vague des araignées : elles escaladent les murs !' : theme === 'squelettes' ? 'Vague des archers squelettes !' : `${total} monstres`);
     await rcon.run(`bossbar set minecraft:vague max ${total}`);
     // nuit de sang toutes les 10 vagues ; une vague sur trois attaque aussi par le nord
     const bloodNight = n % 10 === 0;
     const northFront = n % 3 === 0;
-    if (bloodNight) {
+    if (bloodNight && !continuingNow) {
       await rcon.run('time set midnight');
       await say('Nuit de sang !', 'Les monstres ont 50 % de vie en plus');
     } else if (northFront) {
       await rcon.run('title @a actionbar {"text":"Attention : ils attaquent aussi par le nord !","color":"red"}');
     }
-    for (let i = 0; i < total; i++) {
+    for (let i = 0; i < (continuingNow ? 0 : total); i++) {
       const spawns = northFront && i % 2 === 1 ? NORTH_SPAWNS : SPAWNS;
       const [x, z] = spawns[i % spawns.length]!;
-      const id = `m${nextMob++}`;
+      const id = `m${RUN}_${nextMob++}`;
       const mob = mobCommand(n, i, x + ((i * 7) % 5) - 2, z + ((i * 3) % 5) - 2, p, id, bloodNight);
       await rcon.run(mob.command);
       tracked.set(id, { name: mob.name, max: mob.health, shown: mob.health, color: mob.color, ...(mob.elite ? { elite: mob.elite } : {}) });
       if (i % 4 === 3) await sleep(1000);
     }
-    if (boss) {
-      const id = `m${nextMob++}`;
+    if (boss && !continuingNow) {
+      const id = `m${RUN}_${nextMob++}`;
       const hp = 60 + 5 * n;
       await rcon.run(
         `summon minecraft:evoker 0 -60 50 {Tags:["vague","${id}"],PersistenceRequired:1b,CustomName:'${healthBar('Nécromancien', hp, hp)}',CustomNameVisible:1b,` +
@@ -1231,13 +1242,13 @@ async function main(): Promise<void> {
     }
     // boss uniques : Chef des pillards (toutes les 10 vagues), Roi des zombies (toutes les 15), Wither affaibli (vague 20)
     const extraBoss = async (command: string, name: string, hp: number, count: number) => {
-      const id = `m${nextMob++}`;
+      const id = `m${RUN}_${nextMob++}`;
       await rcon.run(command.replace('TAGS', `Tags:["vague","${id}"]`).replace('NAME', `CustomName:'${healthBar(name, hp, hp)}',CustomNameVisible:1b`));
       tracked.set(id, { name, max: hp, shown: hp });
       extra += count;
     };
     let extra = boss ? 1 : 0;
-    if (n % 10 === 0) {
+    if (n % 10 === 0 && !continuingNow) {
       const hp = 150 + 10 * n;
       await extraBoss(
         `summon minecraft:ravager 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},{id:"minecraft:generic.follow_range",base:64}],` +
@@ -1245,7 +1256,7 @@ async function main(): Promise<void> {
         'Chef des pillards', hp, 2,
       );
     }
-    if (n % 15 === 0) {
+    if (n % 15 === 0 && !continuingNow) {
       const hp = 200 + 10 * n;
       await extraBoss(
         `summon minecraft:zombie 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:${hp}f,ArmorItems:[{},{},{},{id:"minecraft:golden_helmet",count:1,components:{"minecraft:unbreakable":{}}}],` +
@@ -1254,7 +1265,7 @@ async function main(): Promise<void> {
       );
     }
     // le Warden, boss rare toutes les 12 vagues
-    if (n % 12 === 0) {
+    if (n % 12 === 0 && !continuingNow) {
       await extraBoss(
         'summon minecraft:warden 0 -60 52 {TAGS,NAME,PersistenceRequired:1b,Health:250f,attributes:[{id:"minecraft:generic.max_health",base:250},{id:"minecraft:generic.follow_range",base:64}]}',
         'Warden', 250, 1,
@@ -1262,16 +1273,16 @@ async function main(): Promise<void> {
       await rcon.run('title @a actionbar {"text":"Le Warden sort des profondeurs… abattez-le de loin !","color":"dark_aqua"}');
     }
     // shulkers postés sur les remparts nord : leurs projectiles font léviter
-    if (n % 6 === 0 && n + p - 1 >= 6) {
+    if (n % 6 === 0 && n + p - 1 >= 6 && !continuingNow) {
       for (const sx of [-14, 14]) {
         await extraBoss(`summon minecraft:shulker ${sx} -50 -20 {TAGS,NAME,PersistenceRequired:1b,Health:40f,attributes:[{id:"minecraft:generic.max_health",base:40}]}`, 'Shulker', 40, 1);
       }
     }
-    if (n === 20) {
+    if (n === 20 && !continuingNow) {
       await extraBoss('summon minecraft:wither 0 -45 50 {TAGS,NAME,PersistenceRequired:1b,Health:150f}', 'Wither affaibli', 150, 1);
       await rcon.run('title @a actionbar {"text":"Le boss final : le Wither !","color":"dark_purple"}');
     }
-    await rcon.run(`bossbar set minecraft:vague max ${total + extra}`);
+    await rcon.run(`bossbar set minecraft:vague max ${continuingNow ? Math.max(1, number(await rcon.run('execute if entity @e[tag=vague]'))) : total + extra}`);
     let kingCalled = false;
     let eventDone = false;
     // tour de siège (une vague sur six) : une rampe qui monte marche après marche contre le mur est
@@ -1408,9 +1419,10 @@ async function main(): Promise<void> {
       for (let t = 0; t < 5; t++) {
         await rcon.run('tag @e[tag=tourelle,tag=!suivie,limit=1] add nouvelle');
         if (!/passed/.test(await rcon.run('execute if entity @e[tag=nouvelle]'))) break;
-        const id = `t${nextTurret++}`;
-        let owner: string | undefined;
-        for (const name of online) {
+        const id = `t${RUN}_${nextTurret++}`;
+        // propriétaire d'origine (étiquette proprio_…) si la tourelle a déjà été suivie, sinon le joueur le plus proche
+        let owner = /"proprio_(\w+)"/.exec(await rcon.run('data get entity @e[tag=nouvelle,limit=1] Tags'))?.[1];
+        for (const name of owner ? [] : online) {
           if (/passed/.test(await rcon.run(`execute at ${name} if entity @e[tag=nouvelle,distance=..8]`))) {
             owner = name;
             break;
