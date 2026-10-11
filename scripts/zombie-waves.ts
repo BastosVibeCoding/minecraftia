@@ -18,7 +18,7 @@
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
- * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague] [difficulté : 1 normal, 2 dur…]
+ * Usage : node dist/scripts/zombie-waves.js [hôte RCON] [secondes avant la 1re vague] [numéro de la 1re vague, « 1r » pour reprendre sans le hall] [difficulté : 1 normal, 2 dur…]
  */
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { Rcon } from './rcon.js';
@@ -26,7 +26,9 @@ import { Rcon } from './rcon.js';
 const [rconHost = 'localhost', firstDelay = '60', resumeWave = '1', power = '1'] = process.argv.slice(2);
 /** Marque laissée dans le conteneur après une défaite : au redémarrage, nouvelle partie depuis la vague 1. */
 const GAME_OVER_MARK = '/tmp/partie-finie';
-const firstWave = existsSync(GAME_OVER_MARK) ? '1' : resumeWave;
+/** « 1r » : reprise à la vague 1 d'une partie déjà lancée (sans repasser par le hall). */
+const resuming = resumeWave.endsWith('r') && !existsSync(GAME_OVER_MARK);
+const firstWave = existsSync(GAME_OVER_MARK) ? '1' : String(Number.parseInt(resumeWave, 10));
 rmSync(GAME_OVER_MARK, { force: true });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -620,7 +622,12 @@ async function main(): Promise<void> {
       );
       await rcon.run('bossbar set minecraft:vague players @a');
       await kingAlive();
-      if (ready && /passed/.test(await rcon.run(`execute if block ${WAVE_START} minecraft:light_weighted_pressure_plate[power=1..]`))) return;
+      // plaque enfoncée : n'importe quelle puissance sauf 0 (les états n'acceptent pas d'intervalle)
+      const pressed =
+        ready &&
+        /passed/.test(await rcon.run(`execute if block ${WAVE_START} minecraft:light_weighted_pressure_plate`)) &&
+        /passed/.test(await rcon.run(`execute unless block ${WAVE_START} minecraft:light_weighted_pressure_plate[power=0]`));
+      if (pressed) return;
       await sleep(1000);
     }
   };
@@ -640,7 +647,7 @@ async function main(): Promise<void> {
   for (const rule of ['logAdminCommands false', 'sendCommandFeedback false', 'commandBlockOutput false']) await rcon.run(`gamerule ${rule}`);
   await setUpShop(rcon);
   await rcon.run('scoreboard objectives add partie dummy');
-  if (firstWave === '1') {
+  if (firstWave === '1' && !resuming) {
     await lobby(rcon);
     await newGame(rcon);
   } else {
