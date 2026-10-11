@@ -701,8 +701,24 @@ async function main(): Promise<void> {
   const kills = new Map<string, number>();
   const score = async (name: string, objective: string) =>
     Number(/has (-?\d+)/.exec(await rcon.run(`scoreboard players get ${name} ${objective}`))?.[1] ?? 0);
+  /** Un passage à la fois : sinon les commandes s'accumulent dans la file RCON et tout prend du retard. */
+  let busy = false;
+  /** Compte à rebours de réapparition, à part pour ne pas retenir les autres joueurs ni le passage suivant. */
+  const respawn = async (name: string) => {
+    for (let s = RESPAWN_S; s > 0; s--) {
+      await rcon.run(`title ${name} actionbar {"text":"Réapparition dans ${s} s","color":"red"}`);
+      await sleep(1000);
+    }
+    await rcon.run(`tp ${name} 0 -60 12`);
+    await rcon.run(`gamemode survival ${name}`);
+    await rcon.run(`effect give ${name} minecraft:resistance 3 4 true`);
+    waiting.delete(name);
+  };
   setInterval(() => {
+    if (busy) return;
+    busy = true;
     void (async () => {
+      try {
       const online = (await rcon.run('list')).split(':').slice(1).join(':').split(',').map((s) => s.trim()).filter(Boolean);
       for (const name of online) {
         const k = await score(name, 'tues');
@@ -886,14 +902,10 @@ async function main(): Promise<void> {
         waiting.add(name);
         await rcon.run(`scoreboard players set ${name} morts 0`);
         await rcon.run(`gamemode spectator ${name}`);
-        for (let s = RESPAWN_S; s > 0; s--) {
-          await rcon.run(`title ${name} actionbar {"text":"Réapparition dans ${s} s","color":"red"}`);
-          await sleep(1000);
-        }
-        await rcon.run(`tp ${name} 0 -60 12`);
-        await rcon.run(`gamemode survival ${name}`);
-        await rcon.run(`effect give ${name} minecraft:resistance 3 4 true`);
-        waiting.delete(name);
+        void respawn(name);
+      }
+      } finally {
+        busy = false;
       }
     })();
   }, 1000);
