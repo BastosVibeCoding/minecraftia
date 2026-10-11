@@ -1047,6 +1047,9 @@ async function main(): Promise<void> {
             await rcon.run('title @a title {"text":""}');
           }
         }
+        // tourelle posée près de lui (6 blocs) et pas encore attribuée : elle est à lui, même pendant une pause
+        await rcon.run(`execute at ${name} run tag @e[tag=tourelle,tag=!possedee,distance=..6] add proprio_${name}`);
+        await rcon.run(`tag @e[tag=proprio_${name},tag=!possedee] add possedee`);
         // catalogue personnel : ouverture (/trigger boutique) et achats (/trigger achat set <numéro>)
         {
           await rcon.run(`scoreboard players enable ${name} boutique`);
