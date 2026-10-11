@@ -413,8 +413,7 @@ const SHOP: { price: number; item: string; count?: number; components?: string }
   { price: 5, item: 'lava_bucket' },
   { price: 8, item: 'snow_golem_spawn_egg' },
   { price: 2, item: 'firework_rocket', count: 16, components: '"minecraft:fireworks":{flight_duration:2b}' },
-  // tourelles : supports d'armure verrouillés à poser où l'on veut, qui tirent sur les monstres
-  ...TURRET_KINDS.map((k) => ({ price: k.price, item: 'armor_stand', components: turretComponents(k) })),
+  // tourelles : vendues dans la boutique personnelle de chaque joueur (prix croissant avec ses tourelles)
   { price: 10, item: 'paper', components: scrollComponents(TURRET_UPGRADE) },
   { price: 8, item: 'diamond_boots', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
   { price: 10, item: 'diamond_helmet', components: '"minecraft:enchantments":{levels:{"minecraft:protection":2}}' },
@@ -946,14 +945,18 @@ async function main(): Promise<void> {
           const slot = PASSIVE_NPC_SLOTS[online.indexOf(name) % PASSIVE_NPC_SLOTS.length]!;
           if (!/passed/.test(await rcon.run(`execute if entity ${npc}`))) {
             await rcon.run(
-              `summon minecraft:villager ${slot} {CustomName:'{"text":"Passifs de ${name}","color":"light_purple"}',CustomNameVisible:1b,` +
+              `summon minecraft:villager ${slot} {CustomName:'{"text":"Passifs et tourelles de ${name}","color":"light_purple"}',CustomNameVisible:1b,` +
                 `NoAI:1b,Invulnerable:1b,PersistenceRequired:1b,Silent:1b,Tags:["passifs","passifs_${name}"],Rotation:[0f,0f],` +
                 'VillagerData:{profession:"minecraft:cleric",level:5,type:"minecraft:plains"},Offers:{Recipes:[]}}',
             );
             passiveShop.delete(name);
           }
           const blessingLevel = await score('#equipe', `p_${BLESSING.key}`);
-          const signature = [...PASSIVES.map((p) => levels.get(p.key) ?? 0), blessingLevel].join(',');
+          // tourelles possédées : posées (étiquette du propriétaire) ou encore dans l'inventaire
+          const placed = number(await rcon.run(`execute if entity @e[tag=tourelle,tag=proprio_${name}]`));
+          const carried = Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:armor_stand 0`))?.[1] ?? 0);
+          const owned = placed + carried;
+          const signature = [...PASSIVES.map((p) => levels.get(p.key) ?? 0), blessingLevel, owned].join(',');
           if (passiveShop.get(name) !== signature) {
             passiveShop.set(name, signature);
             await rcon.run(`data modify entity ${npc} Offers.Recipes set value []`);
@@ -963,6 +966,13 @@ async function main(): Promise<void> {
               await rcon.run(
                 `data modify entity ${npc} Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${passivePrice(p, level)}},sell:${levelScroll(p, level)},` +
                   'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+              );
+            }
+            // chaque tourelle possédée rend la suivante 50 % plus chère
+            for (const k of TURRET_KINDS) {
+              await rcon.run(
+                `data modify entity ${npc} Offers.Recipes append value {buy:{id:"minecraft:emerald",count:${Math.round(k.price * (1 + 0.5 * owned))}},` +
+                  `sell:{id:"minecraft:armor_stand",count:1,components:{${turretComponents(k)}}},maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}`,
               );
             }
           }
@@ -1266,6 +1276,7 @@ async function main(): Promise<void> {
           }
         }
         await rcon.run(`tag @e[tag=nouvelle] add ${id}`);
+        if (owner) await rcon.run(`tag @e[tag=nouvelle] add proprio_${owner}`);
         await rcon.run('tag @e[tag=nouvelle] add suivie');
         await rcon.run('tag @e[tag=nouvelle] remove nouvelle');
         turrets.set(id, owner);
