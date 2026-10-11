@@ -21,7 +21,7 @@
  * Chaque niveau de passif coûte plus cher que le précédent ; passifs, Bénédiction du Roi et tourelles s'achètent
  * au catalogue personnel (livre et /trigger boutique), dans le chat, tous en même temps. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
- * Rôles jusqu'au niveau 20 (un niveau toutes les 10 victimes) et arbre de compétences par classe (/trigger arbre).
+ * Rôles jusqu'au niveau 20 (chaque niveau demande plus de victimes) et arbre de compétences par classe (/trigger arbre).
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -184,7 +184,7 @@ interface Role {
   name: string;
   color: string;
   bonus: Record<string, number>;
-  /** Bonus ajouté à chaque niveau du rôle (un niveau toutes les ROLE_KILLS_PER_LEVEL victimes). */
+  /** Bonus ajouté à chaque niveau du rôle (voir roleLevelFor : chaque niveau demande plus de victimes). */
   perLevel: Record<string, number>;
   kit: string[];
   /** Capacité spéciale, une fois par vague (objet à utiliser d'un clic droit). */
@@ -320,7 +320,14 @@ const xpForLevel = (level: number) => (level <= 15 ? 2 * level + 7 : level <= 30
 /** Prix d'un changement de classe chez le Maître des rôles (le niveau du rôle, lié aux victimes, est gardé). */
 const ROLE_CHANGE_PRICE = 50;
 /** Victimes par niveau de rôle, et niveau maximal. */
-const ROLE_KILLS_PER_LEVEL = 10;
+/** Victimes cumulées pour atteindre le niveau L : L × (L + 6) (7 pour le niveau 1, puis 9, 11, 13… de plus ; 520 au niveau 20). */
+const killsForRoleLevel = (level: number) => level * (level + 6);
+/** Niveau de rôle atteint avec `kills` victimes. */
+const roleLevelFor = (kills: number) => {
+  let level = 0;
+  while (level < ROLE_MAX_LEVEL && killsForRoleLevel(level + 1) <= kills) level++;
+  return level;
+};
 const ROLE_MAX_LEVEL = 20;
 /** Objet de capacité (canne à carotte : son utilisation est comptée par une statistique du jeu). */
 const abilityItem = (r: Role) =>
@@ -486,7 +493,6 @@ async function newGame(rcon: Rcon): Promise<void> {
   await rcon.run('scoreboard players reset * tourelles');
   // le prestige ne vaut que pour la partie en cours
   await rcon.run('scoreboard players reset * niv_prestige');
-  await rcon.run('scoreboard players set #migre niv_prestige 1');
   await rcon.run('effect give @a minecraft:instant_health 1 5 true');
   await rcon.run('effect give @a minecraft:saturation 5 5 true');
 }
@@ -600,7 +606,7 @@ const PASSIVES: Passive[] = [
 /**
  * Prestige : +1 émeraude par monstre tué de sa main, par niveau, jusqu'à la fin de la partie (score `prestige`, remis à
  * zéro à chaque nouvelle partie). Chaque étape coûte 100 émeraudes et fait repartir de zéro : inventaire vidé (kit de
- * départ redonné) et passifs remis à 0 ; le rôle et la Bénédiction du Roi (passif d'équipe) restent.
+ * départ redonné), passifs remis à 0, classe et arbre à rechoisir (ticket donné) ; la Bénédiction du Roi reste.
  */
 const PRESTIGE_PRICES = [100, 100, 100, 100, 100];
 /** Victimes des tourelles : une émeraude toutes les deux pour le poseur. */
@@ -754,7 +760,7 @@ async function main(): Promise<void> {
     } else if (r.key === 'invocateur') {
       const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
       if (uuid) {
-        const level = Math.min(ROLE_MAX_LEVEL, Math.floor((await score(name, 'tues')) / ROLE_KILLS_PER_LEVEL));
+        const level = roleLevelFor(await score(name, 'tues'));
         const stats = petStats(name, level);
         for (let i = 0; i < PET_CALL + (has(name, 'alpha') ? 3 : 0); i++) await rcon.run(petCommand(name, uuid, stats.hp, stats.damage, ['pet', `renfort_${name}`]));
         await rcon.run(`execute at ${name} run playsound minecraft:entity.wolf.howl master @a ~ ~ ~ 2 1`);
@@ -859,11 +865,10 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add arbre trigger');
   await rcon.run('scoreboard objectives add competence trigger');
   // le niveau de prestige est gardé dans « niv_prestige » ; « prestige » est la commande /trigger prestige
-  if (!/has 1/.test(await rcon.run('scoreboard players get #migre niv_prestige'))) {
-    await rcon.run('scoreboard objectives add niv_prestige dummy');
-    await rcon.run('scoreboard players operation * niv_prestige = * prestige');
+  // (recopie de l'ancien compteur, une seule fois : quand « niv_prestige » vient d'être créé, et pour les joueurs seulement)
+  if (/Created/.test(await rcon.run('scoreboard objectives add niv_prestige dummy'))) {
+    await rcon.run('execute as @a run scoreboard players operation @s niv_prestige = @s prestige');
     await rcon.run('scoreboard objectives remove prestige');
-    await rcon.run('scoreboard players set #migre niv_prestige 1');
   }
   await rcon.run('scoreboard objectives add prestige trigger');
   await rcon.run('scoreboard objectives add boutique trigger');
@@ -952,7 +957,7 @@ async function main(): Promise<void> {
             await rcon.run(`tellraw ${name} {"text":"Prestige ${current} : c’est le maximum.","color":"gold"}`);
           } else if (prestigeAsk === 1) {
             await rcon.run(`tellraw ${name} [{"text":"★ Prestige ${current} → ${level} : ","color":"gold","bold":true},{"text":"${price} émeraudes. +${level} émeraude${level > 1 ? 's' : ''} par monstre tué de ta main jusqu’à la fin de la partie.","color":"yellow"}]`);
-            await rcon.run(`tellraw ${name} {"text":"Attention : tu repars de zéro (inventaire vidé, kit de départ, passifs à 0). Pose tes tourelles avant !","color":"red"}`);
+            await rcon.run(`tellraw ${name} {"text":"Attention : tu repars de zéro (inventaire vidé, kit de départ, passifs à 0, classe à rechoisir). Pose tes tourelles avant !","color":"red"}`);
             await rcon.run(`tellraw ${name} {"text":"[ Passer Prestige ${level} ]","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger prestige set 2"},"hoverEvent":{"action":"show_text","contents":"${price} émeraudes"}}`);
           } else {
             const owned = Number(/Found (\d+)/.exec(await rcon.run(`clear ${name} minecraft:emerald 0`))?.[1] ?? 0);
@@ -970,6 +975,12 @@ async function main(): Promise<void> {
                 await rcon.run(`scoreboard players reset ${name} p_${passive.key}`);
                 levels.set(passive.key, 0);
               }
+              // la classe aussi : plus de rôle ni d'arbre, un ticket pour en rechoisir une
+              await rcon.run(`scoreboard players set ${name} role 0`);
+              await rcon.run(`scoreboard players set ${name} arbre_acquis 0`);
+              await rcon.run(`kill @e[tag=pet_${name}]`);
+              levels.set('role', 0);
+              await rcon.run(`give ${name} minecraft:${ROLE_TICKET_ITEM}`);
               await rcon.run(`tellraw @a {"text":"${name} passe Prestige ${level} et repart de zéro !","color":"gold"}`);
               await rcon.run(`title ${name} times 5 40 10`);
               await rcon.run(`title ${name} subtitle {"text":"Prestige ${level} : +${level} émeraude${level > 1 ? 's' : ''} par monstre jusqu’à la fin de la partie","color":"gold"}`);
@@ -1038,7 +1049,7 @@ async function main(): Promise<void> {
           if (!isSummoner) {
             await rcon.run(`kill @e[tag=pet_${name}]`);
           } else {
-            const level = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
+            const level = roleLevelFor(k);
             const wanted = PET_BASE + Math.floor(level / 5) + (has(name, 'meute') ? 1 : 0) + (has(name, 'grande_meute') ? 1 : 0);
             const stats = petStats(name, level);
             // tous ses loups (meute et renforts) suivent son niveau et son arbre : dégâts et vie maximale
@@ -1056,7 +1067,7 @@ async function main(): Promise<void> {
         const myRoleId = await score(name, 'role');
         const myRole = ROLES.find((r) => r.id === myRoleId);
         if (myRole) {
-          const roleLevel = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
+          const roleLevel = roleLevelFor(k);
           const known = roleLevels.get(name);
           roleLevels.set(name, roleLevel);
           if (known !== undefined && roleLevel > known) {
@@ -1222,7 +1233,7 @@ async function main(): Promise<void> {
           }
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
-        const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
+        const roleLevel = role ? roleLevelFor(k) : 0;
         // arbre de compétences : masque des compétences apprises, menu (/trigger arbre) et apprentissage (/trigger competence)
         let mask = await score(name, 'arbre_acquis');
         skills.set(name, { role: role?.key, mask });
@@ -1290,7 +1301,7 @@ async function main(): Promise<void> {
         }
         // barre d'expérience = progression du rôle (niveau affiché au-dessus, barre jusqu'au niveau suivant)
         if (role) {
-          const progress = roleLevel >= ROLE_MAX_LEVEL ? 1 : (k % ROLE_KILLS_PER_LEVEL) / ROLE_KILLS_PER_LEVEL;
+          const progress = roleLevel >= ROLE_MAX_LEVEL ? 1 : (k - killsForRoleLevel(roleLevel)) / (killsForRoleLevel(roleLevel + 1) - killsForRoleLevel(roleLevel));
           const xpBar = `${roleLevel}:${progress}`;
           if (xpShown.get(name) !== xpBar) {
             xpShown.set(name, xpBar);
@@ -1311,9 +1322,10 @@ async function main(): Promise<void> {
           if (prestigeLevel > 0) parts.unshift(`{"text":"★ Prestige ${prestigeLevel} · ","color":"gold","bold":true}`);
           if (role) {
             const ready = (abilityUsed.get(name) ?? 0) < (has(name, 'double') ? 2 : 1) ? ' ✦' : '';
-            const into = roleLevel >= ROLE_MAX_LEVEL ? ROLE_KILLS_PER_LEVEL : k % ROLE_KILLS_PER_LEVEL;
-            const filled = Math.floor((into / ROLE_KILLS_PER_LEVEL) * 5);
-            const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${ROLE_KILLS_PER_LEVEL}`}`;
+            const step = killsForRoleLevel(roleLevel + 1) - killsForRoleLevel(roleLevel);
+            const into = roleLevel >= ROLE_MAX_LEVEL ? step : k - killsForRoleLevel(roleLevel);
+            const filled = Math.floor((into / step) * 5);
+            const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${step}`}`;
             const freePoints = roleLevel - spentPoints(mask);
             parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${freePoints > 0 ? ` (${freePoints} pt)` : ''}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
           }
