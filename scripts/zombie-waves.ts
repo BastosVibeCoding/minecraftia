@@ -21,6 +21,7 @@
  * Chaque niveau de passif coûte plus cher que le précédent ; passifs, Bénédiction du Roi et tourelles s'achètent
  * au catalogue personnel (livre et /trigger boutique), dans le chat, tous en même temps. Aucun remboursement en émeraudes (les réductions des villageois permettaient d'en fabriquer).
  * Tourelles avec une vie (abîmées par les monstres au contact, détruites à 0), réparables au parchemin.
+ * Rôles jusqu'au niveau 20 (un niveau toutes les 10 victimes) et arbre de compétences par classe (/trigger arbre).
  * Barres de vie au-dessus des monstres ; cœurs des joueurs sous leur pseudo. Équipement des joueurs incassable. Pièces : une émeraude par monstre tué, 5 par vague repoussée ; boutique : le marchand à côté du Roi.
  * Tout passe par RCON (aucun bot dans la partie).
  * À lancer avec `docker run --restart unless-stopped` : après la mort du Roi, le script s'arrête et une nouvelle partie démarre.
@@ -193,28 +194,28 @@ const ROLES: Role[] = [
   {
     id: 1, key: 'chevalier', name: '⚔ Chevalier', color: 'red',
     bonus: { 'generic.max_health': 8, 'generic.armor': 4, 'generic.knockback_resistance': 0.3 },
-    perLevel: { 'generic.max_health': 2, 'generic.armor': 1 },
+    perLevel: { 'generic.max_health': 1, 'generic.armor': 0.5 },
     ability: 'Cri de guerre',
     kit: ['diamond_sword[enchantments={levels:{"minecraft:sharpness":3}},unbreakable={}]'],
   },
   {
     id: 2, key: 'archer', name: '🏹 Archer', color: 'green',
     bonus: { 'generic.movement_speed': 0.015, 'generic.jump_strength': 0.1 },
-    perLevel: { 'generic.max_health': 2, 'generic.movement_speed': 0.003, 'generic.jump_strength': 0.02 },
+    perLevel: { 'generic.max_health': 1, 'generic.movement_speed': 0.0015, 'generic.jump_strength': 0.01 },
     ability: 'Pluie de flèches',
     kit: ['bow[enchantments={levels:{"minecraft:power":5,"minecraft:flame":1,"minecraft:punch":1,"minecraft:infinity":1}},unbreakable={}]', 'spectral_arrow 64'],
   },
   {
     id: 3, key: 'ingenieur', name: '🔧 Ingénieur', color: 'aqua',
     bonus: {},
-    perLevel: { 'generic.max_health': 2 },
+    perLevel: { 'generic.max_health': 1 },
     ability: 'Réparation',
     kit: ['cobblestone 64', 'cobblestone 64'],
   },
   {
     id: 4, key: 'soigneur', name: '✚ Soigneur', color: 'light_purple',
     bonus: {},
-    perLevel: { 'generic.max_health': 2 },
+    perLevel: { 'generic.max_health': 1 },
     ability: 'Soin de groupe',
     kit: ['splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]',
       'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]'],
@@ -222,14 +223,14 @@ const ROLES: Role[] = [
   {
     id: 5, key: 'mage', name: '✦ Mage', color: 'dark_aqua',
     bonus: {},
-    perLevel: { 'generic.max_health': 2 },
+    perLevel: { 'generic.max_health': 1 },
     ability: 'Tempête de foudre',
     kit: ['wind_charge 64', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]'],
   },
   {
     id: 6, key: 'invocateur', name: '🐺 Invocateur', color: 'gold',
     bonus: {},
-    perLevel: { 'generic.max_health': 2 },
+    perLevel: { 'generic.max_health': 1 },
     ability: 'Appel de la meute',
     kit: ['cooked_beef 32', 'bone 16'],
   },
@@ -238,21 +239,98 @@ const ROLES: Role[] = [
 const PET_BASE = 2;
 const PET_CALL = 3;
 const PET_CALL_S = 30;
+/**
+ * Arbre de compétences de chaque classe : 3 branches de 3 compétences (coût 1, 2, 3 points). Chaque niveau de rôle
+ * donne un point ; une compétence demande la précédente de sa branche. Les compétences apprises sont gardées dans le
+ * score « arbre_acquis » (un bit par compétence : branche × 3 + rang), remis à zéro à chaque changement de classe et partie.
+ */
+interface Skill {
+  key: string;
+  label: string;
+  /** Bonus d'attributs (s'ajoutent aux passifs et au rôle) ; sans bonus, l'effet est appliqué ailleurs dans le script. */
+  attr?: Record<string, number>;
+}
+const SURVIVAL: Skill[] = [
+  { key: 'armure', label: 'Armure (+2)', attr: { 'generic.armor': 2 } },
+  { key: 'vigueur', label: 'Vigueur (+3 cœurs)', attr: { 'generic.max_health': 6 } },
+  { key: 'celerite', label: 'Célérité (+10 % vitesse)', attr: { 'generic.movement_speed': 0.01 } },
+];
+const TREES: Record<string, { branches: [string, string, string]; skills: [Skill[], Skill[], Skill[]] }> = {
+  chevalier: {
+    branches: ['Défense', 'Attaque', 'Commandement'],
+    skills: [
+      [{ key: 'peau', label: 'Peau dure (+2 armure)', attr: { 'generic.armor': 2 } }, { key: 'rempart', label: 'Rempart (+4 cœurs)', attr: { 'generic.max_health': 8 } },
+        { key: 'roc', label: 'Inébranlable (recul −50 %, robustesse +4)', attr: { 'generic.knockback_resistance': 0.5, 'generic.armor_toughness': 4 } }],
+      [{ key: 'lame', label: 'Lame affûtée (+2 dégâts)', attr: { 'generic.attack_damage': 2 } }, { key: 'furie', label: 'Furie (+10 % vitesse)', attr: { 'generic.movement_speed': 0.01 } },
+        { key: 'massacre', label: 'Massacre (+3 dégâts)', attr: { 'generic.attack_damage': 3 } }],
+      [{ key: 'cri', label: 'Cri prolongé (20 s)' }, { key: 'regen_cri', label: 'Cri revigorant (régénération)' }, { key: 'aura', label: 'Aura de courage (résistance aux alliés)' }],
+    ],
+  },
+  archer: {
+    branches: ['Agilité', 'Tir', 'Survie'],
+    skills: [
+      [{ key: 'vif', label: 'Pas léger (+10 % vitesse)', attr: { 'generic.movement_speed': 0.01 } }, { key: 'bond', label: 'Bond (saut plus haut)', attr: { 'generic.jump_strength': 0.15 } },
+        { key: 'plume', label: 'Plume (pas de dégâts de chute)', attr: { 'generic.safe_fall_distance': 40 } }],
+      [{ key: 'carquois', label: 'Carquois (32 flèches par vague)' }, { key: 'faucon', label: 'Œil de faucon (monstres visibles)' }, { key: 'deluge', label: 'Déluge (Pluie de flèches ×2)' }],
+      [SURVIVAL[0]!, SURVIVAL[1]!, { key: 'esquive', label: 'Esquive (résistance permanente)' }],
+    ],
+  },
+  ingenieur: {
+    branches: ['Tourelles', 'Construction', 'Survie'],
+    skills: [
+      [{ key: 'economie', label: 'Économie (tourelles −25 %)' }, { key: 'calibre', label: 'Gros calibre (tourelles +25 % dégâts)' }, { key: 'blindage', label: 'Blindage (tourelles +50 % vie)' }],
+      [{ key: 'macon', label: 'Maçon (64 pierres par vague)' }, { key: 'entretien', label: 'Entretien (tourelles réparées à chaque vague)' }, { key: 'double', label: 'Maître d’œuvre (capacité 2 fois par vague)' }],
+      [SURVIVAL[0]!, SURVIVAL[1]!, { key: 'robuste', label: 'Robuste (recul −30 %)', attr: { 'generic.knockback_resistance': 0.3 } }],
+    ],
+  },
+  soigneur: {
+    branches: ['Aura', 'Soin', 'Survie'],
+    skills: [
+      [{ key: 'aura_large', label: 'Aura étendue (+3 blocs)' }, { key: 'aura_forte', label: 'Aura puissante (régénération II)' }, { key: 'aura_roi', label: 'Bénédiction (soigne le Roi de partout)' }],
+      [{ key: 'apothicaire', label: 'Apothicaire (2 potions par vague)' }, { key: 'soin_total', label: 'Soin total (4 cœurs bonus)' }, { key: 'double', label: 'Second souffle (capacité 2 fois par vague)' }],
+      SURVIVAL,
+    ],
+  },
+  mage: {
+    branches: ['Foudre', 'Vent', 'Survie'],
+    skills: [
+      [{ key: 'chaine', label: 'Chaîne d’éclairs (10 cibles)' }, { key: 'surcharge', label: 'Surcharge (+8 dégâts)' }, { key: 'portee', label: 'Portée (36 blocs)' }],
+      [{ key: 'reserve', label: 'Réserve (32 charges de vent par vague)' }, { key: 'givre', label: 'Givre (aura de lenteur)' }, { key: 'double', label: 'Archimage (capacité 2 fois par vague)' }],
+      SURVIVAL,
+    ],
+  },
+  invocateur: {
+    branches: ['Meute', 'Crocs', 'Survie'],
+    skills: [
+      [{ key: 'meute', label: 'Meute (+1 loup)' }, { key: 'grande_meute', label: 'Grande meute (+1 loup)' }, { key: 'alpha', label: 'Alpha (Appel +3 loups)' }],
+      [{ key: 'crocs', label: 'Crocs (loups +3 dégâts)' }, { key: 'pelage', label: 'Pelage épais (loups +20 vie)' }, { key: 'lien', label: 'Lien vital (loups régénérés)' }],
+      SURVIVAL,
+    ],
+  },
+};
+/** Compétences apprises (masque du score « arbre ») et points dépensés. */
+const learnedSkills = (role: string | undefined, mask: number): Skill[] =>
+  role && TREES[role] ? TREES[role]!.skills.flatMap((branch, b) => branch.filter((_, t) => (mask >> (b * 3 + t)) & 1)) : [];
+const spentPoints = (mask: number) => [0, 1, 2, 3, 4, 5, 6, 7, 8].reduce((sum, bit) => sum + ((mask >> bit) & 1) * ((bit % 3) + 1), 0);
+/** Attributs qui ne sont pas des passifs, avec leur valeur de base (pour les bonus de l'arbre). */
+const EXTRA_ATTRIBUTES: [string, number][] = [['generic.armor_toughness', 0], ['generic.safe_fall_distance', 3]];
+/** Points d'expérience pour remplir la barre au niveau L. */
+const xpForLevel = (level: number) => (level <= 15 ? 2 * level + 7 : level <= 30 ? 5 * level - 38 : 9 * level - 158);
+
 /** Prix d'un changement de classe chez le Maître des rôles (le niveau du rôle, lié aux victimes, est gardé). */
 const ROLE_CHANGE_PRICE = 50;
 /** Victimes par niveau de rôle, et niveau maximal. */
-const ROLE_KILLS_PER_LEVEL = 15;
-const ROLE_MAX_LEVEL = 5;
+const ROLE_KILLS_PER_LEVEL = 10;
+const ROLE_MAX_LEVEL = 20;
 /** Objet de capacité (canne à carotte : son utilisation est comptée par une statistique du jeu). */
 const abilityItem = (r: Role) =>
   `carrot_on_a_stick[custom_data={capacite:1b},unbreakable={},custom_name='{"text":"${r.ability} (clic droit)","color":"${r.color}","italic":false}']`;
 /** Commande d'apparition d'un loup de l'Invocateur, plus solide et plus fort à chaque niveau de rôle (valeurs tenues à jour ensuite). */
-const petCommand = (name: string, uuid: string, level: number, tags: string[]) => {
-  const hp = 30 + 6 * level;
+const petCommand = (name: string, uuid: string, hp: number, damage: number, tags: string[]) => {
   return (
     `execute at ${name} run summon minecraft:wolf ~1 ~ ~1 {Owner:${uuid},Tags:[${tags.map((t) => `"${t}"`).join(',')}],PersistenceRequired:1b,` +
     `CustomName:'{"text":"Loup de ${name}","color":"gold"}',Health:${hp}f,attributes:[{id:"minecraft:generic.max_health",base:${hp}},` +
-    `{id:"minecraft:generic.attack_damage",base:${4 + level}},{id:"minecraft:generic.movement_speed",base:0.35}]}`
+    `{id:"minecraft:generic.attack_damage",base:${damage}},{id:"minecraft:generic.movement_speed",base:0.35}]}`
   );
 };
 /** Ticket de rôle, donné à chaque joueur en début de partie ; c'est la monnaie du Maître des rôles. */
@@ -294,8 +372,9 @@ const BLACK_MARKET_CHANCE = 0.35;
 const CATALOGUE_BOOK =
   `written_book[custom_data={catalogue:1b},written_book_content={title:"Catalogue",author:"Le Roi",pages:['[{"text":"Catalogue\\\\n\\\\n","bold":true,"color":"dark_purple"},` +
   `{"text":"[ Ouvrir ma boutique ]","color":"dark_green","bold":true,"clickEvent":{"action":"run_command","value":"/trigger boutique"}},` +
+  `{"text":"\\\\n\\\\n[ Mon arbre de compétences ]","color":"dark_aqua","bold":true,"clickEvent":{"action":"run_command","value":"/trigger arbre"}},` +
   `{"text":"\\\\n\\\\n[ ★ Prestige ]","color":"gold","bold":true,"clickEvent":{"action":"run_command","value":"/trigger prestige"}},` +
-  `{"text":"\\\\n\\\\nPassifs et tourelles, à vos niveaux et à vos prix. Aussi : /trigger boutique, /trigger prestige.","color":"black","bold":false}]']}]`;
+  `{"text":"\\\\n\\\\nPassifs et tourelles, à vos niveaux et à vos prix. Aussi : /trigger boutique, /trigger arbre, /trigger prestige.","color":"black","bold":false}]']}]`;
 /** Numéros d'achat du catalogue : passifs (1 à 20), Bénédiction du Roi (50), tourelles (60 et plus). */
 const BUY_BLESSING = 50;
 const BUY_TURRET = 60;
@@ -403,6 +482,7 @@ async function newGame(rcon: Rcon): Promise<void> {
   for (const item of KIT) await rcon.run(`give @a minecraft:${item}`);
   await rcon.run(`give @a minecraft:${ROLE_TICKET_ITEM}`);
   await rcon.run('scoreboard players reset * role');
+  await rcon.run('scoreboard players reset * arbre_acquis');
   await rcon.run('scoreboard players reset * tourelles');
   // le prestige ne vaut que pour la partie en cours
   await rcon.run('scoreboard players reset * niv_prestige');
@@ -654,13 +734,15 @@ async function main(): Promise<void> {
   const useAbility = async (r: Role, name: string) => {
     await rcon.run(`tellraw @a {"text":"${name} : ${r.ability} !","color":"${r.color}","bold":true}`);
     if (r.key === 'chevalier') {
-      await rcon.run('effect give @a minecraft:strength 10 1 true');
-      await rcon.run('effect give @a minecraft:resistance 10 0 true');
+      const duration = has(name, 'cri') ? 20 : 10;
+      await rcon.run(`effect give @a minecraft:strength ${duration} 1 true`);
+      await rcon.run(`effect give @a minecraft:resistance ${duration} 0 true`);
+      if (has(name, 'regen_cri')) await rcon.run(`effect give @a minecraft:regeneration ${duration} 1 true`);
       await rcon.run(`execute at ${name} run playsound minecraft:event.raid.horn master @a ~ ~ ~ 4 1`);
       await rcon.run(`execute at ${name} run particle minecraft:angry_villager ~ ~2 ~ 1 0.5 1 0 20`);
     } else if (r.key === 'archer') {
       const zone = `execute at ${name} anchored eyes positioned ^ ^ ^15`;
-      await rcon.run(`${zone} as @e[tag=vague,distance=..7] run damage @s 10 minecraft:arrow by ${name}`);
+      await rcon.run(`${zone} as @e[tag=vague,distance=..${has(name, 'deluge') ? 10 : 7}] run damage @s ${has(name, 'deluge') ? 20 : 10} minecraft:arrow by ${name}`);
       for (const [ox, oz] of [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3], [2, 2], [-2, -2], [2, -2], [-2, 2]]) {
         await rcon.run(`${zone} run summon minecraft:arrow ~${ox} ~12 ~${oz} {pickup:0b,Motion:[0.0,-2.0,0.0]}`);
       }
@@ -673,22 +755,24 @@ async function main(): Promise<void> {
       const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
       if (uuid) {
         const level = Math.min(ROLE_MAX_LEVEL, Math.floor((await score(name, 'tues')) / ROLE_KILLS_PER_LEVEL));
-        for (let i = 0; i < PET_CALL; i++) await rcon.run(petCommand(name, uuid, level, ['pet', `renfort_${name}`]));
+        const stats = petStats(name, level);
+        for (let i = 0; i < PET_CALL + (has(name, 'alpha') ? 3 : 0); i++) await rcon.run(petCommand(name, uuid, stats.hp, stats.damage, ['pet', `renfort_${name}`]));
         await rcon.run(`execute at ${name} run playsound minecraft:entity.wolf.howl master @a ~ ~ ~ 2 1`);
         setTimeout(() => void rcon.run(`kill @e[tag=renfort_${name}]`), PET_CALL_S * 1000);
       }
     } else if (r.key === 'mage') {
       // foudre sur les 6 monstres les plus proches (24 blocs), dégâts comptés pour le Mage
-      await rcon.run(`execute at ${name} run tag @e[tag=vague,distance=..24,limit=6,sort=nearest] add foudre`);
+      await rcon.run(`execute at ${name} run tag @e[tag=vague,distance=..${has(name, 'portee') ? 36 : 24},limit=${has(name, 'chaine') ? 10 : 6},sort=nearest] add foudre`);
       // effet visuel seulement : une vraie foudre transformerait le Roi (villageois) en sorcière et blesserait les joueurs
       await rcon.run('execute at @e[tag=foudre] run particle minecraft:flash ~ ~1 ~ 0 0 0 0 1');
       await rcon.run('execute at @e[tag=foudre] run particle minecraft:electric_spark ~ ~1 ~ 0.3 1 0.3 0.5 30');
       await rcon.run('execute at @e[tag=foudre] run playsound minecraft:entity.lightning_bolt.thunder master @a ~ ~ ~ 0.8 1.2');
-      await rcon.run(`execute as @e[tag=foudre] run damage @s 10 minecraft:lightning_bolt by ${name}`);
+      await rcon.run(`execute as @e[tag=foudre] run damage @s ${has(name, 'surcharge') ? 18 : 10} minecraft:lightning_bolt by ${name}`);
       await rcon.run('tag @e[tag=foudre] remove foudre');
     } else if (r.key === 'soigneur') {
       await rcon.run('effect give @a minecraft:instant_health 1 3 true');
       await rcon.run('effect give @a minecraft:regeneration 10 1 true');
+      if (has(name, 'soin_total')) await rcon.run('effect give @a minecraft:absorption 30 1 true');
       await rcon.run(`effect give ${KING} minecraft:instant_health 1 3 true`);
       await rcon.run('execute at @a run particle minecraft:heart ~ ~2 ~ 0.5 0.5 0.5 0 6');
       await rcon.run(`execute at ${name} run playsound minecraft:block.beacon.power_select master @a ~ ~ ~ 1 1.4`);
@@ -771,6 +855,9 @@ async function main(): Promise<void> {
   await rcon.run('scoreboard objectives add morts deathCount');
   for (const p of [...PASSIVES, BLESSING, REPAIR, ...UPGRADES]) await rcon.run(`scoreboard objectives add p_${p.key} dummy`);
   await rcon.run('scoreboard objectives add role dummy');
+  await rcon.run('scoreboard objectives add arbre_acquis dummy');
+  await rcon.run('scoreboard objectives add arbre trigger');
+  await rcon.run('scoreboard objectives add competence trigger');
   // le niveau de prestige est gardé dans « niv_prestige » ; « prestige » est la commande /trigger prestige
   if (!/has 1/.test(await rcon.run('scoreboard players get #migre niv_prestige'))) {
     await rcon.run('scoreboard objectives add niv_prestige dummy');
@@ -790,7 +877,17 @@ async function main(): Promise<void> {
   const turretBank = new Map<string, number>();
   await rcon.run('scoreboard objectives add capacite minecraft.used:minecraft.carrot_on_a_stick');
   /** Joueurs ayant déjà utilisé leur capacité pendant la vague en cours (vidé à chaque vague). */
-  const abilityUsed = new Set<string>();
+  /** Utilisations de la capacité pendant la vague en cours, par joueur (vidé à chaque vague). */
+  const abilityUsed = new Map<string, number>();
+  /** Rôle et compétences apprises de chaque joueur (tenus à jour par la boucle des joueurs). */
+  const skills = new Map<string, { role?: string; mask: number }>();
+  const has = (name: string | undefined, key: string) =>
+    !!name && learnedSkills(skills.get(name)?.role, skills.get(name)?.mask ?? 0).some((sk) => sk.key === key);
+  /** Stats des loups d'un Invocateur selon son niveau et ses compétences. */
+  const petStats = (name: string, level: number) => ({
+    hp: 30 + 3 * level + (has(name, 'pelage') ? 20 : 0),
+    damage: 4 + Math.floor(level / 2) + (has(name, 'crocs') ? 3 : 0),
+  });
   /** Dernier niveau de rôle connu par joueur (annonce des montées de niveau). */
   const roleLevels = new Map<string, number>();
   /** Dernière progression montrée dans la barre d'expérience, par joueur. */
@@ -924,6 +1021,7 @@ async function main(): Promise<void> {
         for (const r of ROLES) {
           if (!/Removed/.test(await rcon.run(`clear ${name} minecraft:paper[minecraft:custom_data={role:"${r.key}"}]`))) continue;
           await rcon.run(`scoreboard players set ${name} role ${r.id}`);
+          await rcon.run(`scoreboard players set ${name} arbre_acquis 0`);
           const kit = r.key === 'ingenieur' ? [...r.kit, ...TURRET_KINDS.filter((k) => k.tag === 'fleche' || k.tag === 'canon').map((k) => `armor_stand[${turretItemArgs(k)}]`), `paper[${turretUpgradeItemArgs()}] 2`] : r.kit;
           for (const item of kit) await rcon.run(`give ${name} minecraft:${item}`);
           if (r.key === 'ingenieur') await rcon.run(`scoreboard players add ${name} tourelles 2`);
@@ -941,14 +1039,16 @@ async function main(): Promise<void> {
             await rcon.run(`kill @e[tag=pet_${name}]`);
           } else {
             const level = Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL));
-            const wanted = PET_BASE + Math.floor(level / 2);
-            // tous ses loups (meute et renforts) suivent son niveau : dégâts et vie maximale
-            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.attack_damage base set ${4 + level}`);
-            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.max_health base set ${30 + 6 * level}`);
+            const wanted = PET_BASE + Math.floor(level / 5) + (has(name, 'meute') ? 1 : 0) + (has(name, 'grande_meute') ? 1 : 0);
+            const stats = petStats(name, level);
+            // tous ses loups (meute et renforts) suivent son niveau et son arbre : dégâts et vie maximale
+            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.attack_damage base set ${stats.damage}`);
+            await rcon.run(`execute as @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] run attribute @s minecraft:generic.max_health base set ${stats.hp}`);
+            if (has(name, 'lien')) await rcon.run(`effect give @e[type=minecraft:wolf,tag=pet,name="Loup de ${name}"] minecraft:regeneration 3 0 true`);
             const pets = number(await rcon.run(`execute if entity @e[tag=pet_${name}]`));
             if (pets < wanted) {
               const uuid = /(\[I; -?\d+, -?\d+, -?\d+, -?\d+\])/.exec(await rcon.run(`data get entity ${name} UUID`))?.[1];
-              if (uuid) await rcon.run(petCommand(name, uuid, level, ['pet', `pet_${name}`]));
+              if (uuid) await rcon.run(petCommand(name, uuid, stats.hp, stats.damage, ['pet', `pet_${name}`]));
             }
           }
         }
@@ -971,10 +1071,11 @@ async function main(): Promise<void> {
           }
           if ((await score(name, 'capacite')) > 0) {
             await rcon.run(`scoreboard players set ${name} capacite 0`);
-            if (abilityUsed.has(name)) {
+            const uses = abilityUsed.get(name) ?? 0;
+            if (uses >= (has(name, 'double') ? 2 : 1)) {
               await rcon.run(`title ${name} actionbar {"text":"${myRole.ability} : déjà utilisé, rechargé à la prochaine vague","color":"gray"}`);
             } else {
-              abilityUsed.add(name);
+              abilityUsed.set(name, uses + 1);
               await useAbility(myRole, name);
             }
           }
@@ -1068,7 +1169,7 @@ async function main(): Promise<void> {
               } else if (choice === BUY_BLESSING) {
                 if (blessingLevel < BLESSING.max) [price, label] = [passivePrice(BLESSING, blessingLevel + 1), `Bénédiction du Roi (niveau ${blessingLevel + 1})`];
               } else if (kind) {
-                [price, label] = [Math.round(kind.price * (1 + (await ownedTurrets()))), kind.name];
+                [price, label] = [Math.round(kind.price * (1 + (await ownedTurrets())) * (has(name, 'economie') ? 0.75 : 1)), kind.name];
               }
               if (price === 0) {
                 await rcon.run(`tellraw ${name} {"text":"Cet article n’est plus disponible.","color":"gray"}`);
@@ -1116,25 +1217,90 @@ async function main(): Promise<void> {
             }
             await line(BUY_BLESSING, `Bénédiction du Roi : niveau ${blessingNow} → ${blessingNow + 1}`, blessingNow < BLESSING.max ? passivePrice(BLESSING, blessingNow + 1) : undefined, 'gold');
             for (const [i, kind] of TURRET_KINDS.entries()) {
-              await line(BUY_TURRET + i, `${kind.name} (vous en avez ${owned})`, Math.round(kind.price * (1 + owned)), kind.color);
+              await line(BUY_TURRET + i, `${kind.name} (vous en avez ${owned})`, Math.round(kind.price * (1 + owned) * (has(name, 'economie') ? 0.75 : 1)), kind.color);
             }
           }
         }
         const role = ROLES.find((r) => r.id === (levels.get('role') ?? 0));
         const roleLevel = role ? Math.min(ROLE_MAX_LEVEL, Math.floor(k / ROLE_KILLS_PER_LEVEL)) : 0;
+        // arbre de compétences : masque des compétences apprises, menu (/trigger arbre) et apprentissage (/trigger competence)
+        let mask = await score(name, 'arbre_acquis');
+        skills.set(name, { role: role?.key, mask });
+        await rcon.run(`scoreboard players enable ${name} arbre`);
+        await rcon.run(`scoreboard players enable ${name} competence`);
+        const treeOpen = (await score(name, 'arbre')) > 0;
+        const learn = await score(name, 'competence');
+        if (treeOpen || learn > 0) {
+          await rcon.run(`scoreboard players set ${name} arbre 0`);
+          await rcon.run(`scoreboard players set ${name} competence 0`);
+          const tree = role ? TREES[role.key] : undefined;
+          if (!tree || !role) {
+            await rcon.run(`tellraw ${name} {"text":"Choisissez d’abord un rôle chez le Maître des rôles.","color":"gray"}`);
+          } else {
+            if (learn >= 1 && learn <= 9) {
+              const bit = learn - 1;
+              const tier = (bit % 3) + 1;
+              const skill = tree.skills[Math.floor(bit / 3)]![bit % 3]!;
+              const free = roleLevel - spentPoints(mask);
+              if ((mask >> bit) & 1) {
+                await rcon.run(`tellraw ${name} {"text":"Déjà appris : ${skill.label}","color":"gray"}`);
+              } else if (tier > 1 && !((mask >> (bit - 1)) & 1)) {
+                await rcon.run(`tellraw ${name} {"text":"Il faut d’abord la compétence précédente de la branche.","color":"red"}`);
+              } else if (free < tier) {
+                await rcon.run(`tellraw ${name} {"text":"Pas assez de points : ${skill.label} en demande ${tier} (vous en avez ${free}).","color":"red"}`);
+              } else {
+                mask |= 1 << bit;
+                skills.set(name, { role: role.key, mask });
+                await rcon.run(`scoreboard players set ${name} arbre_acquis ${mask}`);
+                await rcon.run(`tellraw ${name} {"text":"Compétence apprise : ${skill.label}","color":"green"}`);
+                await rcon.run(`execute at ${name} run playsound minecraft:entity.player.levelup master ${name} ~ ~ ~ 1 1.5`);
+              }
+            }
+            const free = roleLevel - spentPoints(mask);
+            await rcon.run(`tellraw ${name} [{"text":"— Arbre ${role.name} — ","color":"${role.color}","bold":true},{"text":"${free} point${free > 1 ? 's' : ''} à dépenser (1 par niveau)","color":"gold"}]`);
+            for (const [b, branch] of tree.skills.entries()) {
+              const parts = [`{"text":"${tree.branches[b]} : ","color":"white","bold":true}`];
+              for (const [t, skill] of branch.entries()) {
+                const bit = b * 3 + t;
+                const learnedIt = (mask >> bit) & 1;
+                const open = t === 0 || (mask >> (bit - 1)) & 1;
+                parts.push(
+                  learnedIt
+                    ? `{"text":"[✔ ${skill.label}] ","color":"green"}`
+                    : open
+                      ? `{"text":"[Apprendre : ${skill.label} — ${t + 1} pt] ","color":"yellow","clickEvent":{"action":"run_command","value":"/trigger competence set ${bit + 1}"}}`
+                      : `{"text":"[🔒 ${skill.label} — ${t + 1} pt] ","color":"dark_gray"}`,
+                );
+              }
+              await rcon.run(`tellraw ${name} [${parts.join(',')}]`);
+            }
+          }
+        }
+        // effets permanents de l'arbre
+        if (has(name, 'aura')) await rcon.run(`execute at ${name} run effect give @a[distance=..8] minecraft:resistance 3 0 true`);
+        if (has(name, 'esquive')) await rcon.run(`effect give ${name} minecraft:resistance 3 0 true`);
+        if (has(name, 'faucon')) await rcon.run(`execute at ${name} run effect give @e[tag=vague,distance=..30] minecraft:glowing 3 0 true`);
+        if (has(name, 'givre')) await rcon.run(`execute at ${name} run effect give @e[tag=vague,distance=..5] minecraft:slowness 3 1 true`);
+        // aura du Soigneur : plus large avec le niveau et l'arbre, plus forte, et le Roi soigné de partout avec Bénédiction
+        if (role?.key === 'soigneur') {
+          const range = 6 + Math.floor(roleLevel / 3) + (has(name, 'aura_large') ? 3 : 0);
+          const amp = has(name, 'aura_forte') ? 1 : 0;
+          await rcon.run(`execute at ${name} run effect give @a[distance=..${range}] minecraft:regeneration 3 ${amp} true`);
+          await rcon.run(`execute at ${name} run effect give ${has(name, 'aura_roi') ? KING : KING.replace(']', `,distance=..${range}]`)} minecraft:regeneration 3 ${amp + 1} true`);
+        }
         // barre d'expérience = progression du rôle (niveau affiché au-dessus, barre jusqu'au niveau suivant)
         if (role) {
           const progress = roleLevel >= ROLE_MAX_LEVEL ? 1 : (k % ROLE_KILLS_PER_LEVEL) / ROLE_KILLS_PER_LEVEL;
           const xpBar = `${roleLevel}:${progress}`;
           if (xpShown.get(name) !== xpBar) {
             xpShown.set(name, xpBar);
-            // points pour remplir la barre d'un niveau L (de 0 à 15) : 2L + 7
-            const points = Math.min(2 * roleLevel + 6, Math.floor(progress * (2 * roleLevel + 7)));
+            const points = Math.min(xpForLevel(roleLevel) - 1, Math.floor(progress * xpForLevel(roleLevel)));
             await rcon.run(`xp set ${name} ${roleLevel} levels`);
             await rcon.run(`xp set ${name} ${points} points`);
           }
         }
-        const roleBonus = (attribute: string) => (role ? (role.bonus[attribute] ?? 0) + roleLevel * (role.perLevel[attribute] ?? 0) : 0);
+        const treeBonus = (attribute: string) => learnedSkills(role?.key, mask).reduce((sum, sk) => sum + (sk.attr?.[attribute] ?? 0), 0);
+        const roleBonus = (attribute: string) => (role ? (role.bonus[attribute] ?? 0) + roleLevel * (role.perLevel[attribute] ?? 0) : 0) + treeBonus(attribute);
         // passifs affichés en permanence au-dessus de la barre d'objets (sauf pendant le compte à rebours)
         if (!waiting.has(name)) {
           const owned = PASSIVES.filter((p) => (levels.get(p.key) ?? 0) > 0);
@@ -1144,11 +1310,12 @@ async function main(): Promise<void> {
           const prestigeLevel = levels.get('prestige') ?? 0;
           if (prestigeLevel > 0) parts.unshift(`{"text":"★ Prestige ${prestigeLevel} · ","color":"gold","bold":true}`);
           if (role) {
-            const ready = abilityUsed.has(name) ? '' : ' ✦';
+            const ready = (abilityUsed.get(name) ?? 0) < (has(name, 'double') ? 2 : 1) ? ' ✦' : '';
             const into = roleLevel >= ROLE_MAX_LEVEL ? ROLE_KILLS_PER_LEVEL : k % ROLE_KILLS_PER_LEVEL;
             const filled = Math.floor((into / ROLE_KILLS_PER_LEVEL) * 5);
             const gauge = `${'■'.repeat(filled)}${'□'.repeat(5 - filled)} ${roleLevel >= ROLE_MAX_LEVEL ? 'max' : `${into}/${ROLE_KILLS_PER_LEVEL}`}`;
-            parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
+            const freePoints = roleLevel - spentPoints(mask);
+            parts.unshift(`{"text":"${role.name} niv.${roleLevel} ${gauge}${ready}${freePoints > 0 ? ` (${freePoints} pt)` : ''}${owned.length ? ' · ' : ''}","color":"${role.color}","bold":true}`);
           }
           if (remaining > 0 && remaining <= 5) {
             const me = /\[(-?[0-9.]+)d, -?[0-9.]+d, (-?[0-9.]+)d\]/.exec(await rcon.run(`data get entity ${name} Pos`));
@@ -1170,6 +1337,7 @@ async function main(): Promise<void> {
           const [attribute, value] = p.attribute;
           await rcon.run(`attribute ${name} minecraft:${attribute} base set ${value(levels.get(p.key) ?? 0) + roleBonus(attribute)}`);
         }
+        for (const [attribute, base] of EXTRA_ATTRIBUTES) await rcon.run(`attribute ${name} minecraft:${attribute} base set ${base + roleBonus(attribute)}`);
         if (waiting.has(name) || number(await rcon.run(`scoreboard players get ${name} morts`).then((r) => r.replace(/has (-?\d+)/, 'count: $1'))) < 1) continue;
         waiting.add(name);
         await rcon.run(`scoreboard players set ${name} morts 0`);
@@ -1201,6 +1369,18 @@ async function main(): Promise<void> {
     const continuingNow = continuing && n === Number(firstWave);
     await rcon.run('kill @e[tag=marchenoir]');
     abilityUsed.clear();
+    // bonus de l'arbre à chaque vague : flèches, pierres, potions, charges de vent, tourelles réparées
+    if (!continuingNow) {
+      for (const [name, st] of skills) {
+        const give = (item: string) => rcon.run(`give ${name} minecraft:${item}`);
+        if (has(name, 'carquois')) await give('arrow 32');
+        if (has(name, 'macon')) await give('cobblestone 64');
+        if (has(name, 'apothicaire')) for (let i = 0; i < 2; i++) await give('splash_potion[potion_contents={potion:"minecraft:strong_healing"}]');
+        if (has(name, 'reserve')) await give('wind_charge 32');
+        if (has(name, 'entretien')) for (const turret of turrets.values()) if (turret.owner === name) turret.hp = TURRET_HP[turret.level - 1]! * (has(name, 'blindage') ? 1.5 : 1);
+        void st;
+      }
+    }
     if (n === 21) {
       await say('Mode Infini !', 'Les vagues ne s’arrêteront plus : battez le record');
       await kingSays(pick(KING_LINES.infini));
@@ -1441,7 +1621,7 @@ async function main(): Promise<void> {
         const level = turretLevel(tags);
         const range = 22 + 4 * (level - 1);
         const me = `@e[tag=${id},limit=1]`;
-        const maxHp = TURRET_HP[level - 1]!;
+        const maxHp = Math.round(TURRET_HP[level - 1]! * (has(owner, 'blindage') ? 1.5 : 1));
         // une amélioration remet la vie au maximum du nouveau niveau
         if (level > turret.level) {
           turret.level = level;
@@ -1468,7 +1648,7 @@ async function main(): Promise<void> {
         }
         const near = `@e[tag=vague,distance=..${range},limit=1,sort=nearest]`;
         const by = owner && online.includes(owner) ? ` by ${owner}` : '';
-        const damage = TURRET_DAMAGE[kind.tag]![level - 1];
+        const damage = Math.round(TURRET_DAMAGE[kind.tag]![level - 1]! * (has(owner, 'calibre') ? 1.25 : 1));
         // cibles du tir (le canon touche tout ce qui est à 3 blocs de la cible) ; celles qui disparaissent sont ses victimes
         if (kind.tag === 'canon') await rcon.run(`execute as ${me} at @s at ${near} run tag @e[tag=vague,distance=..3] add tir`);
         else await rcon.run(`execute as ${me} at @s run tag ${near} add tir`);
@@ -1486,13 +1666,6 @@ async function main(): Promise<void> {
         await rcon.run('tag @e[tag=tir] remove tir');
       }
       await rcon.run(`execute as @e[tag=tourelle,type=minecraft:armor_stand] run data merge entity @s {DisabledSlots:${LOCKED_SLOTS}}`);
-      // aura des soigneurs : régénération des alliés proches, et du Roi s'il est à côté
-      for (let lvl = 0; lvl <= ROLE_MAX_LEVEL; lvl++) {
-        const min = lvl * ROLE_KILLS_PER_LEVEL;
-        const kills = lvl === ROLE_MAX_LEVEL ? `${min}..` : `${min}..${min + ROLE_KILLS_PER_LEVEL - 1}`;
-        await rcon.run(`execute at @a[scores={role=4,tues=${kills}}] run effect give @a[distance=..${6 + lvl}] minecraft:regeneration 3 0 true`);
-      }
-      await rcon.run(`execute at @a[scores={role=4}] run effect give ${KING.replace(']', ',distance=..6]')} minecraft:regeneration 3 1 true`);
       // le Roi se soigne quand aucun monstre n'est près de lui ; les golems achetés tiennent mieux
       await rcon.run(`execute at ${KING} unless entity @e[tag=vague,distance=..10] run effect give ${KING} minecraft:regeneration 3 0 true`);
       await rcon.run('effect give @e[type=minecraft:iron_golem] minecraft:resistance 5 1 true');
