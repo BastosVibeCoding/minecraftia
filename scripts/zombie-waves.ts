@@ -9,7 +9,8 @@
  * Tourelles à poser où l'on veut ; réparation et améliorations du château ; boss uniques (pillards, Roi des zombies,
  * Wither à la vague 20, puis mode Infini) ; tourelles de quatre types améliorables ; le Roi parle ; marché noir ;
  * événements aléatoires (orage, brouillard, météores, ruée) ; flèche vers les derniers monstres.
- * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur) chez le Maître des rôles ; ils montent
+ * Rôles choisis en début de partie (Chevalier, Archer, Ingénieur, Soigneur, Mage) chez le Maître des rôles (changement
+ * de classe ensuite pour 50 émeraudes, niveau gardé) ; ils montent
  * de niveau avec les victimes et ont une capacité spéciale par vague (objet à utiliser d'un clic droit).
  * Hall d'avant-partie : choix de la carte (classique, désert, neige, Nether) et de la difficulté (Facile à Cauchemar).
  * Nouveaux monstres (Breeze, Bogged, sorcière, blaze, squelette wither, brute, zoglin, Illusionniste, Warden, shulkers),
@@ -211,7 +212,16 @@ const ROLES: Role[] = [
     kit: ['splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]',
       'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_healing"}]'],
   },
+  {
+    id: 5, key: 'mage', name: '✦ Mage', color: 'dark_aqua',
+    bonus: {},
+    perLevel: { 'generic.max_health': 2 },
+    ability: 'Tempête de foudre',
+    kit: ['wind_charge 64', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]', 'splash_potion[potion_contents={potion:"minecraft:strong_slowness"}]'],
+  },
 ];
+/** Prix d'un changement de classe chez le Maître des rôles (le niveau du rôle, lié aux victimes, est gardé). */
+const ROLE_CHANGE_PRICE = 50;
 /** Victimes par niveau de rôle, et niveau maximal. */
 const ROLE_KILLS_PER_LEVEL = 15;
 const ROLE_MAX_LEVEL = 5;
@@ -539,10 +549,12 @@ async function setUpShop(rcon: Rcon): Promise<void> {
     const sell =
       `{id:"minecraft:paper",count:1,components:{"minecraft:custom_data":{role:"${r.key}"},` +
       `"minecraft:custom_name":'{"text":"Rôle : ${r.name}","color":"${r.color}","italic":false}',"minecraft:enchantment_glint_override":1b}}`;
-    await rcon.run(
-      `data modify entity @e[tag=roles,limit=1] Offers.Recipes append value {buy:${ROLE_TICKET},sell:${sell},` +
-        'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
-    );
+    for (const buy of [ROLE_TICKET, `{id:"minecraft:emerald",count:${ROLE_CHANGE_PRICE}}`]) {
+      await rcon.run(
+        `data modify entity @e[tag=roles,limit=1] Offers.Recipes append value {buy:${buy},sell:${sell},` +
+          'maxUses:99999,rewardExp:0b,priceMultiplier:0f,demand:0,specialPrice:0,xp:0}',
+      );
+    }
   }
   // le Maître des passifs, à côté des marchands
   await rcon.run('kill @e[tag=passifs]');
@@ -639,6 +651,15 @@ async function main(): Promise<void> {
     } else if (r.key === 'ingenieur') {
       await applyUpgrade(rcon, 'reparation');
       await rcon.run(`execute at ${name} run playsound minecraft:block.anvil.use master @a ~ ~ ~ 1 1`);
+    } else if (r.key === 'mage') {
+      // foudre sur les 6 monstres les plus proches (24 blocs), dégâts comptés pour le Mage
+      await rcon.run(`execute at ${name} run tag @e[tag=vague,distance=..24,limit=6,sort=nearest] add foudre`);
+      // effet visuel seulement : une vraie foudre transformerait le Roi (villageois) en sorcière et blesserait les joueurs
+      await rcon.run('execute at @e[tag=foudre] run particle minecraft:flash ~ ~1 ~ 0 0 0 0 1');
+      await rcon.run('execute at @e[tag=foudre] run particle minecraft:electric_spark ~ ~1 ~ 0.3 1 0.3 0.5 30');
+      await rcon.run('execute at @e[tag=foudre] run playsound minecraft:entity.lightning_bolt.thunder master @a ~ ~ ~ 0.8 1.2');
+      await rcon.run(`execute as @e[tag=foudre] run damage @s 10 minecraft:lightning_bolt by ${name}`);
+      await rcon.run('tag @e[tag=foudre] remove foudre');
     } else if (r.key === 'soigneur') {
       await rcon.run('effect give @a minecraft:instant_health 1 3 true');
       await rcon.run('effect give @a minecraft:regeneration 10 1 true');
